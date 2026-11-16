@@ -35,7 +35,13 @@ var namedFiles = map[string]bool{
 	"dialspace.go":    true,
 	"dirprovision.go": true,
 	"flow_canvas.go":  true,
+	"ldap.go":         true,
+	"oauth.go":        true,
+	"onboarding.go":   true,
+	"sidekey.go":      true,
 	"store.go":        true,
+	"totp.go":         true,
+	"users.go":        true,
 }
 
 // TestStatementsBuild renders every statement the store's code passes as a

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/oauth"
 )
@@ -83,7 +85,7 @@ func scanClient(r rowScanner) (oauth.Client, error) {
 
 // Client implements oauth.Store.
 func (s *Store) Client(ctx context.Context, id string) (oauth.Client, error) {
-	c, err := scanClient(s.db.QueryRowContext(ctx, `SELECT `+clientCols+` FROM oauth_clients WHERE client_id = $1`, id))
+	c, err := scanClient(s.db.QueryRowContext(ctx, `SELECT `+clientCols+` FROM oauth_clients WHERE client_id = @client_id`, momo.Named("client_id", id)))
 	return c, oauthErr(err)
 }
 
@@ -98,12 +100,14 @@ func jsonOrNil(b []byte) any {
 func (s *Store) SaveCIMDClient(ctx context.Context, c oauth.Client) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO oauth_clients (client_id, kind, name, client_uri, redirect_uris, metadata, fetched_at, cache_until)
-		VALUES ($1, 'cimd', $2, NULLIF($3, ''), $4::text[], $5::jsonb, now(), $6)
+		VALUES (@client_id, 'cimd', @name, NULLIF(@client_uri, ''), @redirect_uris::text[], @metadata::jsonb, now(), @cache_until)
 		ON CONFLICT (client_id) DO UPDATE SET name = EXCLUDED.name, client_uri = EXCLUDED.client_uri,
 			redirect_uris = EXCLUDED.redirect_uris, metadata = EXCLUDED.metadata,
 			fetched_at = now(), cache_until = EXCLUDED.cache_until
 		WHERE oauth_clients.kind = 'cimd'`,
-		c.ID, c.Name, c.ClientURI, nonNil(c.RedirectURIs), jsonOrNil(c.Metadata), c.CacheUntil)
+		momo.Named("client_id", c.ID), momo.Named("name", c.Name), momo.Named("client_uri", c.ClientURI),
+		momo.Named("redirect_uris", nonNil(c.RedirectURIs)), momo.Named("metadata", jsonOrNil(c.Metadata)),
+		momo.Named("cache_until", c.CacheUntil))
 	return err
 }
 
@@ -112,8 +116,9 @@ func (s *Store) RegisterClient(ctx context.Context, actor string, c oauth.Client
 	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO oauth_clients (client_id, kind, name, client_uri, redirect_uris, metadata)
-			VALUES ($1, 'dcr', $2, NULLIF($3, ''), $4::text[], $5::jsonb)`,
-			c.ID, c.Name, c.ClientURI, nonNil(c.RedirectURIs), jsonOrNil(c.Metadata)); err != nil {
+			VALUES (@client_id, 'dcr', @name, NULLIF(@client_uri, ''), @redirect_uris::text[], @metadata::jsonb)`,
+			momo.Named("client_id", c.ID), momo.Named("name", c.Name), momo.Named("client_uri", c.ClientURI),
+			momo.Named("redirect_uris", nonNil(c.RedirectURIs)), momo.Named("metadata", jsonOrNil(c.Metadata))); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "register", "oauth_client", c.ID)
@@ -124,8 +129,10 @@ func (s *Store) RegisterClient(ctx context.Context, actor string, c oauth.Client
 func (s *Store) CreateRequest(ctx context.Context, r oauth.AuthRequest) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO oauth_requests (id, client_id, redirect_uri, state, code_challenge, scopes, resources, expires_at)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6::text[], $7::text[], $8)`,
-		r.ID, r.ClientID, r.RedirectURI, r.State, r.CodeChallenge, scopeArg(r.Scopes), nonNil(r.Resources), r.ExpiresAt)
+		VALUES (@id, @client_id, @redirect_uri, NULLIF(@state, ''), @code_challenge, @scopes::text[], @resources::text[], @expires_at)`,
+		momo.Named("id", r.ID), momo.Named("client_id", r.ClientID), momo.Named("redirect_uri", r.RedirectURI),
+		momo.Named("state", r.State), momo.Named("code_challenge", r.CodeChallenge), momo.Named("scopes", scopeArg(r.Scopes)),
+		momo.Named("resources", nonNil(r.Resources)), momo.Named("expires_at", r.ExpiresAt))
 	return oauthErr(mapErr(err))
 }
 
@@ -151,7 +158,7 @@ func scanRequest(r rowScanner) (oauth.AuthRequest, error) {
 // Request implements oauth.Store.
 func (s *Store) Request(ctx context.Context, id string) (oauth.AuthRequest, error) {
 	q, err := scanRequest(s.db.QueryRowContext(ctx, `SELECT `+requestCols+` FROM oauth_requests
-		WHERE id = $1 AND expires_at > now() AND user_id IS NULL`, id))
+		WHERE id = @id AND expires_at > now() AND user_id IS NULL`, momo.Named("id", id)))
 	return q, oauthErr(err)
 }
 
@@ -159,9 +166,10 @@ func (s *Store) Request(ctx context.Context, id string) (oauth.AuthRequest, erro
 func (s *Store) ApproveRequest(ctx context.Context, actor, id string, userID int64, scopes auth.Scopes, codeHash []byte, codeExpires time.Time) error {
 	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `
-			UPDATE oauth_requests SET user_id = $2, scopes = $3::text[], code_hash = $4, code_expires_at = $5
-			WHERE id = $1 AND expires_at > now() AND user_id IS NULL`,
-			id, userID, scopeArg(scopes), codeHash, codeExpires)
+			UPDATE oauth_requests SET user_id = @user_id, scopes = @scopes::text[], code_hash = @code_hash, code_expires_at = @code_expires_at
+			WHERE id = @id AND expires_at > now() AND user_id IS NULL`,
+			momo.Named("id", id), momo.Named("user_id", userID), momo.Named("scopes", scopeArg(scopes)),
+			momo.Named("code_hash", codeHash), momo.Named("code_expires_at", codeExpires))
 		if err != nil {
 			return err
 		}
@@ -175,7 +183,7 @@ func (s *Store) ApproveRequest(ctx context.Context, actor, id string, userID int
 // DenyRequest implements oauth.Store.
 func (s *Store) DenyRequest(ctx context.Context, actor, id string) error {
 	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM oauth_requests WHERE id = $1 AND user_id IS NULL`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM oauth_requests WHERE id = @id AND user_id IS NULL`, momo.Named("id", id))
 		if err != nil {
 			return err
 		}
@@ -198,16 +206,19 @@ func insertTokens(ctx context.Context, tx *dbTx, ts []oauth.Token) error {
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO oauth_tokens (hash, kind, grant_id, client_id, user_id, scopes, resources, expires_at)
-			VALUES ($1, $2, $3, $4, $5, $6::text[], $7::text[], $8)`,
-			t.Hash, t.Kind, grant, t.ClientID, user, scopeArg(t.Scopes), nonNil(t.Resources), t.ExpiresAt); err != nil {
+			VALUES (@hash, @kind, @grant_id, @client_id, @user_id, @scopes::text[], @resources::text[], @expires_at)`,
+			momo.Named("hash", t.Hash), momo.Named("kind", t.Kind), momo.Named("grant_id", grant), momo.Named("client_id", t.ClientID),
+			momo.Named("user_id", user), momo.Named("scopes", scopeArg(t.Scopes)), momo.Named("resources", nonNil(t.Resources)),
+			momo.Named("expires_at", t.ExpiresAt)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// revokeGrants revokes the grants matching where (with args) and every
-// token issued under them.
+// revokeGrants revokes the grants matching where and every token issued
+// under them. where binds by name: args are the momo.Named values of its
+// @names (it must not use @ids, which the token update binds).
 func revokeGrants(ctx context.Context, tx *dbTx, where string, args ...any) ([]int64, error) {
 	//nolint:gosec // G202: where is a caller's constant condition; values are parameters.
 	rows, err := tx.QueryContext(ctx, `UPDATE oauth_grants SET revoked_at = now()
@@ -229,7 +240,7 @@ func revokeGrants(ctx context.Context, tx *dbTx, where string, args ...any) ([]i
 	}
 	if len(ids) > 0 {
 		if _, err := tx.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = now()
-			WHERE grant_id = ANY($1::bigint[]) AND revoked_at IS NULL`, ids); err != nil {
+			WHERE grant_id = ANY(@ids::bigint[]) AND revoked_at IS NULL`, momo.Named("ids", ids)); err != nil {
 			return nil, err
 		}
 	}
@@ -242,7 +253,7 @@ func (s *Store) RedeemCode(ctx context.Context, actor string, codeHash []byte,
 	reused := false
 	err := s.tx(ctx, func(tx *dbTx) error {
 		q, err := scanRequest(tx.QueryRowContext(ctx, `SELECT `+requestCols+` FROM oauth_requests
-			WHERE code_hash = $1 FOR UPDATE`, codeHash))
+			WHERE code_hash = @code_hash FOR UPDATE`, momo.Named("code_hash", codeHash)))
 		if errors.Is(err, sql.ErrNoRows) {
 			return oauth.ErrInvalidGrant
 		}
@@ -251,15 +262,15 @@ func (s *Store) RedeemCode(ctx context.Context, actor string, codeHash []byte,
 		}
 		var used sql.NullTime
 		var expires time.Time
-		if err := tx.QueryRowContext(ctx, `SELECT code_used_at, code_expires_at FROM oauth_requests WHERE id = $1`,
-			q.ID).Scan(&used, &expires); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT code_used_at, code_expires_at FROM oauth_requests WHERE id = @id`,
+			momo.Named("id", q.ID)).Scan(&used, &expires); err != nil {
 			return err
 		}
 		if used.Valid {
 			// A second use: revoke what the first use issued (every grant
 			// the user gave the client since the request).
-			ids, err := revokeGrants(ctx, tx, `user_id = $1 AND client_id = $2 AND created_at >= $3`,
-				q.UserID, q.ClientID, q.CreatedAt)
+			ids, err := revokeGrants(ctx, tx, `user_id = @user_id AND client_id = @client_id AND created_at >= @created_at`,
+				momo.Named("user_id", q.UserID), momo.Named("client_id", q.ClientID), momo.Named("created_at", q.CreatedAt))
 			if err != nil {
 				return err
 			}
@@ -278,14 +289,15 @@ func (s *Store) RedeemCode(ctx context.Context, actor string, codeHash []byte,
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE oauth_requests SET code_used_at = now() WHERE id = $1`, q.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE oauth_requests SET code_used_at = now() WHERE id = @id`, momo.Named("id", q.ID)); err != nil {
 			return err
 		}
 		var gid int64
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO oauth_grants (user_id, client_id, scopes, resources, last_used_at)
-			VALUES ($1, $2, $3::text[], $4::text[], now()) RETURNING id`,
-			g.UserID, g.ClientID, scopeArg(g.Scopes), nonNil(g.Resources)).Scan(&gid); err != nil {
+			VALUES (@user_id, @client_id, @scopes::text[], @resources::text[], now()) RETURNING id`,
+			momo.Named("user_id", g.UserID), momo.Named("client_id", g.ClientID), momo.Named("scopes", scopeArg(g.Scopes)),
+			momo.Named("resources", nonNil(g.Resources))).Scan(&gid); err != nil {
 			return err
 		}
 		for i := range toks {
@@ -294,7 +306,7 @@ func (s *Store) RedeemCode(ctx context.Context, actor string, codeHash []byte,
 		if err := insertTokens(ctx, tx, toks); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE oauth_clients SET last_used_at = now() WHERE client_id = $1`, q.ClientID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE oauth_clients SET last_used_at = now() WHERE client_id = @client_id`, momo.Named("client_id", q.ClientID)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "issue", "oauth_grant", strconv.FormatInt(gid, 10))
@@ -334,7 +346,7 @@ func (s *Store) Refresh(ctx context.Context, actor string, hash []byte, maxAge t
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var spent, revoked sql.NullTime
 		old, err := scanToken(tx.QueryRowContext(ctx, `SELECT `+tokenCols+`, spent_at, revoked_at FROM oauth_tokens
-			WHERE hash = $1 AND kind = 'refresh' FOR UPDATE`, hash), &spent, &revoked)
+			WHERE hash = @hash AND kind = 'refresh' FOR UPDATE`, momo.Named("hash", hash)), &spent, &revoked)
 		if errors.Is(err, sql.ErrNoRows) {
 			return oauth.ErrInvalidGrant
 		}
@@ -342,7 +354,7 @@ func (s *Store) Refresh(ctx context.Context, actor string, hash []byte, maxAge t
 			return err
 		}
 		if spent.Valid {
-			ids, err := revokeGrants(ctx, tx, `id = $1`, old.GrantID)
+			ids, err := revokeGrants(ctx, tx, `id = @id`, momo.Named("id", old.GrantID))
 			if err != nil {
 				return err
 			}
@@ -371,7 +383,7 @@ func (s *Store) Refresh(ctx context.Context, actor string, hash []byte, maxAge t
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE oauth_tokens SET spent_at = now() WHERE hash = $1`, hash); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE oauth_tokens SET spent_at = now() WHERE hash = @hash`, momo.Named("hash", hash)); err != nil {
 			return err
 		}
 		if err := insertTokens(ctx, tx, toks); err != nil {
@@ -409,7 +421,7 @@ func scanGrant(r rowScanner) (oauth.Grant, error) {
 func grantByID(ctx context.Context, tx *dbTx, id int64) (oauth.Grant, error) {
 	return scanGrant(tx.QueryRowContext(ctx, `SELECT `+grantCols+` FROM oauth_grants g
 		JOIN users u ON u.id = g.user_id JOIN oauth_clients c ON c.client_id = g.client_id
-		WHERE g.id = $1`, id))
+		WHERE g.id = @id`, momo.Named("id", id)))
 }
 
 // ClientCredentials implements oauth.Store.
@@ -419,16 +431,16 @@ func (s *Store) ClientCredentials(ctx context.Context, clientID string, secretHa
 		var secretID int64
 		err := tx.QueryRowContext(ctx, `
 			SELECT s.id FROM oauth_client_secrets s JOIN oauth_clients c ON c.client_id = s.client_id
-			WHERE s.secret_hash = $1 AND s.client_id = $2 AND c.kind = 'service' AND c.enabled
+			WHERE s.secret_hash = @secret_hash AND s.client_id = @client_id AND c.kind = 'service' AND c.enabled
 			  AND s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at > now())`,
-			secretHash, clientID).Scan(&secretID)
+			momo.Named("secret_hash", secretHash), momo.Named("client_id", clientID)).Scan(&secretID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return oauth.ErrInvalidGrant
 		}
 		if err != nil {
 			return err
 		}
-		c, err := scanClient(tx.QueryRowContext(ctx, `SELECT `+clientCols+` FROM oauth_clients WHERE client_id = $1`, clientID))
+		c, err := scanClient(tx.QueryRowContext(ctx, `SELECT `+clientCols+` FROM oauth_clients WHERE client_id = @client_id`, momo.Named("client_id", clientID)))
 		if err != nil {
 			return err
 		}
@@ -439,10 +451,10 @@ func (s *Store) ClientCredentials(ctx context.Context, clientID string, secretHa
 		if err := insertTokens(ctx, tx, []oauth.Token{t}); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE oauth_client_secrets SET last_used_at = now() WHERE id = $1`, secretID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE oauth_client_secrets SET last_used_at = now() WHERE id = @id`, momo.Named("id", secretID)); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE oauth_clients SET last_used_at = now() WHERE client_id = $1`, clientID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE oauth_clients SET last_used_at = now() WHERE client_id = @client_id`, momo.Named("client_id", clientID)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, "service:"+c.Name, "issue", "oauth_token", clientID)
@@ -457,7 +469,7 @@ func (s *Store) RevokeToken(ctx context.Context, actor string, hash []byte) erro
 			grant sql.NullInt64
 		)
 		err := tx.QueryRowContext(ctx, `UPDATE oauth_tokens SET revoked_at = coalesce(revoked_at, now())
-			WHERE hash = $1 RETURNING kind, grant_id`, hash).Scan(&kind, &grant)
+			WHERE hash = @hash RETURNING kind, grant_id`, momo.Named("hash", hash)).Scan(&kind, &grant)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -465,7 +477,7 @@ func (s *Store) RevokeToken(ctx context.Context, actor string, hash []byte) erro
 			return err
 		}
 		if kind == oauth.TokenRefresh && grant.Valid {
-			if _, err := revokeGrants(ctx, tx, `id = $1`, grant.Int64); err != nil {
+			if _, err := revokeGrants(ctx, tx, `id = @id`, momo.Named("id", grant.Int64)); err != nil {
 				return err
 			}
 			return insertAudit(ctx, tx, actor, "revoke", "oauth_grant", strconv.FormatInt(grant.Int64, 10))
@@ -478,7 +490,7 @@ func (s *Store) RevokeToken(ctx context.Context, actor string, hash []byte) erro
 func (s *Store) Grants(ctx context.Context, userID int64) ([]oauth.Grant, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+grantCols+` FROM oauth_grants g
 		JOIN users u ON u.id = g.user_id JOIN oauth_clients c ON c.client_id = g.client_id
-		WHERE g.revoked_at IS NULL AND ($1::bigint = 0 OR g.user_id = $1::bigint) ORDER BY g.id`, userID)
+		WHERE g.revoked_at IS NULL AND (@user_id::bigint = 0 OR g.user_id = @user_id::bigint) ORDER BY g.id`, momo.Named("user_id", userID))
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +509,8 @@ func (s *Store) Grants(ctx context.Context, userID int64) ([]oauth.Grant, error)
 // RevokeGrant implements oauth.Store.
 func (s *Store) RevokeGrant(ctx context.Context, actor string, id, userID int64) error {
 	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
-		ids, err := revokeGrants(ctx, tx, `id = $1 AND ($2::bigint = 0 OR user_id = $2::bigint)`, id, userID)
+		ids, err := revokeGrants(ctx, tx, `id = @id AND (@user_id::bigint = 0 OR user_id = @user_id::bigint)`,
+			momo.Named("id", id), momo.Named("user_id", userID))
 		if err != nil {
 			return err
 		}
@@ -539,7 +552,7 @@ func (s *Store) ServiceAccounts(ctx context.Context) ([]oauth.Client, error) {
 
 func (s *Store) secrets(ctx context.Context, clientID string) ([]oauth.Secret, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, created_at, expires_at, revoked_at, last_used_at
-		FROM oauth_client_secrets WHERE client_id = $1 AND revoked_at IS NULL ORDER BY id`, clientID)
+		FROM oauth_client_secrets WHERE client_id = @client_id AND revoked_at IS NULL ORDER BY id`, momo.Named("client_id", clientID))
 	if err != nil {
 		return nil, err
 	}
@@ -562,7 +575,7 @@ func (s *Store) secrets(ctx context.Context, clientID string) ([]oauth.Secret, e
 // ServiceAccount implements oauth.Store.
 func (s *Store) ServiceAccount(ctx context.Context, id string) (oauth.Client, error) {
 	c, err := scanClient(s.db.QueryRowContext(ctx, `SELECT `+clientCols+` FROM oauth_clients
-		WHERE client_id = $1 AND kind = 'service'`, id))
+		WHERE client_id = @client_id AND kind = 'service'`, momo.Named("client_id", id)))
 	if err != nil {
 		return c, oauthErr(err)
 	}
@@ -574,8 +587,8 @@ func (s *Store) ServiceAccount(ctx context.Context, id string) (oauth.Client, er
 func (s *Store) CreateServiceAccount(ctx context.Context, actor string, c oauth.Client) (oauth.Client, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var taken bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM oauth_clients WHERE kind = 'service' AND name = $1)`,
-			c.Name).Scan(&taken); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM oauth_clients WHERE kind = 'service' AND name = @name)`,
+			momo.Named("name", c.Name)).Scan(&taken); err != nil {
 			return err
 		}
 		if taken {
@@ -583,8 +596,10 @@ func (s *Store) CreateServiceAccount(ctx context.Context, actor string, c oauth.
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO oauth_clients (client_id, kind, name, description, role, scopes, enabled, created_by, extension_scope)
-			VALUES ($1, 'service', $2, $3, $4, $5::text[], $6, $7, $8::text[])`,
-			c.ID, c.Name, c.Description, string(c.Role), scopeArg(c.Scopes), c.Enabled, c.CreatedBy, extScopeArg(c.ExtensionScope)); err != nil {
+			VALUES (@client_id, 'service', @name, @description, @role, @scopes::text[], @enabled, @created_by, @extension_scope::text[])`,
+			momo.Named("client_id", c.ID), momo.Named("name", c.Name), momo.Named("description", c.Description),
+			momo.Named("role", string(c.Role)), momo.Named("scopes", scopeArg(c.Scopes)), momo.Named("enabled", c.Enabled),
+			momo.Named("created_by", c.CreatedBy), momo.Named("extension_scope", extScopeArg(c.ExtensionScope))); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "service_account", c.ID)
@@ -608,11 +623,12 @@ func (s *Store) UpdateServiceAccount(ctx context.Context, actor, id string, ch o
 		if ch.Enabled != nil {
 			enabled = *ch.Enabled
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE oauth_clients SET description = coalesce($2, description),
-			role = coalesce($3, role), scopes = coalesce($4::text[], scopes), enabled = coalesce($5, enabled),
-			extension_scope = CASE WHEN $6 THEN $7::text[] ELSE extension_scope END
-			WHERE client_id = $1 AND kind = 'service'`, id, ch.Description, role, scopes, enabled,
-			ch.SetExtensionScope, extScopeArg(ch.ExtensionScope))
+		res, err := tx.ExecContext(ctx, `UPDATE oauth_clients SET description = coalesce(@description, description),
+			role = coalesce(@role, role), scopes = coalesce(@scopes::text[], scopes), enabled = coalesce(@enabled, enabled),
+			extension_scope = CASE WHEN @set_extension_scope THEN @extension_scope::text[] ELSE extension_scope END
+			WHERE client_id = @client_id AND kind = 'service'`, momo.Named("client_id", id), momo.Named("description", ch.Description),
+			momo.Named("role", role), momo.Named("scopes", scopes), momo.Named("enabled", enabled),
+			momo.Named("set_extension_scope", ch.SetExtensionScope), momo.Named("extension_scope", extScopeArg(ch.ExtensionScope)))
 		if err != nil {
 			return err
 		}
@@ -622,7 +638,7 @@ func (s *Store) UpdateServiceAccount(ctx context.Context, actor, id string, ch o
 		// Narrowing or disabling stops the account's live tokens now.
 		if ch.Enabled != nil || ch.Scopes != nil || ch.Role != nil || ch.SetExtensionScope {
 			if _, err := tx.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = now()
-				WHERE client_id = $1 AND revoked_at IS NULL`, id); err != nil {
+				WHERE client_id = @client_id AND revoked_at IS NULL`, momo.Named("client_id", id)); err != nil {
 				return err
 			}
 		}
@@ -637,7 +653,7 @@ func (s *Store) UpdateServiceAccount(ctx context.Context, actor, id string, ch o
 // DeleteServiceAccount implements oauth.Store.
 func (s *Store) DeleteServiceAccount(ctx context.Context, actor, id string) error {
 	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM oauth_clients WHERE client_id = $1 AND kind = 'service'`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM oauth_clients WHERE client_id = @client_id AND kind = 'service'`, momo.Named("client_id", id))
 		if err != nil {
 			return err
 		}
@@ -658,8 +674,8 @@ func (s *Store) AddClientSecret(ctx context.Context, actor, clientID string, has
 		// Lock the account so two concurrent adds cannot both see one
 		// live secret.
 		var kind string
-		if err := tx.QueryRowContext(ctx, `SELECT kind FROM oauth_clients WHERE client_id = $1 FOR UPDATE`,
-			clientID).Scan(&kind); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT kind FROM oauth_clients WHERE client_id = @client_id FOR UPDATE`,
+			momo.Named("client_id", clientID)).Scan(&kind); err != nil {
 			return err
 		}
 		if kind != oauth.ClientService {
@@ -667,15 +683,16 @@ func (s *Store) AddClientSecret(ctx context.Context, actor, clientID string, has
 		}
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM oauth_client_secrets
-			WHERE client_id = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())`,
-			clientID).Scan(&n); err != nil {
+			WHERE client_id = @client_id AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())`,
+			momo.Named("client_id", clientID)).Scan(&n); err != nil {
 			return err
 		}
 		if n >= maxLiveSecrets {
 			return oauth.ErrTooManySecrets
 		}
 		if err := tx.QueryRowContext(ctx, `INSERT INTO oauth_client_secrets (client_id, secret_hash, expires_at)
-			VALUES ($1, $2, $3) RETURNING id, created_at`, clientID, hash, expires).Scan(&sc.ID, &sc.CreatedAt); err != nil {
+			VALUES (@client_id, @secret_hash, @expires_at) RETURNING id, created_at`,
+			momo.Named("client_id", clientID), momo.Named("secret_hash", hash), momo.Named("expires_at", expires)).Scan(&sc.ID, &sc.CreatedAt); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "client_secret", strconv.FormatInt(sc.ID, 10))
@@ -689,7 +706,7 @@ func (s *Store) AddClientSecret(ctx context.Context, actor, clientID string, has
 func (s *Store) RevokeClientSecret(ctx context.Context, actor, clientID string, secretID int64) error {
 	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE oauth_client_secrets SET revoked_at = now()
-			WHERE id = $1 AND client_id = $2 AND revoked_at IS NULL`, secretID, clientID)
+			WHERE id = @id AND client_id = @client_id AND revoked_at IS NULL`, momo.Named("id", secretID), momo.Named("client_id", clientID))
 		if err != nil {
 			return err
 		}
@@ -697,7 +714,7 @@ func (s *Store) RevokeClientSecret(ctx context.Context, actor, clientID string, 
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = now()
-			WHERE client_id = $1 AND revoked_at IS NULL`, clientID); err != nil {
+			WHERE client_id = @client_id AND revoked_at IS NULL`, momo.Named("client_id", clientID)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "revoke", "client_secret", strconv.FormatInt(secretID, 10))
@@ -708,17 +725,17 @@ func (s *Store) RevokeClientSecret(ctx context.Context, actor, clientID string, 
 func (s *Store) PruneOAuth(ctx context.Context, cutoff time.Time) (int64, error) {
 	var total int64
 	for _, q := range []string{
-		`DELETE FROM oauth_tokens WHERE expires_at < $1 OR revoked_at < $1`,
-		`DELETE FROM oauth_requests WHERE expires_at < $1 AND (code_expires_at IS NULL OR code_expires_at < $1)`,
-		`DELETE FROM oauth_grants WHERE revoked_at < $1`,
+		`DELETE FROM oauth_tokens WHERE expires_at < @cutoff OR revoked_at < @cutoff`,
+		`DELETE FROM oauth_requests WHERE expires_at < @cutoff AND (code_expires_at IS NULL OR code_expires_at < @cutoff)`,
+		`DELETE FROM oauth_grants WHERE revoked_at < @cutoff`,
 		// Dynamically registered clients that never completed a grant
 		// within a day, or were unused for 30 days (spec S-10).
-		`DELETE FROM oauth_clients WHERE kind = 'dcr' AND $1::timestamptz IS NOT NULL AND (
+		`DELETE FROM oauth_clients WHERE kind = 'dcr' AND @cutoff::timestamptz IS NOT NULL AND (
 			(last_used_at IS NULL AND created_at < now() - interval '1 day')
 			OR last_used_at < now() - interval '30 days')`,
-		`DELETE FROM oauth_client_secrets WHERE revoked_at < $1 OR expires_at < $1`,
+		`DELETE FROM oauth_client_secrets WHERE revoked_at < @cutoff OR expires_at < @cutoff`,
 	} {
-		res, err := s.db.ExecContext(ctx, q, cutoff)
+		res, err := s.db.ExecContext(ctx, q, momo.Named("cutoff", cutoff))
 		if err != nil {
 			return total, fmt.Errorf("prune oauth: %w", err)
 		}
@@ -742,10 +759,11 @@ func extScopeArg(nums []string) any {
 func (s *Store) UpsertPreregisteredClient(ctx context.Context, c oauth.Client) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO oauth_clients (client_id, kind, name, client_uri, redirect_uris)
-		VALUES ($1, 'preregistered', $2, NULLIF($3, ''), $4::text[])
+		VALUES (@client_id, 'preregistered', @name, NULLIF(@client_uri, ''), @redirect_uris::text[])
 		ON CONFLICT (client_id) DO UPDATE SET name = EXCLUDED.name, client_uri = EXCLUDED.client_uri,
 			redirect_uris = EXCLUDED.redirect_uris
 		WHERE oauth_clients.kind = 'preregistered'`,
-		c.ID, c.Name, c.ClientURI, nonNil(c.RedirectURIs))
+		momo.Named("client_id", c.ID), momo.Named("name", c.Name), momo.Named("client_uri", c.ClientURI),
+		momo.Named("redirect_uris", nonNil(c.RedirectURIs)))
 	return err
 }
