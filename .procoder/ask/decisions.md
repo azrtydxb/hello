@@ -5679,3 +5679,78 @@ answered, whatever the order.
   a 42 s wall-clock gap inside a run the test timed at 1.28 s). Its 300 ms
   leases cannot survive the machine sleeping, which is not a product or
   test bug. Local loops now run under `caffeinate -i`.
+
+## momo Phase 1 pilot: the pin, internal/db and internal/crm (2026-11-16, feat/momo-p1-crm)
+
+- **Pin and scope.** `github.com/azrtydxb/momo v0.14.0`, exact, as the query
+  layer only. Goose stays the migration tool; no migration, no schema
+  change. `momo.yaml` has no `migrate` section. Hello imports only momo's
+  root, `driver/pgxdriver` and `momolog` in production code; the model gate
+  test adds `gen/config`, `gen/fromdb` and `migrate` (test binary only).
+  None of momo's MySQL or SQLite packages is built, and `go.mod` requires
+  none of them; `go.sum` carries their checksums because momo is one module,
+  which is Go's module-graph bookkeeping, not a dependency. The momo command
+  is run as `go run github.com/azrtydxb/momo/cmd/momo@v0.14.0`, which builds
+  it in its own module.
+- **One handle per pool, no new pool.** `internal/db.New(*sql.DB, log)`
+  wraps the existing pool with `pgxdriver.FromSQLDB`; hello-control and
+  hello-sip (which also builds `crm.PG` for caller-name lookups) each pass
+  their own `*sql.DB`. Logging: momo's slog hook (`momolog`) on the
+  telemetry logger with `component=db`, debug per statement, warn above
+  `db.SlowQuery` (500 ms). Argument values are never logged
+  (`WithArgLogging` off), because sealed tokens and secrets are arguments.
+- **Hand-written SQL with @name binds, not builders.** Every crm statement
+  keeps its SQL text; `$n` became `@name` and `momo.Named`. The upserts with
+  `ON CONFLICT ... WHERE`, the `FOR UPDATE OF l SKIP LOCKED` claim, the
+  `UNION ALL` stats and the joins to users/extensions stay raw, as the plan
+  recommends. A reused bind (`@dnd`, `@status`, `@now`) renders one bind per
+  use, so each use carries an explicit cast where PostgreSQL must infer the
+  same type (`@dnd::boolean` added in SetCalendarSettings, `@now::timestamptz`
+  in MarkRenewals; Finish and ListLogs already cast).
+- **Models are generated but not yet used by crm queries.** The task asked
+  for the models and the gate; crm reads with small per-query scan structs
+  (`Query[T]` by column name, aliases for computed columns such as
+  `has_secret`) so each SELECT reads exactly the columns it read before
+  (a model read would also pull `client_secret_enc` and the sealed tokens
+  into memory where only `IS NOT NULL` was read). Model inserts and
+  builders come per package where column churn hurts (plan 3.1); PR B
+  shows the named-bind route for the widest insert.
+- **Errors are unchanged for callers.** Zero rows go through a generic
+  `one()` that returns `sql.ErrNoRows` (G7: momo still has no single-row raw
+  helper), so the existing `notFound` mapping and `UserForExtension`'s
+  "no user" result are untouched. `unique()` accepts
+  `momo.ErrUniqueViolation` or the `*pgconn.PgError` 23505 check it always
+  made (both hold through momo's error). Other errors now read
+  `momo: <kind> (op=...): <driver error>`; `errors.Is`/`errors.As` still
+  reach the driver error and `context.Canceled`.
+- **Transactions.** CreateConnector and UpdateConnector use `momo.DB.Tx`
+  (commit on nil, rollback on error, the fn's error returned as is, so
+  ErrNotFound and the unique check behave as before). The hook-side methods
+  take the event ingest `*sql.Tx` and run on `db.AdoptTx`, which never
+  commits it. Difference noted, accepted: with `FromSQLDB` a transaction
+  outlives the context passed to Begin; every statement still gets the
+  request context.
+- **Contract test.** `TestRepoContractMem` and `TestRepoContractPG` run the
+  same assertions (error kinds, secrets, tokens, single-use state, the call
+  log state machine, mappings). It found one divergence: Mem accepted
+  `SaveUserConnection` for user 0, which PG refuses with ErrNotFound. Mem
+  now refuses it too (test double aligned to production; no caller passes
+  user 0, the services check first). Other known differences are listed
+  in the test's comment and left alone: Mem overwrites granted scopes with
+  an empty list on a refresh, returns ErrNotFound from Finish and
+  SetCalendarState for an unknown id, and orders ClaimDue by id.
+- **Statement build test without a database.** `TestPGStatementsBuild`
+  calls every PG method on `momo.NewOffline(dialect.Postgres)`; a statement
+  that does not build is `ErrValidation`, one that built is the offline
+  handle's `ErrUnsupported`. The pull request tier (no database) therefore
+  catches a misspelled `@name`.
+- **Model gate.** `TestMomoModelsMatchSchema` (test/integration) migrates a
+  scratch database with goose, inspects the `introspect.only` tables with
+  `Config.OnlyTables`, runs `fromdb.Generate` with the `momo.yaml` settings,
+  and fails when a committed model body differs, a file is missing or
+  orphaned, the generator errors, or it warns about anything but the known
+  dropped constraints (the foreign keys to `users`, which has no model). A
+  second check compares the schema the generated code declares
+  (`MomoMeta().TableSchema`) with the inspected one, so a model regenerated
+  without `momo generate` fails too. The failure prints the regenerate
+  commands and the expected files; the commands are in docs/database.md.

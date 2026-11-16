@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -34,6 +35,7 @@ import (
 	momopg "github.com/azrtydxb/momo/migrate/postgres"
 	"github.com/azrtydxb/momo/schema"
 
+	"github.com/azrtydxb/hello/internal/db/models"
 	"github.com/azrtydxb/hello/internal/migrate"
 )
 
@@ -174,4 +176,55 @@ func TestMomoModelsMatchSchema(t *testing.T) {
 	if stale {
 		t.Errorf("the models in %s are stale: %s", r.cfg.Introspect.Out, regenerateModels)
 	}
+}
+
+// declaredTables is the schema each generated model declares (momo_gen.go),
+// one entry per table of introspect.only.
+func declaredTables() []*schema.Table {
+	return []*schema.Table{
+		(*models.CrmConnector)(nil).MomoMeta().TableSchema,
+		(*models.CrmConnection)(nil).MomoMeta().TableSchema,
+		(*models.CrmOauthState)(nil).MomoMeta().TableSchema,
+		(*models.CrmCallLog)(nil).MomoMeta().TableSchema,
+		(*models.CrmUserMap)(nil).MomoMeta().TableSchema,
+	}
+}
+
+// TestMomoModelsDeclareSchema fails if the schema the generated code declares
+// (each model's MomoMeta().TableSchema, written by `momo generate`) differs
+// from the modeled tables of the goose schema, less the constraints the
+// models cannot declare (droppedConstraints): a column, type, default,
+// check, index or key added, changed or removed by a goose migration, or
+// model files regenerated without running `momo generate` afterwards.
+func TestMomoModelsDeclareSchema(t *testing.T) {
+	r := newMomoModelsRig(t)
+	if r.res.Failed() {
+		t.Fatal("momo generate --from-db cannot model the goose schema (TestMomoModelsMatchSchema lists why)")
+	}
+	declared := &schema.Schema{Dialect: r.res.Snapshot.Dialect}
+	for _, tb := range declaredTables() {
+		declared.Tables = append(declared.Tables, *tb)
+	}
+	if len(declared.Tables) != len(r.res.Snapshot.Tables) {
+		t.Errorf("the models declare %d tables, introspect.only matches %d: add the new model to declaredTables, and %s",
+			len(declared.Tables), len(r.res.Snapshot.Tables), regenerateModels)
+	}
+	if schema.Equal(r.res.Snapshot, declared) {
+		return
+	}
+	changes, _, err := momomigrate.Diff(declared, r.res.Snapshot, momomigrate.DiffOptions{AllowDestructive: true})
+	if err != nil {
+		t.Fatalf("diff the declared and the goose schema: %v", err)
+	}
+	for _, c := range changes {
+		before, _ := json.Marshal(c.Before)
+		after, _ := json.Marshal(c.After)
+		t.Errorf("%s %s.%s: declared %s, goose schema %s", c.Kind, c.Table, c.Name, before, after)
+	}
+	if len(changes) == 0 {
+		a, _ := json.MarshalIndent(schema.Normalized(declared), "", "  ")
+		b, _ := json.MarshalIndent(schema.Normalized(r.res.Snapshot), "", "  ")
+		t.Errorf("the declared schema differs from the goose schema in a way Diff does not report:\ndeclared:\n%s\ngoose:\n%s", a, b)
+	}
+	t.Errorf("the generated code in internal/db/models does not match the goose schema: %s", regenerateModels)
 }

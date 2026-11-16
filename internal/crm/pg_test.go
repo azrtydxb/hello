@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
@@ -57,7 +59,7 @@ func scratchPG(t *testing.T) (*PG, *sql.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &PG{DB: db, Box: box}, db
+	return &PG{DB: hellodb.New(db, slog.New(slog.DiscardHandler)), Box: box}, db
 }
 
 func pgConnector(t *testing.T, p *PG, name string) ConnectorRow {
