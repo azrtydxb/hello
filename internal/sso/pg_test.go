@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/secret"
 )
@@ -56,7 +58,7 @@ func scratchPG(t *testing.T) (*sql.DB, *PG) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return db, &PG{DB: db, Box: box}
+	return db, &PG{DB: hellodb.New(db, slog.New(slog.DiscardHandler)), Box: box}
 }
 
 // TestPGStore fails if a provider's secret is not sealed and readable only
