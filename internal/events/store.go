@@ -2,15 +2,15 @@ package events
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strings"
+
+	"github.com/azrtydxb/momo"
 )
 
 // insert stores e once; it reports whether the row is new (an event already
 // stored, delivered twice by the stream, is not).
-func insert(ctx context.Context, tx *sql.Tx, e Entry) (bool, error) {
+func insert(ctx context.Context, q momo.Querier, e Entry) (bool, error) {
 	c, err := ParseCursor(e.Cursor)
 	if err != nil {
 		return false, err
@@ -19,15 +19,13 @@ func insert(ctx context.Context, tx *sql.Tx, e Entry) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	res, err := tx.ExecContext(ctx, `
+	n, err := momo.Exec(ctx, q, `
 		INSERT INTO integration_events (id, cursor_ms, cursor_seq, type, created_at, correlation_id, extension_number, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+		VALUES (@id, @cursor_ms, @cursor_seq, @type, @created_at, @correlation_id, @extension_number, @payload::jsonb)
 		ON CONFLICT (id) DO NOTHING`,
-		e.ID, c.MS, c.Seq, e.Type, e.CreatedAt, e.Data.CallID, e.Data.Extension, string(b))
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
+		momo.Named("id", e.ID), momo.Named("cursor_ms", c.MS), momo.Named("cursor_seq", c.Seq), momo.Named("type", e.Type),
+		momo.Named("created_at", e.CreatedAt), momo.Named("correlation_id", e.Data.CallID), momo.Named("extension_number", e.Data.Extension),
+		momo.Named("payload", string(b)))
 	return n == 1, err
 }
 
@@ -55,41 +53,41 @@ func (s *Service) History(ctx context.Context, q Query) ([]Entry, error) {
 		where []string
 		args  []any
 	)
-	arg := func(v any) string {
-		args = append(args, v)
-		return fmt.Sprintf("$%d", len(args))
+	arg := func(name string, v any) string {
+		args = append(args, momo.Named(name, v))
+		return "@" + name
 	}
 	if !q.After.Zero() {
-		where = append(where, fmt.Sprintf("(cursor_ms, cursor_seq) > (%s, %s)", arg(q.After.MS), arg(q.After.Seq)))
+		where = append(where, "(cursor_ms, cursor_seq) > ("+arg("after_ms", q.After.MS)+", "+arg("after_seq", q.After.Seq)+")")
 	}
 	if !q.Before.Zero() {
-		where = append(where, fmt.Sprintf("(cursor_ms, cursor_seq) < (%s, %s)", arg(q.Before.MS), arg(q.Before.Seq)))
+		where = append(where, "(cursor_ms, cursor_seq) < ("+arg("before_ms", q.Before.MS)+", "+arg("before_seq", q.Before.Seq)+")")
 	}
 	if q.Extension != "" {
-		where = append(where, "extension_number = "+arg(q.Extension))
+		where = append(where, "extension_number = "+arg("extension", q.Extension))
 	}
 	if q.Allowed != nil {
-		where = append(where, "extension_number = ANY("+arg(pgArray(q.Allowed))+"::text[])")
+		where = append(where, "extension_number = ANY("+arg("allowed", pgArray(q.Allowed))+"::text[])")
 	}
 	if len(q.Hide) > 0 {
 		like := make([]string, len(q.Hide))
 		for i, p := range q.Hide {
 			like[i] = p + "%"
 		}
-		where = append(where, "NOT (type LIKE ANY("+arg(pgArray(like))+"::text[]))")
+		where = append(where, "NOT (type LIKE ANY("+arg("hide", pgArray(like))+"::text[]))")
 	}
 	if len(q.Types) > 0 {
 		exact, prefixes := q.split()
 		var ors []string
 		if len(exact) > 0 {
-			ors = append(ors, "type = ANY("+arg(pgArray(exact))+"::text[])")
+			ors = append(ors, "type = ANY("+arg("types", pgArray(exact))+"::text[])")
 		}
 		if len(prefixes) > 0 {
 			like := make([]string, len(prefixes))
 			for i, p := range prefixes {
 				like[i] = p + "%"
 			}
-			ors = append(ors, "type LIKE ANY("+arg(pgArray(like))+"::text[])")
+			ors = append(ors, "type LIKE ANY("+arg("type_prefixes", pgArray(like))+"::text[])")
 		}
 		where = append(where, "("+strings.Join(ors, " OR ")+")")
 	}
@@ -101,29 +99,20 @@ func (s *Service) History(ctx context.Context, q Query) ([]Entry, error) {
 	if q.Desc {
 		order = " DESC"
 	}
-	//nolint:gosec // G202: only fixed fragments and $n placeholders are joined; every value is bound.
-	sqlText += " ORDER BY cursor_ms" + order + ", cursor_seq" + order + " LIMIT " + arg(q.Limit)
-	rows, err := s.DB.QueryContext(ctx, sqlText, args...)
+	sqlText += " ORDER BY cursor_ms" + order + ", cursor_seq" + order + " LIMIT " + arg("limit", q.Limit)
+	rows, err := momo.Query[momo.Row3[int64, int64, string]](ctx, s.DB, sqlText, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
 	var out []Entry
-	for rows.Next() {
-		var (
-			c       Cursor
-			payload string
-		)
-		if err := rows.Scan(&c.MS, &c.Seq, &payload); err != nil {
-			return nil, err
-		}
-		e := Entry{Cursor: c.String()}
-		if err := json.Unmarshal([]byte(payload), &e.Event); err != nil {
+	for _, r := range rows {
+		e := Entry{Cursor: Cursor{MS: r.C1, Seq: r.C2}.String()}
+		if err := json.Unmarshal([]byte(r.C3), &e.Event); err != nil {
 			continue // a row this version cannot read is skipped, not fatal
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // pgArray is a PostgreSQL text[] literal.

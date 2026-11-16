@@ -255,7 +255,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	crmSvc := newCRM(cfg, st, hellodb.New(db, log), box, vk, metrics.Registry, &crmLinks{Store: st, PublicURL: cfg.AI.PublicURL}, crmAudio{st: st, objs: objs}, log)
 	evSvc := &events.Service{
 		Hooks: []events.TxHook{crmSvc.Hook},
-		DB:    db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
+		DB:    hellodb.New(db, log), Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
 		RetentionDays: cfg.EventRetentionDays, Log: log.With("component", "events"),
 		Metrics: events.NewServiceMetrics(metrics.Registry),
 	}

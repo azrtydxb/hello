@@ -5838,3 +5838,38 @@ answered, whatever the order.
   at GOMAXPROCS=2. The CI failure did not reproduce locally. New test on
   old code: "487 before 200" failed 50/50 with the CI message ("timed out waiting for ACK to the callee's crossing 200"); "200 before 487" failed 0/50. New test with the fix: 0/50 for
   each order.
+
+## momo Phase 2: internal/events, and internal/queue has no SQL (2026-11-16, momo/events-queue)
+
+- **internal/queue is not converted: it has no SQL.** The six call sites
+  the inventory counted there are Valkey Lua scripts (`joinScript.Exec`
+  and the like in `valkey.go`). The PostgreSQL `queue.CallbackStore` lives
+  in `internal/store/queue_callbacks.go` and moves with `internal/store`
+  (Phase 3).
+- **The ingest transaction is momo's, the hooks still get a `*sql.Tx`.**
+  `events.Service.DB` is now a `*momo.DB` (built inline in hello-control
+  with `hellodb.New(db, log)`). `store` runs the batch in `DB.Tx` and hands
+  every hook the `*sql.Tx` behind it (`pgxdriver.UnwrapSQLTx`), so
+  `TxHook` keeps its signature and the crm, webhook and slack hooks write
+  in the same transaction as before, raw or through `db.AdoptTx`; none of
+  them commits it. A failing hook still rolls the whole batch back. A DB
+  that is not over database/sql (no `*sql.Tx` to hand out) refuses a batch
+  with hooks (`errNotSQLTx`) instead of running them outside the
+  transaction. As in crm, a momo transaction over `FromSQLDB` outlives the
+  context passed to Begin; every statement still gets the ingest context,
+  and a batch whose acknowledgement fails after the commit is read again
+  and found stored, as before.
+- **Same SQL, named binds.** The insert, the user lookup, the retention
+  purge and `History` keep their text with `@name` binds; History's WHERE
+  is still built from fixed fragments, now with named binds (`@after_ms`,
+  `@types`, `@limit`, ...). Rows are read with `momo.Query` into tuple
+  rows. History now buffers its page (at most `MaxLimit`, 1000 rows)
+  instead of streaming it; a row whose payload this version cannot decode
+  is still skipped.
+- **Tests.** `TestStatementsBuild` runs the insert, the user lookup, every
+  History filter and the purge on momo's offline handle (pull request
+  tier). `TestIngestHooksShareTheTransaction` (DB tier) proves that a hook
+  sees its event row, that a raw hook write and an `AdoptTx` momo write
+  commit with the event, and that a failing hook rolls back what earlier
+  hooks wrote. events has no in-memory store fake, so there is no mem/pg
+  contract test.

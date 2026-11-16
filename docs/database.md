@@ -13,7 +13,9 @@ are never logged.
 
 Moved so far: `internal/crm` (`crm.PG`) and the CDR writer (`internal/cdr`),
 which runs on hello-sip's pgx pool through `db.NewPool`, in the pool's own
-query execution mode.
+query execution mode. `internal/events` runs its ingest transaction on
+momo and hands the hooks its `*sql.Tx` (`pgxdriver.UnwrapSQLTx`), so a hook
+still writes in the same transaction, raw or through `db.AdoptTx`.
 
 ## Writing a statement
 
