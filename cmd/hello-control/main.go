@@ -255,7 +255,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	crmSvc := newCRM(cfg, st, hellodb.New(db, log), box, vk, metrics.Registry, &crmLinks{Store: st, PublicURL: cfg.AI.PublicURL}, crmAudio{st: st, objs: objs}, log)
 	evSvc := &events.Service{
 		Hooks: []events.TxHook{crmSvc.Hook},
-		DB:    db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
+		DB:    hellodb.New(db, log), Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
 		RetentionDays: cfg.EventRetentionDays, Log: log.With("component", "events"),
 		Metrics: events.NewServiceMetrics(metrics.Registry),
 	}
@@ -263,13 +263,13 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// the ingest transaction of every event that matches an endpoint, and
 	// the dispatcher on each replica sends the due ones.
 	hooks := &webhook.Service{
-		Store: &webhook.PG{DB: db}, Box: box, AllowedCIDRs: cfg.IntegrationsAllowedCIDRs,
+		Store: &webhook.PG{DB: hellodb.New(db, log)}, Box: box, AllowedCIDRs: cfg.IntegrationsAllowedCIDRs,
 		Log: log.With("component", "webhooks"), Enrich: inboxWebhookEnricher(st),
 	}
 	evSvc.Hooks = append(evSvc.Hooks, hooks.Hook())
 	// Slack notifications (spec integrations P17): queued in the same
 	// ingest transaction, sent by a worker on each replica.
-	slackSvc := &slack.Service{Store: &slack.PG{DB: db}, Box: box, PublicURL: cfg.AI.PublicURL, Log: log.With("component", "slack")}
+	slackSvc := &slack.Service{Store: &slack.PG{DB: hellodb.New(db, log)}, Box: box, PublicURL: cfg.AI.PublicURL, Log: log.With("component", "slack")}
 	evSvc.Hooks = append(evSvc.Hooks, slackSvc.Hook())
 	slackWorker := &slack.Worker{Svc: slackSvc, Metrics: slack.NewMetrics(metrics.Registry), Log: log.With("component", "slack")}
 	go slackWorker.Run(ctx)
@@ -289,11 +289,11 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// sync users; one replica runs a connector, the one holding its lock.
 	// SCIM (spec integrations P10): identity providers push to /scim/v2; the
 	// pushed resources are the source of the scim connector kind.
-	scimStore := &scim.PG{DB: db}
+	scimStore := &scim.PG{DB: hellodb.New(db, log)}
 	dirEngine := &directory.Engine{
 		// Range auto-provisioning (P12) creates extensions through the
 		// configuration store, with its numbering rules and routing check.
-		Store: &directory.PG{DB: db, Box: box, Provisioner: &dirstore.Provisioner{Store: st, Realm: cfg.SIPDomain}},
+		Store: &directory.PG{DB: hellodb.New(db, log), Box: box, Provisioner: &dirstore.Provisioner{Store: st, Realm: cfg.SIPDomain}},
 		Drivers: map[string]directory.Driver{
 			directory.KindLDAP: directory.LDAP{}, directory.KindGoogle: directory.Google{}, directory.KindEntra: directory.Entra{},
 			directory.KindSCIM: scim.Driver{Store: scimStore},
@@ -414,7 +414,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			_ = ln.Close()
 			return fmt.Errorf("ai proposals: %w", err)
 		}
-		props := proposal.NewStore(db, validator)
+		props := proposal.NewStore(hellodb.New(db, log), validator)
 		props.OnStatus = func(source string, st proposal.Status) {
 			agent.Metrics().Proposal(proposalSource(source), string(st))
 		}
@@ -446,7 +446,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		// and explain findings through it when it answers.
 		if cfg.AIAgent.AIOpsInterval > 0 {
 			env := &detect.Env{
-				DB: db, Store: st, Live: vk, Cluster: vk,
+				DB: hellodb.New(db, log), Store: st, Live: vk, Cluster: vk,
 				VKFunc:        vk.Client,
 				AuthFailLimit: cfg.AuthFailLimit,
 				Log:           log,

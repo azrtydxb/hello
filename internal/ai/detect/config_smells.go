@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/routing"
+	"github.com/azrtydxb/momo"
 )
 
 // config_smells (spec S-19): configuration that is probably a mistake. Info
@@ -39,20 +40,7 @@ func configSmells(ctx context.Context, r *Run) ([]Candidate, error) {
 
 // names runs a query returning one text column per row.
 func names(ctx context.Context, r *Run, q string, args ...any) ([]string, error) {
-	rows, err := r.DB.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []string
-	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
-			return nil, err
-		}
-		out = append(out, s)
-	}
-	return out, rows.Err()
+	return momo.Scalars[string](ctx, r.DB, q, args...)
 }
 
 func smell(kind, name, severity, title string, ev map[string]any) Candidate {
@@ -115,22 +103,15 @@ func routeSmells(ctx context.Context, r *Run) ([]Candidate, error) {
 }
 
 func phoneSmells(ctx context.Context, r *Run) ([]Candidate, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT mac, label, created_at, last_fetch_at, ua_mismatch FROM phones
-		WHERE enabled AND ((last_fetch_at IS NULL AND created_at < $1) OR last_fetch_at < $2 OR (last_fetch_at IS NOT NULL AND ua_mismatch))
-		ORDER BY mac`, r.Now.Add(-phoneNeverFetchedAfter), r.Now.Add(-phoneStaleAfter))
+	rows, err := momo.Query[momo.Row5[string, string, time.Time, *time.Time, bool]](ctx, r.DB, `SELECT mac, label, created_at, last_fetch_at, ua_mismatch FROM phones
+		WHERE enabled AND ((last_fetch_at IS NULL AND created_at < @never) OR last_fetch_at < @stale OR (last_fetch_at IS NOT NULL AND ua_mismatch))
+		ORDER BY mac`, momo.Named("never", r.Now.Add(-phoneNeverFetchedAfter)), momo.Named("stale", r.Now.Add(-phoneStaleAfter)))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
 	var out []Candidate
-	for rows.Next() {
-		var mac, label string
-		var created time.Time
-		var fetched *time.Time
-		var mismatch bool
-		if err := rows.Scan(&mac, &label, &created, &fetched, &mismatch); err != nil {
-			return nil, err
-		}
+	for _, row := range rows {
+		mac, label, created, fetched, mismatch := row.C1, row.C2, row.C3, row.C4, row.C5
 		ev := map[string]any{"mac": mac, "label": label, "createdAt": created, "lastFetchAt": fetched}
 		switch {
 		case fetched == nil:
@@ -141,7 +122,7 @@ func phoneSmells(ctx context.Context, r *Run) ([]Candidate, error) {
 			out = append(out, smell("phone_stale", mac, Info, fmt.Sprintf("Phone %s has not fetched its configuration for 7 days", mac), ev))
 		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // deviceSmells reports enabled devices never registered on any of the last
@@ -161,19 +142,15 @@ func deviceSmells(ctx context.Context, r *Run) ([]Candidate, error) {
 	}
 	day := r.Now.Truncate(24 * time.Hour)
 	// One row per enabled device for today: registered stays true once true.
-	if _, err := r.DB.ExecContext(ctx, `INSERT INTO ai_samples (kind, subject, at, value)
-		SELECT $1, d.sip_username, $2::timestamptz, jsonb_build_object('registered', d.sip_username = ANY($3))
+	if _, err := momo.Exec(ctx, r.DB, `INSERT INTO ai_samples (kind, subject, at, value)
+		SELECT @kind, d.sip_username, @day::timestamptz, jsonb_build_object('registered', d.sip_username = ANY(@registered))
 		FROM devices d WHERE d.enabled
 		ON CONFLICT (kind, subject, at) DO UPDATE
 		SET value = jsonb_build_object('registered', (ai_samples.value->>'registered')::boolean OR (EXCLUDED.value->>'registered')::boolean)`,
-		kindDeviceDay, day, registered); err != nil {
+		momo.Named("kind", kindDeviceDay), momo.Named("day", day), momo.Named("registered", registered)); err != nil {
 		return nil, fmt.Errorf("write device samples: %w", err)
 	}
-	ns, err := names(ctx, r, `SELECT d.sip_username FROM devices d
-		JOIN ai_samples s ON s.kind = $1 AND s.subject = d.sip_username AND s.at >= $2 AND s.at <= $3
-		WHERE d.enabled GROUP BY d.sip_username
-		HAVING count(*) >= $4 AND bool_and(NOT (s.value->>'registered')::boolean) ORDER BY d.sip_username`,
-		kindDeviceDay, day.AddDate(0, 0, 1-deviceNeverRegisteredDays), day, deviceNeverRegisteredDays)
+	ns, err := neverRegistered(ctx, r, day)
 	if err != nil {
 		return nil, err
 	}
@@ -184,6 +161,17 @@ func deviceSmells(ctx context.Context, r *Run) ([]Candidate, error) {
 			map[string]any{"days": deviceNeverRegisteredDays}))
 	}
 	return out, nil
+}
+
+// neverRegistered lists the enabled devices whose day samples up to day
+// cover deviceNeverRegisteredDays days, none of them registered.
+func neverRegistered(ctx context.Context, r *Run, day time.Time) ([]string, error) {
+	return names(ctx, r, `SELECT d.sip_username FROM devices d
+		JOIN ai_samples s ON s.kind = @kind AND s.subject = d.sip_username AND s.at >= @from AND s.at <= @day
+		WHERE d.enabled GROUP BY d.sip_username
+		HAVING count(*) >= @days AND bool_and(NOT (s.value->>'registered')::boolean) ORDER BY d.sip_username`,
+		momo.Named("kind", kindDeviceDay), momo.Named("from", day.AddDate(0, 0, 1-deviceNeverRegisteredDays)), momo.Named("day", day),
+		momo.Named("days", deviceNeverRegisteredDays))
 }
 
 // shadowedRoutes finds enabled outbound routes that can never match because

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
@@ -34,7 +36,9 @@ type pgRig struct {
 	ctx context.Context
 }
 
-func newPGRig(t *testing.T) *pgRig {
+// scratchPG is the PostgreSQL store on a migrated scratch database, and the
+// database; it skips without HELLO_TEST_DATABASE_URL.
+func scratchPG(t *testing.T) (*PG, *sql.DB) {
 	t.Helper()
 	dsn := os.Getenv("HELLO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -69,9 +73,17 @@ func newPGRig(t *testing.T) *pgRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &pgRig{t: t, db: db, ctx: ctx, pg: &PG{DB: db, Box: box}, d: &fakeDriver{res: &Result{}}}
+	return &PG{DB: hellodb.New(db, slog.New(slog.DiscardHandler)), Box: box}, db
+}
+
+func newPGRig(t *testing.T) *pgRig {
+	t.Helper()
+	ctx := context.Background()
+	pg, db := scratchPG(t)
+	r := &pgRig{t: t, db: db, ctx: ctx, pg: pg, d: &fakeDriver{res: &Result{}}}
 	r.e = &Engine{Store: r.pg, Drivers: map[string]Driver{KindLDAP: r.d}, Replica: "pg1"}
 	pw := "bind-password-123"
+	var err error
 	r.c, err = r.e.Create(ctx, "admin", ConnectorInput{Kind: KindLDAP, Name: strPtr("AD"), Secret: &pw, Enabled: boolPtr(true),
 		Config: json.RawMessage(`{"url":"ldaps://dc","ldapBindLogin":true}`)})
 	if err != nil {

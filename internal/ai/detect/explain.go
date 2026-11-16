@@ -11,6 +11,7 @@ import (
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/ai/proposal"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/momo"
 )
 
 // The model explains and ranks what the detectors found (spec S-18); it
@@ -66,6 +67,19 @@ type explainFinding struct {
 	Evidence json.RawMessage `json:"evidence"`
 }
 
+// lastExplained reads the newest explanation sample: when the model was
+// last asked and for which open set; the zero values when it never was.
+func lastExplained(ctx context.Context, r *Run) (time.Time, explainState, error) {
+	var st explainState
+	last, err := momo.Query[momo.Row2[time.Time, []byte]](ctx, r.DB, `SELECT at, value FROM ai_samples WHERE kind = @kind AND subject = 'aiops'
+		ORDER BY at DESC LIMIT 1`, momo.Named("kind", kindExplain))
+	if err != nil || len(last) == 0 {
+		return time.Time{}, st, err
+	}
+	_ = json.Unmarshal(last[0].C2, &st)
+	return last[0].C1, st, nil
+}
+
 // explain asks the model about the open set when it changed since the last
 // success and the last call is at least minInterval old. It returns whether
 // a call was made.
@@ -75,14 +89,8 @@ func (a *AIOps) explain(ctx context.Context, r *Run) (called bool, err error) {
 		return false, err
 	}
 	fp := setFingerprint(open)
-	var at time.Time
-	var st explainState
-	var raw []byte
-	err = r.DB.QueryRowContext(ctx, `SELECT at, value FROM ai_samples WHERE kind = $1 AND subject = 'aiops'
-		ORDER BY at DESC LIMIT 1`, kindExplain).Scan(&at, &raw)
-	if err == nil {
-		_ = json.Unmarshal(raw, &st)
-	} else if !isNoRows(err) {
+	at, st, err := lastExplained(ctx, r)
+	if err != nil {
 		return false, err
 	}
 	if st.Fingerprint == fp || (!at.IsZero() && r.Now.Sub(at) < a.opt.ExplainMinInterval) {

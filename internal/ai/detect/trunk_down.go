@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/momo"
 )
 
 // trunk_down (spec S-19): an enabled trunk whose live state is down or
@@ -42,35 +43,20 @@ func trunkIsDown(mode string, st livestate.TrunkStatus) trunkState {
 }
 
 func trunkDown(ctx context.Context, r *Run) ([]Candidate, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT id, name, mode FROM trunks WHERE enabled ORDER BY id`)
+	type tr struct {
+		ID         int64 `momo:"column:id"`
+		Name, Mode string
+	}
+	trunks, err := momo.Query[tr](ctx, r.DB, `SELECT id, name, mode FROM trunks WHERE enabled ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
-	type tr struct {
-		id         int64
-		name, mode string
-	}
-	var trunks []tr
-	for rows.Next() {
-		var t tr
-		if err := rows.Scan(&t.id, &t.name, &t.mode); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		trunks = append(trunks, t)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
 	for _, t := range trunks {
-		st, err := r.Live.TrunkStatus(ctx, t.id)
+		st, err := r.Live.TrunkStatus(ctx, t.ID)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrValkeyUnavailable, err)
 		}
-		if err := r.putSample(ctx, kindTrunkState, t.name, trunkIsDown(t.mode, st)); err != nil {
+		if err := r.putSample(ctx, kindTrunkState, t.Name, trunkIsDown(t.Mode, st)); err != nil {
 			return nil, err
 		}
 	}
@@ -80,7 +66,7 @@ func trunkDown(ctx context.Context, r *Run) ([]Candidate, error) {
 	}
 	var out []Candidate
 	for _, t := range trunks {
-		if c, ok := evalTrunkDown(t.name, hist[t.name], r.Now); ok {
+		if c, ok := evalTrunkDown(t.Name, hist[t.Name], r.Now); ok {
 			out = append(out, c)
 		}
 	}

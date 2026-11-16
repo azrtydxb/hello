@@ -3,13 +3,15 @@ package directory
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+	"github.com/azrtydxb/momo/advisory"
+	"github.com/azrtydxb/momo/driver/pgxdriver"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/azrtydxb/hello/internal/secret"
@@ -24,9 +26,18 @@ const configLockKey = 0x68656c6c6f636667
 // revision (store.NotifyChannel).
 const notifyChannel = "hello_config"
 
-// PG is the PostgreSQL Store.
+// PG is the PostgreSQL Store, on momo (internal/db).
+//
+// The statements are the hand-written SQL they were on database/sql, with
+// @name binds instead of $n, and rows are scanned positionally as before
+// (queryRow and queryEach over momo.RawRows). Errors reach callers as before:
+// ErrNotFound for a missing row, the field error for a taken connector name,
+// and the driver's error (a *pgconn.PgError is still reachable with
+// errors.As) for anything else. The Provisioner still receives the
+// transaction as a *sql.Tx (pgxdriver.UnwrapSQLTx), so DB must be a handle
+// over a *sql.DB (internal/db.New).
 type PG struct {
-	DB  *sql.DB
+	DB  *momo.DB
 	Box *secret.Box
 	// Provisioner creates the extensions of range auto-provisioning (I-11);
 	// nil refuses a run that would provision.
@@ -35,28 +46,80 @@ type PG struct {
 
 func credentialAAD(id int64) string { return "directory:" + strconv.FormatInt(id, 10) + ":credential" }
 
-func (p *PG) tx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := p.DB.BeginTx(ctx, nil)
+// tx runs fn in a transaction: committed when fn returns nil, rolled back
+// when it returns an error, which is returned as is.
+func (p *PG) tx(ctx context.Context, fn func(*momo.Tx) error) error {
+	return p.DB.Tx(ctx, momo.TxOptions{}, fn)
+}
+
+// sqlTx is the *sql.Tx behind tx, for the Provisioner, which runs the
+// configuration store's own statements in it.
+func sqlTx(tx *momo.Tx) (*sql.Tx, error) {
+	stx, ok := pgxdriver.UnwrapSQLTx(tx)
+	if !ok {
+		return nil, errors.New("directory: the provisioner needs a database/sql transaction (a momo handle from internal/db.New)")
+	}
+	return stx, nil
+}
+
+// row is one row of a query, run when it is scanned: QueryRow(...).Scan's
+// contract on momo, sql.ErrNoRows when there is no row, so mapErr maps it
+// as before (G7: momo has no single-row raw helper).
+type row struct {
+	ctx  context.Context
+	q    momo.Querier
+	sql  string
+	args []any
+}
+
+func queryRow(ctx context.Context, q momo.Querier, sql string, args ...any) row {
+	return row{ctx: ctx, q: q, sql: sql, args: args}
+}
+
+// Scan scans the first row into dest.
+func (r row) Scan(dest ...any) error {
+	rows, err := momo.RawRows(r.ctx, r.q, r.sql, r.args...)
 	if err != nil {
 		return err
 	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return sql.ErrNoRows
+	}
+	if err := rows.Scan(dest...); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return rows.Close()
 }
 
-type execer interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+// scanner is a row being read: a momo.Rows or a row.
+type scanner interface{ Scan(...any) error }
+
+// queryEach runs the query and calls fn for every row, in order.
+func queryEach(ctx context.Context, q momo.Querier, fn func(scanner) error, sql string, args ...any) error {
+	rows, err := momo.RawRows(ctx, q, sql, args...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		if err := fn(rows); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return rows.Close()
 }
 
-func audit(ctx context.Context, q execer, actor, action, resource, id string) error {
-	_, err := q.ExecContext(ctx,
-		`INSERT INTO audit_events (actor, action, resource, resource_id, via) VALUES ($1, $2, $3, $4, NULL)`,
-		actor, action, resource, id)
+func audit(ctx context.Context, q momo.Querier, actor, action, resource, id string) error {
+	_, err := momo.Exec(ctx, q,
+		`INSERT INTO audit_events (actor, action, resource, resource_id, via) VALUES (@actor, @action, @resource, @resource_id, NULL)`,
+		momo.Named("actor", actor), momo.Named("action", action), momo.Named("resource", resource), momo.Named("resource_id", id))
 	return err
 }
 
@@ -71,7 +134,7 @@ const connectorCols = `c.id, c.kind, c.name, c.enabled, c.mode, c.schedule_minut
 	(SELECT count(*) FROM users u WHERE u.source_connector_id = c.id), c.sync_mark::text, c.sync_fingerprint, c.last_full_run_at,
 	c.paused_at, c.guard_since`
 
-func scanConnector(r interface{ Scan(...any) error }) (Connector, error) {
+func scanConnector(r scanner) (Connector, error) {
 	var (
 		c                             Connector
 		cfg, maps, rules, opts, autoP string
@@ -132,27 +195,34 @@ func mapErr(err error) error {
 	return err
 }
 
+// unique reports a unique violation: momo.ErrUniqueViolation, or the
+// *pgconn.PgError 23505 check this store always made (it still holds
+// through momo's error).
+func unique(err error) bool {
+	var pe *pgconn.PgError
+	return errors.Is(err, momo.ErrUniqueViolation) || errors.As(err, &pe) && pe.Code == "23505"
+}
+
 // ListConnectors implements Store.
 func (p *PG) ListConnectors(ctx context.Context) ([]Connector, error) {
-	rows, err := p.DB.QueryContext(ctx, `SELECT `+connectorCols+` FROM directory_connectors c ORDER BY c.id`)
+	out := []Connector{}
+	err := queryEach(ctx, p.DB, func(r scanner) error {
+		c, err := scanConnector(r)
+		if err != nil {
+			return err
+		}
+		out = append(out, c)
+		return nil
+	}, `SELECT `+connectorCols+` FROM directory_connectors c ORDER BY c.id`)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := []Connector{}
-	for rows.Next() {
-		c, err := scanConnector(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // GetConnector implements Store.
 func (p *PG) GetConnector(ctx context.Context, id int64) (Connector, error) {
-	c, err := scanConnector(p.DB.QueryRowContext(ctx, `SELECT `+connectorCols+` FROM directory_connectors c WHERE c.id = $1`, id))
+	c, err := scanConnector(queryRow(ctx, p.DB, `SELECT `+connectorCols+` FROM directory_connectors c WHERE c.id = @id`, momo.Named("id", id)))
 	return c, mapErr(err)
 }
 
@@ -164,14 +234,16 @@ func jsonOf(v any) string {
 // SaveConnector implements Store.
 func (p *PG) SaveConnector(ctx context.Context, actor string, c Connector, secretValue *string, fp string) (Connector, error) {
 	var id int64
-	err := p.tx(ctx, func(tx *sql.Tx) error {
+	err := p.tx(ctx, func(tx *momo.Tx) error {
 		wasEnabled := false
+		cols := []any{momo.Named("name", c.Name), momo.Named("enabled", c.Enabled), momo.Named("mode", c.Mode),
+			momo.Named("schedule_minutes", c.ScheduleMinutes), momo.Named("config", string(c.Config)), momo.Named("mappings", jsonOf(c.Mappings)),
+			momo.Named("group_rules", jsonOf(c.GroupRules)), momo.Named("options", jsonOf(c.Options)), momo.Named("auto_provision", jsonOf(c.AutoProvision))}
 		if c.ID == 0 {
-			if err := tx.QueryRowContext(ctx, `
+			if err := queryRow(ctx, tx, `
 				INSERT INTO directory_connectors (kind, name, enabled, mode, schedule_minutes, config, mappings, group_rules, options, auto_provision)
-				VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb) RETURNING id`,
-				c.Kind, c.Name, c.Enabled, c.Mode, c.ScheduleMinutes, string(c.Config), jsonOf(c.Mappings), jsonOf(c.GroupRules),
-				jsonOf(c.Options), jsonOf(c.AutoProvision)).Scan(&id); err != nil {
+				VALUES (@kind, @name, @enabled, @mode, @schedule_minutes, @config::jsonb, @mappings::jsonb, @group_rules::jsonb, @options::jsonb, @auto_provision::jsonb) RETURNING id`,
+				append(cols, momo.Named("kind", c.Kind))...).Scan(&id); err != nil {
 				return err
 			}
 			if err := audit(ctx, tx, actor, "create", "directory_connector", strconv.FormatInt(id, 10)); err != nil {
@@ -179,15 +251,14 @@ func (p *PG) SaveConnector(ctx context.Context, actor string, c Connector, secre
 			}
 		} else {
 			id = c.ID
-			if err := tx.QueryRowContext(ctx, `SELECT enabled FROM directory_connectors WHERE id = $1 FOR UPDATE`, id).Scan(&wasEnabled); err != nil {
+			if err := queryRow(ctx, tx, `SELECT enabled FROM directory_connectors WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&wasEnabled); err != nil {
 				return mapErr(err)
 			}
-			if _, err := tx.ExecContext(ctx, `
-				UPDATE directory_connectors SET name = $2, enabled = $3, mode = $4, schedule_minutes = $5, config = $6::jsonb,
-					mappings = $7::jsonb, group_rules = $8::jsonb, options = $9::jsonb, auto_provision = $10::jsonb, updated_at = now()
-				WHERE id = $1`,
-				id, c.Name, c.Enabled, c.Mode, c.ScheduleMinutes, string(c.Config), jsonOf(c.Mappings), jsonOf(c.GroupRules),
-				jsonOf(c.Options), jsonOf(c.AutoProvision)); err != nil {
+			if _, err := momo.Exec(ctx, tx, `
+				UPDATE directory_connectors SET name = @name, enabled = @enabled, mode = @mode, schedule_minutes = @schedule_minutes, config = @config::jsonb,
+					mappings = @mappings::jsonb, group_rules = @group_rules::jsonb, options = @options::jsonb, auto_provision = @auto_provision::jsonb, updated_at = now()
+				WHERE id = @id`,
+				append(cols, momo.Named("id", id))...); err != nil {
 				return err
 			}
 			if err := audit(ctx, tx, actor, "update", "directory_connector", strconv.FormatInt(id, 10)); err != nil {
@@ -211,7 +282,8 @@ func (p *PG) SaveConnector(ctx context.Context, actor string, c Connector, secre
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE directory_connectors SET credential_enc = $2, credential_fp = $3 WHERE id = $1`, id, sealed, fp); err != nil {
+			if _, err := momo.Exec(ctx, tx, `UPDATE directory_connectors SET credential_enc = @sealed, credential_fp = @fp WHERE id = @id`,
+				momo.Named("id", id), momo.Named("sealed", sealed), momo.Named("fp", fp)); err != nil {
 				return err
 			}
 			return audit(ctx, tx, actor, "set-credential", "directory_connector", strconv.FormatInt(id, 10))
@@ -219,8 +291,7 @@ func (p *PG) SaveConnector(ctx context.Context, actor string, c Connector, secre
 		return nil
 	})
 	if err != nil {
-		var pg *pgconn.PgError
-		if errors.As(err, &pg) && pg.Code == "23505" {
+		if unique(err) {
 			return Connector{}, fieldErr("name", "a connector with this name already exists")
 		}
 		return Connector{}, err
@@ -230,16 +301,17 @@ func (p *PG) SaveConnector(ctx context.Context, actor string, c Connector, secre
 
 // DeleteConnector implements Store.
 func (p *PG) DeleteConnector(ctx context.Context, actor string, id int64, release bool) error {
-	return p.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
+	return p.tx(ctx, func(tx *momo.Tx) error {
+		if err := advisory.XactLock(ctx, tx, configLockKey); err != nil {
 			return err
 		}
+		idArg := momo.Named("id", id)
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM directory_connectors WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
+		if err := queryRow(ctx, tx, `SELECT 1 FROM directory_connectors WHERE id = @id FOR UPDATE`, idArg).Scan(&one); err != nil {
 			return mapErr(err)
 		}
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE source_connector_id = $1`, id).Scan(&n); err != nil {
+		if err := queryRow(ctx, tx, `SELECT count(*) FROM users WHERE source_connector_id = @id`, idArg).Scan(&n); err != nil {
 			return err
 		}
 		if n > 0 && !release {
@@ -248,17 +320,17 @@ func (p *PG) DeleteConnector(ctx context.Context, actor string, id int64, releas
 		// Released users become local users: they keep their rows, lose the
 		// lock on their fields, and have no password until an administrator
 		// sets one.
-		if _, err := tx.ExecContext(ctx, `UPDATE users SET source_connector_id = NULL, external_id = NULL, managed_fields = '{}',
-			absent_runs = 0 WHERE source_connector_id = $1`, id); err != nil {
+		if _, err := momo.Exec(ctx, tx, `UPDATE users SET source_connector_id = NULL, external_id = NULL, managed_fields = '{}',
+			absent_runs = 0 WHERE source_connector_id = @id`, idArg); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE user_extensions SET source_connector_id = NULL WHERE source_connector_id = $1`, id); err != nil {
+		if _, err := momo.Exec(ctx, tx, `UPDATE user_extensions SET source_connector_id = NULL WHERE source_connector_id = @id`, idArg); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE ring_group_members SET source_connector_id = NULL WHERE source_connector_id = $1`, id); err != nil {
+		if _, err := momo.Exec(ctx, tx, `UPDATE ring_group_members SET source_connector_id = NULL WHERE source_connector_id = @id`, idArg); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM directory_connectors WHERE id = $1`, id); err != nil {
+		if _, err := momo.Exec(ctx, tx, `DELETE FROM directory_connectors WHERE id = @id`, idArg); err != nil {
 			return err
 		}
 		if n > 0 {
@@ -273,7 +345,7 @@ func (p *PG) DeleteConnector(ctx context.Context, actor string, id int64, releas
 // Secret implements Store.
 func (p *PG) Secret(ctx context.Context, id int64) (string, error) {
 	var enc []byte
-	if err := p.DB.QueryRowContext(ctx, `SELECT credential_enc FROM directory_connectors WHERE id = $1`, id).Scan(&enc); err != nil {
+	if err := queryRow(ctx, p.DB, `SELECT credential_enc FROM directory_connectors WHERE id = @id`, momo.Named("id", id)).Scan(&enc); err != nil {
 		return "", mapErr(err)
 	}
 	if enc == nil {
@@ -291,15 +363,16 @@ func (p *PG) RecordOutcome(ctx context.Context, id int64, ok bool, code, detail 
 		detail = detail[:300]
 	}
 	var n int
-	err := p.DB.QueryRowContext(ctx, `
+	err := queryRow(ctx, p.DB, `
 		UPDATE directory_connectors SET
-			last_run_at = $5,
-			status = CASE WHEN $2 THEN 'ok' ELSE 'failing' END,
-			last_success_at = CASE WHEN $2 THEN $5 ELSE last_success_at END,
-			consecutive_failures = CASE WHEN $2 THEN 0 ELSE consecutive_failures + 1 END,
-			last_error_code = CASE WHEN $2 THEN '' ELSE $3 END,
-			last_error_detail = CASE WHEN $2 THEN '' ELSE $4 END
-		WHERE id = $1 RETURNING consecutive_failures`, id, ok, code, detail, at).Scan(&n)
+			last_run_at = @at,
+			status = CASE WHEN @ok::boolean THEN 'ok' ELSE 'failing' END,
+			last_success_at = CASE WHEN @ok::boolean THEN @at::timestamptz ELSE last_success_at END,
+			consecutive_failures = CASE WHEN @ok::boolean THEN 0 ELSE consecutive_failures + 1 END,
+			last_error_code = CASE WHEN @ok::boolean THEN '' ELSE @code END,
+			last_error_detail = CASE WHEN @ok::boolean THEN '' ELSE @detail END
+		WHERE id = @id RETURNING consecutive_failures`,
+		momo.Named("id", id), momo.Named("ok", ok), momo.Named("code", code), momo.Named("detail", detail), momo.Named("at", at)).Scan(&n)
 	return n, mapErr(err)
 }
 
@@ -309,12 +382,12 @@ func (p *PG) SaveSyncState(ctx context.Context, id int64, s SyncState) error {
 	if s.Mark != nil {
 		mark = jsonOf(s.Mark)
 	}
-	res, err := p.DB.ExecContext(ctx, `UPDATE directory_connectors SET sync_mark = $2::jsonb, sync_fingerprint = $3, last_full_run_at = $4 WHERE id = $1`,
-		id, mark, s.Fingerprint, s.LastFullAt)
+	n, err := momo.Exec(ctx, p.DB, `UPDATE directory_connectors SET sync_mark = @mark::jsonb, sync_fingerprint = @fingerprint, last_full_run_at = @last_full WHERE id = @id`,
+		momo.Named("id", id), momo.Named("mark", mark), momo.Named("fingerprint", s.Fingerprint), momo.Named("last_full", s.LastFullAt))
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if n == 0 {
 		return ErrNotFound
 	}
 	return nil
@@ -322,7 +395,7 @@ func (p *PG) SaveSyncState(ctx context.Context, id int64, s SyncState) error {
 
 const runCols = `id, connector_id, kind, status, requested_by, created_at, started_at, finished_at, replica, counts::text, diff_hash, error_code, error_detail, incremental, full_reason`
 
-func scanRun(r interface{ Scan(...any) error }) (Run, error) {
+func scanRun(r scanner) (Run, error) {
 	var (
 		x       Run
 		started sql.NullTime
@@ -346,10 +419,12 @@ func scanRun(r interface{ Scan(...any) error }) (Run, error) {
 
 // CreateRun implements Store.
 func (p *PG) CreateRun(ctx context.Context, r Run) (Run, error) {
-	x, err := scanRun(p.DB.QueryRowContext(ctx, `
+	x, err := scanRun(queryRow(ctx, p.DB, `
 		INSERT INTO directory_sync_runs (connector_id, kind, status, requested_by, started_at, replica, counts, incremental, full_reason)
-		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9) RETURNING `+runCols,
-		r.ConnectorID, r.Kind, r.Status, r.RequestedBy, r.StartedAt, r.Replica, jsonOf(orEmpty(r.Counts)), r.Incremental, r.FullReason))
+		VALUES (@connector_id, @kind, @status, @requested_by, @started_at, @replica, @counts::jsonb, @incremental, @full_reason) RETURNING `+runCols,
+		momo.Named("connector_id", r.ConnectorID), momo.Named("kind", r.Kind), momo.Named("status", r.Status), momo.Named("requested_by", r.RequestedBy),
+		momo.Named("started_at", r.StartedAt), momo.Named("replica", r.Replica), momo.Named("counts", jsonOf(orEmpty(r.Counts))),
+		momo.Named("incremental", r.Incremental), momo.Named("full_reason", r.FullReason)))
 	return x, mapErr(err)
 }
 
@@ -362,7 +437,7 @@ func orEmpty(m map[string]int) map[string]int {
 
 // GetRun implements Store.
 func (p *PG) GetRun(ctx context.Context, id int64) (Run, error) {
-	x, err := scanRun(p.DB.QueryRowContext(ctx, `SELECT `+runCols+` FROM directory_sync_runs WHERE id = $1`, id))
+	x, err := scanRun(queryRow(ctx, p.DB, `SELECT `+runCols+` FROM directory_sync_runs WHERE id = @id`, momo.Named("id", id)))
 	return x, mapErr(err)
 }
 
@@ -371,38 +446,41 @@ func (p *PG) ListRuns(ctx context.Context, connectorID int64, limit int) ([]Run,
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := p.DB.QueryContext(ctx, `SELECT `+runCols+` FROM directory_sync_runs WHERE connector_id = $1 ORDER BY id DESC LIMIT $2`, connectorID, limit)
+	out := []Run{}
+	err := queryEach(ctx, p.DB, func(r scanner) error {
+		x, err := scanRun(r)
+		if err != nil {
+			return err
+		}
+		out = append(out, x)
+		return nil
+	}, `SELECT `+runCols+` FROM directory_sync_runs WHERE connector_id = @connector_id ORDER BY id DESC LIMIT @limit`,
+		momo.Named("connector_id", connectorID), momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := []Run{}
-	for rows.Next() {
-		x, err := scanRun(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, x)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // UpdateRun implements Store.
 func (p *PG) UpdateRun(ctx context.Context, r Run) error {
-	_, err := p.DB.ExecContext(ctx, `
-		UPDATE directory_sync_runs SET kind = $2, status = $3, requested_by = $4, started_at = $5, finished_at = $6, replica = $7,
-			counts = $8::jsonb, diff_hash = $9, error_code = $10, error_detail = $11, incremental = $12, full_reason = $13 WHERE id = $1`,
-		r.ID, r.Kind, r.Status, r.RequestedBy, r.StartedAt, r.FinishedAt, r.Replica, jsonOf(orEmpty(r.Counts)), r.DiffHash, r.ErrorCode, r.ErrorDetail,
-		r.Incremental, r.FullReason)
+	_, err := momo.Exec(ctx, p.DB, `
+		UPDATE directory_sync_runs SET kind = @kind, status = @status, requested_by = @requested_by, started_at = @started_at, finished_at = @finished_at,
+			replica = @replica, counts = @counts::jsonb, diff_hash = @diff_hash, error_code = @error_code, error_detail = @error_detail,
+			incremental = @incremental, full_reason = @full_reason WHERE id = @id`,
+		momo.Named("id", r.ID), momo.Named("kind", r.Kind), momo.Named("status", r.Status), momo.Named("requested_by", r.RequestedBy),
+		momo.Named("started_at", r.StartedAt), momo.Named("finished_at", r.FinishedAt), momo.Named("replica", r.Replica),
+		momo.Named("counts", jsonOf(orEmpty(r.Counts))), momo.Named("diff_hash", r.DiffHash), momo.Named("error_code", r.ErrorCode),
+		momo.Named("error_detail", r.ErrorDetail), momo.Named("incremental", r.Incremental), momo.Named("full_reason", r.FullReason))
 	return err
 }
 
 // ClaimQueued implements Store.
 func (p *PG) ClaimQueued(ctx context.Context, connectorID int64, replica string) (*Run, error) {
-	x, err := scanRun(p.DB.QueryRowContext(ctx, `
-		UPDATE directory_sync_runs SET status = 'running', started_at = now(), replica = $2
-		WHERE id = (SELECT id FROM directory_sync_runs WHERE connector_id = $1 AND status = 'queued' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
-		RETURNING `+runCols, connectorID, replica))
+	x, err := scanRun(queryRow(ctx, p.DB, `
+		UPDATE directory_sync_runs SET status = 'running', started_at = now(), replica = @replica
+		WHERE id = (SELECT id FROM directory_sync_runs WHERE connector_id = @connector_id AND status = 'queued' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
+		RETURNING `+runCols, momo.Named("connector_id", connectorID), momo.Named("replica", replica)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -414,20 +492,20 @@ func (p *PG) ClaimQueued(ctx context.Context, connectorID int64, replica string)
 
 // CloseOrphans implements Store.
 func (p *PG) CloseOrphans(ctx context.Context, connectorID int64) (int, error) {
-	res, err := p.DB.ExecContext(ctx, `
-		UPDATE directory_sync_runs SET status = 'failed', error_code = $2, error_detail = 'the replica running it went away', finished_at = now()
-		WHERE connector_id = $1 AND status = 'running'`, connectorID, CodeReplicaLost)
+	n, err := momo.Exec(ctx, p.DB, `
+		UPDATE directory_sync_runs SET status = 'failed', error_code = @code, error_detail = 'the replica running it went away', finished_at = now()
+		WHERE connector_id = @connector_id AND status = 'running'`, momo.Named("connector_id", connectorID), momo.Named("code", CodeReplicaLost))
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
 	return int(n), nil
 }
 
 // LastScheduled implements Store.
 func (p *PG) LastScheduled(ctx context.Context, connectorID int64) (time.Time, bool, error) {
 	var t sql.NullTime
-	if err := p.DB.QueryRowContext(ctx, `SELECT max(created_at) FROM directory_sync_runs WHERE connector_id = $1 AND kind = 'scheduled'`, connectorID).Scan(&t); err != nil {
+	if err := queryRow(ctx, p.DB, `SELECT max(created_at) FROM directory_sync_runs WHERE connector_id = @connector_id AND kind = 'scheduled'`,
+		momo.Named("connector_id", connectorID)).Scan(&t); err != nil {
 		return time.Time{}, false, err
 	}
 	return t.Time, t.Valid, nil
@@ -436,25 +514,31 @@ func (p *PG) LastScheduled(ctx context.Context, connectorID int64) (time.Time, b
 // HasApplied implements Store.
 func (p *PG) HasApplied(ctx context.Context, connectorID int64) (bool, error) {
 	var ok bool
-	err := p.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM directory_sync_runs
-		WHERE connector_id = $1 AND status = 'succeeded' AND kind IN ('apply', 'scheduled'))`, connectorID).Scan(&ok)
+	err := queryRow(ctx, p.DB, `SELECT EXISTS (SELECT 1 FROM directory_sync_runs
+		WHERE connector_id = @connector_id AND status = 'succeeded' AND kind IN ('apply', 'scheduled'))`, momo.Named("connector_id", connectorID)).Scan(&ok)
 	return ok, err
+}
+
+// insertChange is the statement ReplaceChanges and RecordPush run per
+// change (they prepared it once on database/sql; the text is unchanged).
+const insertChange = `INSERT INTO directory_sync_changes (run_id, action, user_id, external_id, username, field_diffs, reason)
+	VALUES (@run_id, @action, @user_id, @external_id, @username, @field_diffs::jsonb, @reason)`
+
+func addChange(ctx context.Context, tx *momo.Tx, runID int64, c Change) error {
+	_, err := momo.Exec(ctx, tx, insertChange, momo.Named("run_id", runID), momo.Named("action", c.Action), momo.Named("user_id", c.UserID),
+		momo.Named("external_id", c.ExternalID), momo.Named("username", c.Username), momo.Named("field_diffs", jsonOf(nonNilDiffs(c.FieldDiffs))),
+		momo.Named("reason", c.Reason))
+	return err
 }
 
 // ReplaceChanges implements Store.
 func (p *PG) ReplaceChanges(ctx context.Context, runID int64, cs []Change) error {
-	return p.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM directory_sync_changes WHERE run_id = $1`, runID); err != nil {
+	return p.tx(ctx, func(tx *momo.Tx) error {
+		if _, err := momo.Exec(ctx, tx, `DELETE FROM directory_sync_changes WHERE run_id = @run_id`, momo.Named("run_id", runID)); err != nil {
 			return err
 		}
-		st, err := tx.PrepareContext(ctx, `INSERT INTO directory_sync_changes (run_id, action, user_id, external_id, username, field_diffs, reason)
-			VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = st.Close() }()
 		for _, c := range cs {
-			if _, err := st.ExecContext(ctx, runID, c.Action, c.UserID, c.ExternalID, c.Username, jsonOf(nonNilDiffs(c.FieldDiffs)), c.Reason); err != nil {
+			if err := addChange(ctx, tx, runID, c); err != nil {
 				return err
 			}
 		}
@@ -475,23 +559,15 @@ func (p *PG) ListChanges(ctx context.Context, runID int64, f ChangeFilter) ([]Ch
 	if limit <= 0 || limit > 1000 {
 		limit = 200
 	}
-	rows, err := p.DB.QueryContext(ctx, `
-		SELECT id, run_id, action, user_id, external_id, username, field_diffs::text, reason, created_at
-		FROM directory_sync_changes WHERE run_id = $1 AND id > $2 AND ($3 = '' OR action = $3) ORDER BY id LIMIT $4`,
-		runID, f.After, f.Action, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
 	out := []Change{}
-	for rows.Next() {
+	err := queryEach(ctx, p.DB, func(r scanner) error {
 		var (
 			c     Change
 			uid   sql.NullInt64
 			diffs string
 		)
-		if err := rows.Scan(&c.ID, &c.RunID, &c.Action, &uid, &c.ExternalID, &c.Username, &diffs, &c.Reason, &c.CreatedAt); err != nil {
-			return nil, err
+		if err := r.Scan(&c.ID, &c.RunID, &c.Action, &uid, &c.ExternalID, &c.Username, &diffs, &c.Reason, &c.CreatedAt); err != nil {
+			return err
 		}
 		if uid.Valid {
 			c.UserID = &uid.Int64
@@ -500,30 +576,29 @@ func (p *PG) ListChanges(ctx context.Context, runID int64, f ChangeFilter) ([]Ch
 		_ = json.Unmarshal([]byte(diffs), &c.FieldDiffs)
 		c.Overridable = c.Action == ActionConflict && c.Reason == ReasonExtensionLinked
 		out = append(out, c)
+		return nil
+	}, `
+		SELECT id, run_id, action, user_id, external_id, username, field_diffs::text, reason, created_at
+		FROM directory_sync_changes WHERE run_id = @run_id AND id > @after AND (@action::text = '' OR action = @action::text) ORDER BY id LIMIT @limit`,
+		momo.Named("run_id", runID), momo.Named("after", f.After), momo.Named("action", f.Action), momo.Named("limit", limit))
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // LoadState implements Store.
 func (p *PG) LoadState(ctx context.Context, connectorID int64) (State, error) {
 	st := State{Exts: map[string]LocalExt{}, RingGroups: map[int64]bool{}}
-	rows, err := p.DB.QueryContext(ctx, `
-		SELECT id, username, email, display_name, role, enabled, coalesce(source_connector_id, 0), coalesce(external_id, ''),
-			disabled_at IS NOT NULL, absent_runs, to_json(managed_fields)::text, coalesce(provisioned_number, ''), break_glass
-		FROM users ORDER BY id`)
-	if err != nil {
-		return st, err
-	}
 	idx := map[int64]int{}
-	for rows.Next() {
+	if err := queryEach(ctx, p.DB, func(r scanner) error {
 		var (
 			u       LocalUser
 			managed string
 		)
-		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.DisplayName, &u.Role, &u.Enabled, &u.ConnectorID, &u.ExternalID,
+		if err := r.Scan(&u.ID, &u.Username, &u.Email, &u.DisplayName, &u.Role, &u.Enabled, &u.ConnectorID, &u.ExternalID,
 			&u.DisabledByDirectory, &u.AbsentRuns, &managed, &u.ProvisionedNumber, &u.BreakGlass); err != nil {
-			_ = rows.Close()
-			return st, err
+			return err
 		}
 		_ = json.Unmarshal([]byte(managed), &u.Managed)
 		if len(u.Managed) == 0 {
@@ -534,21 +609,19 @@ func (p *PG) LoadState(ctx context.Context, connectorID int64) (State, error) {
 		}
 		idx[u.ID] = len(st.Users)
 		st.Users = append(st.Users, u)
-	}
-	if err := rows.Close(); err != nil {
+		return nil
+	}, `
+		SELECT id, username, email, display_name, role, enabled, coalesce(source_connector_id, 0), coalesce(external_id, ''),
+			disabled_at IS NOT NULL, absent_runs, to_json(managed_fields)::text, coalesce(provisioned_number, ''), break_glass
+		FROM users ORDER BY id`); err != nil {
 		return st, err
 	}
 	owned := map[int64]int64{} // user -> owned extension
-	links, err := p.DB.QueryContext(ctx, `SELECT user_id, extension_id, coalesce(source_connector_id, 0) FROM user_extensions ORDER BY user_id, position`)
-	if err != nil {
-		return st, err
-	}
 	extUser := map[int64]int64{}
-	for links.Next() {
+	if err := queryEach(ctx, p.DB, func(r scanner) error {
 		var u, e, by int64
-		if err := links.Scan(&u, &e, &by); err != nil {
-			_ = links.Close()
-			return st, err
+		if err := r.Scan(&u, &e, &by); err != nil {
+			return err
 		}
 		extUser[e] = u
 		if i, ok := idx[u]; ok {
@@ -558,39 +631,29 @@ func (p *PG) LoadState(ctx context.Context, connectorID int64) (State, error) {
 				owned[u] = e
 			}
 		}
-	}
-	if err := links.Close(); err != nil {
+		return nil
+	}, `SELECT user_id, extension_id, coalesce(source_connector_id, 0) FROM user_extensions ORDER BY user_id, position`); err != nil {
 		return st, err
 	}
-	exts, err := p.DB.QueryContext(ctx, `SELECT id, number, kind = 'door' FROM extensions`)
-	if err != nil {
-		return st, err
-	}
-	for exts.Next() {
+	if err := queryEach(ctx, p.DB, func(r scanner) error {
 		var e LocalExt
-		if err := exts.Scan(&e.ID, &e.Number, &e.Door); err != nil {
-			_ = exts.Close()
-			return st, err
+		if err := r.Scan(&e.ID, &e.Number, &e.Door); err != nil {
+			return err
 		}
 		e.UserID = extUser[e.ID]
 		st.Exts[e.Number] = e
-	}
-	if err := exts.Close(); err != nil {
+		return nil
+	}, `SELECT id, number, kind = 'door' FROM extensions`); err != nil {
 		return st, err
 	}
 	ownerOfExt := map[int64]int{}
 	for u, e := range owned {
 		ownerOfExt[e] = idx[u]
 	}
-	ms, err := p.DB.QueryContext(ctx, `SELECT group_id, extension_id, coalesce(source_connector_id, 0) FROM ring_group_members`)
-	if err != nil {
-		return st, err
-	}
-	for ms.Next() {
+	if err := queryEach(ctx, p.DB, func(r scanner) error {
 		var g, e, by int64
-		if err := ms.Scan(&g, &e, &by); err != nil {
-			_ = ms.Close()
-			return st, err
+		if err := r.Scan(&g, &e, &by); err != nil {
+			return err
 		}
 		if i, ok := ownerOfExt[e]; ok {
 			st.Users[i].MemberOf = append(st.Users[i].MemberOf, g)
@@ -598,23 +661,18 @@ func (p *PG) LoadState(ctx context.Context, connectorID int64) (State, error) {
 				st.Users[i].SyncedMemberOf = append(st.Users[i].SyncedMemberOf, g)
 			}
 		}
-	}
-	if err := ms.Close(); err != nil {
+		return nil
+	}, `SELECT group_id, extension_id, coalesce(source_connector_id, 0) FROM ring_group_members`); err != nil {
 		return st, err
 	}
-	gs, err := p.DB.QueryContext(ctx, `SELECT id FROM ring_groups`)
-	if err != nil {
-		return st, err
-	}
-	for gs.Next() {
+	if err := queryEach(ctx, p.DB, func(r scanner) error {
 		var g int64
-		if err := gs.Scan(&g); err != nil {
-			_ = gs.Close()
-			return st, err
+		if err := r.Scan(&g); err != nil {
+			return err
 		}
 		st.RingGroups[g] = true
-	}
-	if err := gs.Close(); err != nil {
+		return nil
+	}, `SELECT id FROM ring_groups`); err != nil {
 		return st, err
 	}
 	return st, p.loadTaken(ctx, connectorID, &st)
@@ -637,12 +695,16 @@ func (p *PG) loadTaken(ctx context.Context, connectorID int64, st *State) error 
 	if !c.AutoProvision.active() {
 		return nil
 	}
-	tx, err := p.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := p.DB.Begin(ctx, momo.TxOptions{ReadOnly: true})
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
-	taken, err := p.Provisioner.Taken(ctx, tx, c.AutoProvision.RangeStart, c.AutoProvision.RangeEnd)
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	stx, err := sqlTx(tx)
+	if err != nil {
+		return err
+	}
+	taken, err := p.Provisioner.Taken(ctx, stx, c.AutoProvision.RangeStart, c.AutoProvision.RangeEnd)
 	if err != nil {
 		return err
 	}
@@ -653,40 +715,50 @@ func (p *PG) loadTaken(ctx context.Context, connectorID int64, st *State) error 
 // PruneChanges implements Store: old changes, and finished runs past the
 // same age.
 func (p *PG) PruneChanges(ctx context.Context, before time.Time) (int64, error) {
-	res, err := p.DB.ExecContext(ctx, `DELETE FROM directory_sync_changes WHERE created_at < $1`, before)
+	n, err := momo.Exec(ctx, p.DB, `DELETE FROM directory_sync_changes WHERE created_at < @before`, momo.Named("before", before))
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
-	if _, err := p.DB.ExecContext(ctx, `DELETE FROM directory_sync_runs WHERE created_at < $1 AND status NOT IN ('queued', 'running')`, before); err != nil {
+	if _, err := momo.Exec(ctx, p.DB, `DELETE FROM directory_sync_runs WHERE created_at < @before AND status NOT IN ('queued', 'running')`,
+		momo.Named("before", before)); err != nil {
 		return n, err
 	}
 	return n, nil
 }
 
 // TryLock implements Store: a session-level advisory lock on a dedicated
-// connection, so a dead replica's lock goes with its connection (I-13).
+// connection, so a dead replica's lock goes with its connection (I-13). The
+// key is hashtext(key), as before; an unlock that fails discards the
+// connection instead of returning it to the pool with the lock held.
 func (p *PG) TryLock(ctx context.Context, key string) (func(), bool, error) {
-	conn, err := p.DB.Conn(ctx)
+	pinner, ok := p.DB.Driver().(momo.Pinner)
+	if !ok {
+		return nil, false, errors.New("directory: the database handle cannot pin a connection")
+	}
+	pc, err := pinner.Pin(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	var ok bool
-	if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1::text))`, key).Scan(&ok); err != nil {
-		_ = conn.Close()
+	conn := p.DB.OnConn(pc)
+	got, err := advisory.TryLockString(ctx, conn, key)
+	if err != nil {
+		_ = pc.Release()
 		return nil, false, err
 	}
-	if !ok {
-		_ = conn.Close()
+	if !got {
+		_ = pc.Release()
 		return nil, false, nil
 	}
 	return func() {
 		uctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if _, err := conn.ExecContext(uctx, `SELECT pg_advisory_unlock(hashtext($1::text))`, key); err != nil {
-			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		if _, err := advisory.UnlockString(uctx, conn, key); err != nil {
+			if d, ok := pc.(momo.Discarder); ok {
+				_ = d.Discard()
+				return
+			}
 		}
-		_ = conn.Close()
+		_ = pc.Release()
 	}, true, nil
 }
 
@@ -702,10 +774,10 @@ func (o Op) touchesConfig(c Connector) bool {
 // connector (one row per user-level change, never per field, never a value).
 func (p *PG) Apply(ctx context.Context, actor string, c Connector, op Op) (Applied, error) {
 	var got Applied
-	err := p.tx(ctx, func(tx *sql.Tx) error {
+	err := p.tx(ctx, func(tx *momo.Tx) error {
 		got = Applied{}
 		if op.touchesConfig(c) {
-			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
+			if err := advisory.XactLock(ctx, tx, configLockKey); err != nil {
 				return err
 			}
 		}
@@ -721,12 +793,15 @@ func (p *PG) Apply(ctx context.Context, actor string, c Connector, op Op) (Appli
 		case ActionEnable:
 			bump, err = p.enable(ctx, tx, actor, op)
 		case "absent":
-			_, err = tx.ExecContext(ctx, `UPDATE users SET absent_runs = $2 WHERE id = $1`, op.UserID, op.AbsentRuns)
+			_, err = momo.Exec(ctx, tx, `UPDATE users SET absent_runs = @absent_runs WHERE id = @id`,
+				momo.Named("id", op.UserID), momo.Named("absent_runs", op.AbsentRuns))
 		case "touch":
-			_, err = tx.ExecContext(ctx, `UPDATE users SET absent_runs = 0 WHERE id = $1 AND source_connector_id = $2`, op.UserID, c.ID)
+			_, err = momo.Exec(ctx, tx, `UPDATE users SET absent_runs = 0 WHERE id = @id AND source_connector_id = @connector_id`,
+				momo.Named("id", op.UserID), momo.Named("connector_id", c.ID))
 		case "managed":
-			_, err = tx.ExecContext(ctx, `UPDATE users SET managed_fields = ARRAY(SELECT jsonb_array_elements_text($3::jsonb))
-				WHERE id = $1 AND source_connector_id = $2`, op.UserID, c.ID, jsonOf(nonNilStrings(op.Managed)))
+			_, err = momo.Exec(ctx, tx, `UPDATE users SET managed_fields = ARRAY(SELECT jsonb_array_elements_text(@managed::jsonb))
+				WHERE id = @id AND source_connector_id = @connector_id`,
+				momo.Named("id", op.UserID), momo.Named("connector_id", c.ID), momo.Named("managed", jsonOf(nonNilStrings(op.Managed))))
 		default:
 			err = fmt.Errorf("directory: unknown operation %q", op.Kind)
 		}
@@ -744,21 +819,25 @@ func (p *PG) Apply(ctx context.Context, actor string, c Connector, op Op) (Appli
 // provision allocates and creates the user's extension through the
 // Provisioner (inside tx, under the configuration lock), keeps the number on
 // the user so a re-run never renumbers, and turns op into a link of it.
-func (p *PG) provision(ctx context.Context, tx *sql.Tx, actor string, c Connector, userID int64, op *Op, got *Applied) error {
+func (p *PG) provision(ctx context.Context, tx *momo.Tx, actor string, c Connector, userID int64, op *Op, got *Applied) error {
 	if op.Provision == nil {
 		return nil
 	}
 	if p.Provisioner == nil {
 		return errors.New("directory: auto-provisioning is not available on this node")
 	}
+	stx, err := sqlTx(tx)
+	if err != nil {
+		return err
+	}
 	pr := op.Provision
-	res, err := p.Provisioner.Provision(ctx, tx, actor, ProvisionRequest{ConnectorID: c.ID, Preferred: pr.Preferred,
+	res, err := p.Provisioner.Provision(ctx, stx, actor, ProvisionRequest{ConnectorID: c.ID, Preferred: pr.Preferred,
 		RangeStart: pr.Range.RangeStart, RangeEnd: pr.Range.RangeEnd, Name: ExtensionName(pr.Name, ""), Email: pr.Email,
 		Voicemail: pr.Range.Voicemail, Device: pr.Range.Device})
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET provisioned_number = $2 WHERE id = $1`, userID, res.Number); err != nil {
+	if err := setProvisioned(ctx, tx, userID, res.Number); err != nil {
 		return err
 	}
 	op.Extension, op.SetExtension = res.ExtensionID, true
@@ -766,33 +845,39 @@ func (p *PG) provision(ctx context.Context, tx *sql.Tx, actor string, c Connecto
 	return audit(ctx, tx, actor, "provision", "user", itoa64(userID))
 }
 
+// setProvisioned keeps the number provisioning gave the user.
+func setProvisioned(ctx context.Context, tx *momo.Tx, userID int64, number string) error {
+	_, err := momo.Exec(ctx, tx, `UPDATE users SET provisioned_number = @number WHERE id = @id`, momo.Named("id", userID), momo.Named("number", number))
+	return err
+}
+
 // followUser keeps the extension auto-provisioning created for the user in
 // step with it while provisioning is on: its name follows the display name and
 // its voicemail email follows the email, each only while it still has the
 // value provisioning gave it (an administrator's own edit wins).
-func (p *PG) followUser(ctx context.Context, tx *sql.Tx, c Connector, userID int64, op Op, oldName, oldEmail string) (bool, error) {
+func (p *PG) followUser(ctx context.Context, tx *momo.Tx, c Connector, userID int64, op Op, oldName, oldEmail string) (bool, error) {
 	if !c.AutoProvision.Enabled || (op.Display == nil && op.Email == nil) {
 		return false, nil
 	}
 	const owned = `SELECT e.id FROM extensions e JOIN user_extensions ue ON ue.extension_id = e.id
-		WHERE ue.user_id = $1 AND ue.source_connector_id = $2 AND e.provisioned_by = $2`
+		WHERE ue.user_id = @user_id AND ue.source_connector_id = @connector_id AND e.provisioned_by = @connector_id`
 	bump := false
 	if op.Display != nil && *op.Display != "" && *op.Display != oldName {
-		res, err := tx.ExecContext(ctx, `UPDATE extensions SET name = $3, updated_at = now()
-			WHERE id IN (`+owned+`) AND name = $4`, userID, c.ID, ExtensionName(*op.Display, ""), ExtensionName(oldName, ""))
+		n, err := momo.Exec(ctx, tx, `UPDATE extensions SET name = @name, updated_at = now()
+			WHERE id IN (`+owned+`) AND name = @old`, momo.Named("user_id", userID), momo.Named("connector_id", c.ID),
+			momo.Named("name", ExtensionName(*op.Display, "")), momo.Named("old", ExtensionName(oldName, "")))
 		if err != nil {
 			return false, err
 		}
-		n, _ := res.RowsAffected()
 		bump = n > 0
 	}
 	if op.Email != nil && *op.Email != oldEmail {
-		res, err := tx.ExecContext(ctx, `UPDATE voicemail_boxes SET email = $3, updated_at = now()
-			WHERE extension_id IN (`+owned+`) AND email = $4`, userID, c.ID, *op.Email, oldEmail)
+		n, err := momo.Exec(ctx, tx, `UPDATE voicemail_boxes SET email = @email, updated_at = now()
+			WHERE extension_id IN (`+owned+`) AND email = @old`, momo.Named("user_id", userID), momo.Named("connector_id", c.ID),
+			momo.Named("email", *op.Email), momo.Named("old", oldEmail))
 		if err != nil {
 			return false, err
 		}
-		n, _ := res.RowsAffected()
 		bump = bump || n > 0
 	}
 	return bump, nil
@@ -805,16 +890,15 @@ func nonNilStrings(s []string) []string {
 	return s
 }
 
-func bumpRevision(ctx context.Context, tx *sql.Tx) error {
+func bumpRevision(ctx context.Context, tx *momo.Tx) error {
 	var rev int64
-	if err := tx.QueryRowContext(ctx, `UPDATE schema_info SET config_revision = config_revision + 1 RETURNING config_revision`).Scan(&rev); err != nil {
+	if err := queryRow(ctx, tx, `UPDATE schema_info SET config_revision = config_revision + 1 RETURNING config_revision`).Scan(&rev); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, notifyChannel, strconv.FormatInt(rev, 10))
-	return err
+	return pgxdriver.Notify(ctx, tx, notifyChannel, strconv.FormatInt(rev, 10))
 }
 
-func (p *PG) create(ctx context.Context, tx *sql.Tx, actor string, c Connector, op Op, got *Applied) (bool, error) {
+func (p *PG) create(ctx context.Context, tx *momo.Tx, actor string, c Connector, op Op, got *Applied) (bool, error) {
 	if op.Username == nil || op.Role == nil {
 		return false, errors.New("directory: create without username or role")
 	}
@@ -829,12 +913,13 @@ func (p *PG) create(ctx context.Context, tx *sql.Tx, actor string, c Connector, 
 	// The password is a marker no hash equals ("An empty or unknown hash never
 	// matches"): a synced user signs in only through its directory, by OIDC
 	// or an LDAP bind (I-29).
-	if err := tx.QueryRowContext(ctx, `
+	if err := queryRow(ctx, tx, `
 		INSERT INTO users (username, password_hash, role, display_name, email, enabled, must_change_password,
 			source_connector_id, external_id, managed_fields)
-		VALUES ($1, '!', $2, $3, $4, TRUE, FALSE, $5, $6, ARRAY(SELECT jsonb_array_elements_text($7::jsonb)))
+		VALUES (@username, '!', @role, @display_name, @email, TRUE, FALSE, @connector_id, @external_id, ARRAY(SELECT jsonb_array_elements_text(@managed::jsonb)))
 		RETURNING id`,
-		*op.Username, *op.Role, display, email, c.ID, op.ExternalID, jsonOf(nonNilStrings(op.Managed))).Scan(&id); err != nil {
+		momo.Named("username", *op.Username), momo.Named("role", *op.Role), momo.Named("display_name", display), momo.Named("email", email),
+		momo.Named("connector_id", c.ID), momo.Named("external_id", op.ExternalID), momo.Named("managed", jsonOf(nonNilStrings(op.Managed)))).Scan(&id); err != nil {
 		return false, err
 	}
 	if err := audit(ctx, tx, actor, "create", "user", itoa64(id)); err != nil {
@@ -847,20 +932,16 @@ func (p *PG) create(ctx context.Context, tx *sql.Tx, actor string, c Connector, 
 }
 
 // lockAdmins locks every enabled admin row and counts them, like the store's.
-func lockAdmins(ctx context.Context, tx *sql.Tx) (int, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM users WHERE role = 'admin' AND enabled FOR UPDATE`)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = rows.Close() }()
+func lockAdmins(ctx context.Context, tx *momo.Tx) (int, error) {
 	n := 0
-	for rows.Next() {
+	err := queryEach(ctx, tx, func(scanner) error {
 		n++
-	}
-	return n, rows.Err()
+		return nil
+	}, `SELECT id FROM users WHERE role = 'admin' AND enabled FOR UPDATE`)
+	return n, err
 }
 
-func (p *PG) update(ctx context.Context, tx *sql.Tx, actor string, c Connector, op Op, got *Applied) (bool, error) {
+func (p *PG) update(ctx context.Context, tx *momo.Tx, actor string, c Connector, op Op, got *Applied) (bool, error) {
 	admins, err := lockAdmins(ctx, tx)
 	if err != nil {
 		return false, err
@@ -870,8 +951,8 @@ func (p *PG) update(ctx context.Context, tx *sql.Tx, actor string, c Connector, 
 		enabled, breakGlass     bool
 		src                     sql.NullInt64
 	)
-	if err := tx.QueryRowContext(ctx, `SELECT role, enabled, source_connector_id, CASE WHEN display_name <> '' THEN display_name ELSE username END, email, break_glass
-		FROM users WHERE id = $1 FOR UPDATE`, op.UserID).Scan(&role, &enabled, &src, &oldName, &oldEmail, &breakGlass); err != nil {
+	if err := queryRow(ctx, tx, `SELECT role, enabled, source_connector_id, CASE WHEN display_name <> '' THEN display_name ELSE username END, email, break_glass
+		FROM users WHERE id = @id FOR UPDATE`, momo.Named("id", op.UserID)).Scan(&role, &enabled, &src, &oldName, &oldEmail, &breakGlass); err != nil {
 		return false, mapErr(err)
 	}
 	if breakGlass {
@@ -889,23 +970,24 @@ func (p *PG) update(ctx context.Context, tx *sql.Tx, actor string, c Connector, 
 	if op.Kind == ActionAdopt && role == "admin" {
 		return false, errors.New("directory: a local admin is never adopted")
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := momo.Exec(ctx, tx, `
 		UPDATE users SET
-			username = COALESCE($2, username),
-			email = COALESCE($3, email),
-			display_name = COALESCE($4, display_name),
-			role = COALESCE($5, role),
-			managed_fields = CASE WHEN $6 THEN ARRAY(SELECT jsonb_array_elements_text($7::jsonb)) ELSE managed_fields END,
-			source_connector_id = CASE WHEN $8 THEN $9 ELSE source_connector_id END,
-			external_id = CASE WHEN $8 THEN $10 ELSE external_id END,
+			username = COALESCE(@username, username),
+			email = COALESCE(@email, email),
+			display_name = COALESCE(@display_name, display_name),
+			role = COALESCE(@role, role),
+			managed_fields = CASE WHEN @set_managed::boolean THEN ARRAY(SELECT jsonb_array_elements_text(@managed::jsonb)) ELSE managed_fields END,
+			source_connector_id = CASE WHEN @adopt::boolean THEN @connector_id ELSE source_connector_id END,
+			external_id = CASE WHEN @adopt::boolean THEN @external_id ELSE external_id END,
 			-- An adopted user signs in through the directory from now on: its
 			-- local password stops working (I-29).
-			password_hash = CASE WHEN $8 THEN '!' ELSE password_hash END,
-			must_change_password = CASE WHEN $8 THEN FALSE ELSE must_change_password END,
+			password_hash = CASE WHEN @adopt::boolean THEN '!' ELSE password_hash END,
+			must_change_password = CASE WHEN @adopt::boolean THEN FALSE ELSE must_change_password END,
 			absent_runs = 0
-		WHERE id = $1`,
-		op.UserID, op.Username, op.Email, op.Display, op.Role, op.SetManaged, jsonOf(nonNilStrings(op.Managed)),
-		op.Kind == ActionAdopt, c.ID, op.ExternalID); err != nil {
+		WHERE id = @id`,
+		momo.Named("id", op.UserID), momo.Named("username", op.Username), momo.Named("email", op.Email), momo.Named("display_name", op.Display),
+		momo.Named("role", op.Role), momo.Named("set_managed", op.SetManaged), momo.Named("managed", jsonOf(nonNilStrings(op.Managed))),
+		momo.Named("adopt", op.Kind == ActionAdopt), momo.Named("connector_id", c.ID), momo.Named("external_id", op.ExternalID)); err != nil {
 		return false, err
 	}
 	if err := audit(ctx, tx, actor, op.Kind, "user", itoa64(op.UserID)); err != nil {
@@ -928,39 +1010,40 @@ func (p *PG) update(ctx context.Context, tx *sql.Tx, actor string, c Connector, 
 // extAndRings links the user's synced extension and brings its synced
 // ring-group rows to the plan. Rows the connector does not own are never
 // touched (I-4, I-10).
-func (p *PG) extAndRings(ctx context.Context, tx *sql.Tx, c Connector, userID int64, op Op) (bool, error) {
+func (p *PG) extAndRings(ctx context.Context, tx *momo.Tx, c Connector, userID int64, op Op) (bool, error) {
+	user, conn, ext := momo.Named("user_id", userID), momo.Named("connector_id", c.ID), momo.Named("extension_id", op.Extension)
 	bump := false
 	if op.SetExtension && op.Extension != 0 {
 		if op.Override {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM user_extensions WHERE extension_id = $1 AND user_id <> $2`, op.Extension, userID); err != nil {
+			if _, err := momo.Exec(ctx, tx, `DELETE FROM user_extensions WHERE extension_id = @extension_id AND user_id <> @user_id`, ext, user); err != nil {
 				return false, err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE users SET extension_id = NULL WHERE extension_id = $1 AND id <> $2`, op.Extension, userID); err != nil {
+			if _, err := momo.Exec(ctx, tx, `UPDATE users SET extension_id = NULL WHERE extension_id = @extension_id AND id <> @user_id`, ext, user); err != nil {
 				return false, err
 			}
 		}
 		// The rows the old synced link put in ring groups go with it.
-		if _, err := tx.ExecContext(ctx, `
-			DELETE FROM ring_group_members WHERE source_connector_id = $1 AND extension_id IN
-				(SELECT extension_id FROM user_extensions WHERE user_id = $2 AND source_connector_id = $1 AND extension_id <> $3)`,
-			c.ID, userID, op.Extension); err != nil {
+		if _, err := momo.Exec(ctx, tx, `
+			DELETE FROM ring_group_members WHERE source_connector_id = @connector_id AND extension_id IN
+				(SELECT extension_id FROM user_extensions WHERE user_id = @user_id AND source_connector_id = @connector_id AND extension_id <> @extension_id)`,
+			conn, user, ext); err != nil {
 			return false, err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM user_extensions WHERE user_id = $1 AND source_connector_id = $2 AND extension_id <> $3`,
-			userID, c.ID, op.Extension); err != nil {
+		if _, err := momo.Exec(ctx, tx, `DELETE FROM user_extensions WHERE user_id = @user_id AND source_connector_id = @connector_id AND extension_id <> @extension_id`,
+			user, conn, ext); err != nil {
 			return false, err
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := momo.Exec(ctx, tx, `
 			INSERT INTO user_extensions (user_id, extension_id, position, source_connector_id)
-			VALUES ($1, $2, (SELECT coalesce(max(position) + 1, 0) FROM user_extensions WHERE user_id = $1), $3)
+			VALUES (@user_id, @extension_id, (SELECT coalesce(max(position) + 1, 0) FROM user_extensions WHERE user_id = @user_id), @connector_id)
 			ON CONFLICT (user_id, extension_id) DO UPDATE SET source_connector_id = EXCLUDED.source_connector_id`,
-			userID, op.Extension, c.ID); err != nil {
+			user, ext, conn); err != nil {
 			return false, err
 		}
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE users SET extension_id = $2 WHERE id = $1
-				AND (extension_id IS NULL OR extension_id NOT IN (SELECT extension_id FROM user_extensions WHERE user_id = $1))`,
-			userID, op.Extension); err != nil {
+		if _, err := momo.Exec(ctx, tx, `
+			UPDATE users SET extension_id = @extension_id WHERE id = @user_id
+				AND (extension_id IS NULL OR extension_id NOT IN (SELECT extension_id FROM user_extensions WHERE user_id = @user_id))`,
+			user, ext); err != nil {
 			return false, err
 		}
 		bump = true
@@ -968,32 +1051,32 @@ func (p *PG) extAndRings(ctx context.Context, tx *sql.Tx, c Connector, userID in
 	if len(op.RingAdd)+len(op.RingRemove) == 0 {
 		return bump, nil
 	}
-	var ext int64
-	switch err := tx.QueryRowContext(ctx, `SELECT extension_id FROM user_extensions WHERE user_id = $1 AND source_connector_id = $2 ORDER BY position LIMIT 1`,
-		userID, c.ID).Scan(&ext); {
+	var linked int64
+	switch err := queryRow(ctx, tx, `SELECT extension_id FROM user_extensions WHERE user_id = @user_id AND source_connector_id = @connector_id ORDER BY position LIMIT 1`,
+		user, conn).Scan(&linked); {
 	case errors.Is(err, sql.ErrNoRows):
 		return bump, nil
 	case err != nil:
 		return false, err
 	}
 	for _, g := range op.RingAdd {
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := momo.Exec(ctx, tx, `
 			INSERT INTO ring_group_members (group_id, extension_id, position, source_connector_id)
-			SELECT $1::bigint, $2::bigint, coalesce(max(position), 0) + 1, $3::bigint FROM ring_group_members WHERE group_id = $1::bigint
-			ON CONFLICT (group_id, extension_id) DO NOTHING`, g, ext, c.ID); err != nil {
+			SELECT @group_id::bigint, @extension_id::bigint, coalesce(max(position), 0) + 1, @connector_id::bigint FROM ring_group_members WHERE group_id = @group_id::bigint
+			ON CONFLICT (group_id, extension_id) DO NOTHING`, momo.Named("group_id", g), momo.Named("extension_id", linked), conn); err != nil {
 			return false, err
 		}
 	}
 	if len(op.RingRemove) > 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM ring_group_members WHERE group_id = ANY($1::bigint[]) AND extension_id = $2 AND source_connector_id = $3`,
-			op.RingRemove, ext, c.ID); err != nil {
+		if _, err := momo.Exec(ctx, tx, `DELETE FROM ring_group_members WHERE group_id = ANY(@groups::bigint[]) AND extension_id = @extension_id AND source_connector_id = @connector_id`,
+			momo.Named("groups", op.RingRemove), momo.Named("extension_id", linked), conn); err != nil {
 			return false, err
 		}
 	}
 	return true, nil
 }
 
-func (p *PG) disable(ctx context.Context, tx *sql.Tx, actor string, op Op) (bool, error) {
+func (p *PG) disable(ctx context.Context, tx *momo.Tx, actor string, op Op) (bool, error) {
 	admins, err := lockAdmins(ctx, tx)
 	if err != nil {
 		return false, err
@@ -1003,7 +1086,8 @@ func (p *PG) disable(ctx context.Context, tx *sql.Tx, actor string, op Op) (bool
 		enabled    bool
 		breakGlass bool
 	)
-	if err := tx.QueryRowContext(ctx, `SELECT role, enabled, break_glass FROM users WHERE id = $1 FOR UPDATE`, op.UserID).Scan(&role, &enabled, &breakGlass); err != nil {
+	user := momo.Named("user_id", op.UserID)
+	if err := queryRow(ctx, tx, `SELECT role, enabled, break_glass FROM users WHERE id = @user_id FOR UPDATE`, user).Scan(&role, &enabled, &breakGlass); err != nil {
 		return false, mapErr(err)
 	}
 	if breakGlass {
@@ -1015,47 +1099,47 @@ func (p *PG) disable(ctx context.Context, tx *sql.Tx, actor string, op Op) (bool
 	if role == "admin" && admins <= 1 {
 		return false, ErrLastAdmin
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET enabled = FALSE, disabled_at = now(), absent_runs = $2 WHERE id = $1`, op.UserID, op.AbsentRuns); err != nil {
+	if _, err := momo.Exec(ctx, tx, `UPDATE users SET enabled = FALSE, disabled_at = now(), absent_runs = @absent_runs WHERE id = @user_id`,
+		user, momo.Named("absent_runs", op.AbsentRuns)); err != nil {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = $1`, op.UserID); err != nil {
+	if _, err := momo.Exec(ctx, tx, `DELETE FROM sessions WHERE user_id = @user_id`, user); err != nil {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, op.UserID); err != nil {
+	if _, err := momo.Exec(ctx, tx, `UPDATE api_tokens SET revoked_at = now() WHERE user_id = @user_id AND revoked_at IS NULL`, user); err != nil {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		WITH g AS (UPDATE oauth_grants SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL RETURNING id)
-		UPDATE oauth_tokens SET revoked_at = now() WHERE revoked_at IS NULL AND (user_id = $1 OR grant_id IN (SELECT id FROM g))`, op.UserID); err != nil {
+	if _, err := momo.Exec(ctx, tx, `
+		WITH g AS (UPDATE oauth_grants SET revoked_at = now() WHERE user_id = @user_id AND revoked_at IS NULL RETURNING id)
+		UPDATE oauth_tokens SET revoked_at = now() WHERE revoked_at IS NULL AND (user_id = @user_id OR grant_id IN (SELECT id FROM g))`, user); err != nil {
 		return false, err
 	}
 	bump := false
 	if op.Devices {
-		res, err := tx.ExecContext(ctx, `
+		n, err := momo.Exec(ctx, tx, `
 			UPDATE devices SET enabled = FALSE, disabled_by_directory = TRUE, updated_at = now()
-			WHERE enabled AND extension_id IN (SELECT extension_id FROM user_extensions WHERE user_id = $1)`, op.UserID)
+			WHERE enabled AND extension_id IN (SELECT extension_id FROM user_extensions WHERE user_id = @user_id)`, user)
 		if err != nil {
 			return false, err
 		}
-		n, _ := res.RowsAffected()
 		bump = n > 0
 	}
 	return bump, audit(ctx, tx, actor, "disable", "user", itoa64(op.UserID))
 }
 
-func (p *PG) enable(ctx context.Context, tx *sql.Tx, actor string, op Op) (bool, error) {
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET enabled = TRUE, disabled_at = NULL, absent_runs = 0 WHERE id = $1`, op.UserID); err != nil {
+func (p *PG) enable(ctx context.Context, tx *momo.Tx, actor string, op Op) (bool, error) {
+	user := momo.Named("user_id", op.UserID)
+	if _, err := momo.Exec(ctx, tx, `UPDATE users SET enabled = TRUE, disabled_at = NULL, absent_runs = 0 WHERE id = @user_id`, user); err != nil {
 		return false, err
 	}
 	bump := false
 	if op.Devices {
-		res, err := tx.ExecContext(ctx, `
+		n, err := momo.Exec(ctx, tx, `
 			UPDATE devices SET enabled = TRUE, disabled_by_directory = FALSE, updated_at = now()
-			WHERE disabled_by_directory AND extension_id IN (SELECT extension_id FROM user_extensions WHERE user_id = $1)`, op.UserID)
+			WHERE disabled_by_directory AND extension_id IN (SELECT extension_id FROM user_extensions WHERE user_id = @user_id)`, user)
 		if err != nil {
 			return false, err
 		}
-		n, _ := res.RowsAffected()
 		bump = n > 0
 	}
 	return bump, audit(ctx, tx, actor, "enable", "user", itoa64(op.UserID))
@@ -1067,21 +1151,22 @@ func (p *PG) RecordPush(ctx context.Context, connectorID int64, cs []Change, at 
 	if len(cs) == 0 {
 		return nil
 	}
-	return p.tx(ctx, func(tx *sql.Tx) error {
+	return p.tx(ctx, func(tx *momo.Tx) error {
 		var (
 			runID  int64
 			counts string
 		)
-		err := tx.QueryRowContext(ctx, `
+		conn, when := momo.Named("connector_id", connectorID), momo.Named("at", at)
+		err := queryRow(ctx, tx, `
 			SELECT id, counts::text FROM directory_sync_runs
-			WHERE connector_id = $1 AND kind = 'scim' AND status = 'succeeded' AND created_at >= date_trunc('hour', $2::timestamptz)
-			ORDER BY id DESC LIMIT 1 FOR UPDATE`, connectorID, at).Scan(&runID, &counts)
+			WHERE connector_id = @connector_id AND kind = 'scim' AND status = 'succeeded' AND created_at >= date_trunc('hour', @at::timestamptz)
+			ORDER BY id DESC LIMIT 1 FOR UPDATE`, conn, when).Scan(&runID, &counts)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			counts = "{}"
-			if err := tx.QueryRowContext(ctx, `
+			if err := queryRow(ctx, tx, `
 				INSERT INTO directory_sync_runs (connector_id, kind, status, requested_by, created_at, started_at, finished_at, counts)
-				VALUES ($1, 'scim', 'succeeded', 'scim', $2, $2, $2, '{}') RETURNING id`, connectorID, at).Scan(&runID); err != nil {
+				VALUES (@connector_id, 'scim', 'succeeded', 'scim', @at, @at, @at, '{}') RETURNING id`, conn, when).Scan(&runID); err != nil {
 				return err
 			}
 		case err != nil:
@@ -1089,19 +1174,14 @@ func (p *PG) RecordPush(ctx context.Context, connectorID int64, cs []Change, at 
 		}
 		n := map[string]int{}
 		_ = json.Unmarshal([]byte(counts), &n)
-		st, err := tx.PrepareContext(ctx, `INSERT INTO directory_sync_changes (run_id, action, user_id, external_id, username, field_diffs, reason)
-			VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = st.Close() }()
 		for _, c := range cs {
-			if _, err := st.ExecContext(ctx, runID, c.Action, c.UserID, c.ExternalID, c.Username, jsonOf(nonNilDiffs(c.FieldDiffs)), c.Reason); err != nil {
+			if err := addChange(ctx, tx, runID, c); err != nil {
 				return err
 			}
 			n[c.Action]++
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE directory_sync_runs SET counts = $2::jsonb, finished_at = $3 WHERE id = $1`, runID, jsonOf(n), at)
+		_, err = momo.Exec(ctx, tx, `UPDATE directory_sync_runs SET counts = @counts::jsonb, finished_at = @at WHERE id = @id`,
+			momo.Named("id", runID), momo.Named("counts", jsonOf(n)), when)
 		return err
 	})
 }
@@ -1109,24 +1189,24 @@ func (p *PG) RecordPush(ctx context.Context, connectorID int64, cs []Change, at 
 // PushDisables implements Store.
 func (p *PG) PushDisables(ctx context.Context, connectorID int64, since time.Time) (int, error) {
 	var n int
-	err := p.DB.QueryRowContext(ctx, `
+	err := queryRow(ctx, p.DB, `
 		SELECT count(*) FROM directory_sync_changes ch JOIN directory_sync_runs r ON r.id = ch.run_id
-		WHERE r.connector_id = $1 AND r.kind = 'scim' AND r.status = 'succeeded' AND ch.action = 'disable' AND ch.created_at >= $2`,
-		connectorID, since).Scan(&n)
+		WHERE r.connector_id = @connector_id AND r.kind = 'scim' AND r.status = 'succeeded' AND ch.action = 'disable' AND ch.created_at >= @since`,
+		momo.Named("connector_id", connectorID), momo.Named("since", since)).Scan(&n)
 	return n, err
 }
 
 // SetPaused implements Store.
 func (p *PG) SetPaused(ctx context.Context, connectorID int64, paused bool, at time.Time) error {
-	q := `UPDATE directory_connectors SET paused_at = NULL, guard_since = $2, updated_at = now() WHERE id = $1`
+	q := `UPDATE directory_connectors SET paused_at = NULL, guard_since = @at, updated_at = now() WHERE id = @id`
 	if paused {
-		q = `UPDATE directory_connectors SET paused_at = $2, updated_at = now() WHERE id = $1`
+		q = `UPDATE directory_connectors SET paused_at = @at, updated_at = now() WHERE id = @id`
 	}
-	res, err := p.DB.ExecContext(ctx, q, connectorID, at)
+	n, err := momo.Exec(ctx, p.DB, q, momo.Named("id", connectorID), momo.Named("at", at))
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if n == 0 {
 		return ErrNotFound
 	}
 	return nil

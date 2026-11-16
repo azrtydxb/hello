@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // trunk_capacity (spec S-19): a trunk with max_calls > 0 whose active calls
@@ -24,36 +26,21 @@ type trunkLoad struct {
 }
 
 func trunkCapacity(ctx context.Context, r *Run) ([]Candidate, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT id, name, max_calls FROM trunks WHERE enabled AND max_calls > 0 ORDER BY id`)
+	type tr struct {
+		ID       int64 `momo:"column:id"`
+		Name     string
+		MaxCalls int `momo:"column:max_calls"`
+	}
+	trunks, err := momo.Query[tr](ctx, r.DB, `SELECT id, name, max_calls FROM trunks WHERE enabled AND max_calls > 0 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
-	type tr struct {
-		id       int64
-		name     string
-		maxCalls int
-	}
-	var trunks []tr
-	for rows.Next() {
-		var t tr
-		if err := rows.Scan(&t.id, &t.name, &t.maxCalls); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		trunks = append(trunks, t)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
 	for _, t := range trunks {
-		st, err := r.Live.TrunkStatus(ctx, t.id)
+		st, err := r.Live.TrunkStatus(ctx, t.ID)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrValkeyUnavailable, err)
 		}
-		if err := r.putSample(ctx, kindTrunkActive, t.name, trunkLoad{Active: st.ActiveCalls, Max: t.maxCalls}); err != nil {
+		if err := r.putSample(ctx, kindTrunkActive, t.Name, trunkLoad{Active: st.ActiveCalls, Max: t.MaxCalls}); err != nil {
 			return nil, err
 		}
 	}
@@ -63,7 +50,7 @@ func trunkCapacity(ctx context.Context, r *Run) ([]Candidate, error) {
 	}
 	var out []Candidate
 	for _, t := range trunks {
-		if c, ok := evalCapacity(t.name, hist[t.name]); ok {
+		if c, ok := evalCapacity(t.Name, hist[t.Name]); ok {
 			out = append(out, c)
 		}
 	}

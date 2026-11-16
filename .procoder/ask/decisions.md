@@ -5839,6 +5839,278 @@ answered, whatever the order.
   old code: "487 before 200" failed 50/50 with the CI message ("timed out waiting for ACK to the callee's crossing 200"); "200 before 487" failed 0/50. New test with the fix: 0/50 for
   each order.
 
+## momo Phase 2: internal/slack on momo (2026-11-16, momo/slack)
+
+- **Scope of this group.** Of the packages assigned (slack, chat,
+  livestate, cluster, telemetry, oauth), only `internal/slack` uses
+  database/sql. The grep matches in chat, livestate, cluster and oauth are
+  Valkey `Script.Exec` calls and `url.Query()`; telemetry's is
+  `url.Query()`. The SQL behind `oauth.Store` and chat's webchat store is in
+  `internal/store` (Phase 3). So this group is one PR, and the lease,
+  heartbeat and lock timing of livestate and cluster is untouched.
+- **Hand-written SQL with @name binds.** `slack.PG` holds a `*momo.DB`,
+  built inline in hello-control with `hellodb.New(db, log)`. Every
+  statement keeps its SQL; `$n` became `@name`. Rows are read with
+  `momo.RawRows` into the same Scan destinations as before (`scanDest`,
+  `scanPost` unchanged), and single-row reads go through a local
+  `queryRow`, which reports `sql.ErrNoRows` on an empty result as
+  `QueryRow` did (G7), so `mapErr` and Retry's not-found/conflict split are
+  unchanged. `FOR UPDATE OF sp SKIP LOCKED` in Claim is as it was.
+- **Casts for reused binds.** A reused `@name` is one bind per use, so
+  every use carries a cast where PostgreSQL must give the uses one type:
+  Update's `@reset::boolean` (twice) and `@secret_enc::bytea`, Finish's
+  `@now::timestamptz` (the `updated_at` use gained the cast the
+  `delivered_at` use had), and ListPosts' `@dest::bigint`, `@status::text`,
+  `@before::bigint`. Before, ListPosts' `$1 = 0` made the destination and
+  cursor parameters int4; they are int8 now, which matches the bigint
+  columns and changes no result for any id that fitted.
+- **Transactions.** `PG.tx` keeps its shape on `momo.DB.Begin`: commit on
+  nil, else roll back (error ignored, as before) and return fn's error
+  through `mapErr`. The rollback runs on `context.WithoutCancel(ctx)` so it
+  still reaches the database when ctx ended the work; with `FromSQLDB` a
+  transaction is not rolled back by its Begin context ending (noted in
+  Phase 1). Enqueue joins the event ingest `*sql.Tx` through
+  `db.AdoptTx`, which never commits it; the `Store` interface still takes
+  `*sql.Tx`. A nil tx now runs on the pool where it panicked before; no
+  caller passes nil.
+- **Errors.** `isUnique` accepts `momo.ErrUniqueViolation` or the 23505
+  `*pgconn.PgError` check it always made. Other errors now read
+  `momo: <kind> (op=...): <driver error>`.
+- **Hot path.** None. The slack store runs in hello-control (admin API,
+  event ingest hook, the post worker); hello-sip does not build it. momo's
+  hook adds one debug log call per statement.
+- **Tests.** `TestPGStatementsBuild` runs every method on momo's offline
+  handle. `TestPGStatementsBuildInTx` runs every method on a stub
+  `momo.Driver` that answers queries with zero or one row, so the
+  statements inside transactions build too: all 19 distinct statements
+  must reach the driver with no unrendered `@` and `$1` present. Both run
+  on the pull request tier. `TestStoreContractMem` and
+  `TestStoreContractPG` run the same assertions on Mem and PG (error
+  kinds, the nil-secret update, queue filters and de-duplication, the
+  claim lease, health counters, both disable rules, manual retry, paging,
+  purge, cascade on delete); the file header lists the differences left
+  out on purpose. `TestPGQueue` is unchanged apart from building the store
+  with `hellodb.New`.
+
+## momo Phase 2: internal/ai/proposal and internal/ai/detect (2026-11-16, feat/momo-p2-ai)
+
+- **Handle.** `proposal.NewStore` and `detect.Env.DB` take the `*momo.DB`
+  that hello-control builds inline with `hellodb.New(db, log)` at each
+  construction site. Every statement keeps its SQL text with `@name` binds.
+  AI calls are untouched (still go-ai-sdk through `internal/ai`).
+- **Advisory lock.** Upsert's `pg_advisory_xact_lock(hashtext('hello:ai:proposals'))`
+  is now `advisory.XactLockString(ctx, tx, "hello:ai:proposals")`: the same
+  function, the same server-side `hashtext` of the same text (bound as a
+  parameter instead of a literal), so old and new pods contend on one key.
+- **Transactions.** Upsert, Dismiss and Apply use `momo.DB.Begin` with a
+  deferred Rollback rather than `DB.Tx`, so the early `return id,
+tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
+  ErrNotFound, ErrNotBatch) are exactly as before. Apply still begins on
+  `context.WithoutCancel(ctx)` and writes its outcome and commits on it.
+  Difference (as in Phase 1, accepted): with `FromSQLDB` a transaction
+  outlives the context given to Begin, so a cancelled request no longer
+  rolls the transaction back by itself; the next statement fails on the
+  cancelled context and the deferred Rollback ends it.
+- **Same results for callers.** Single-row reads go through a local `one()`
+  that returns `sql.ErrNoRows`, so ErrNotFound, ErrNotOpen and the
+  suppression check map as before; `List` still returns an empty, non-nil
+  slice. `FOR UPDATE SKIP LOCKED` in `lock` is unchanged. The detectors'
+  `QueryRow` on the last explanation sample became a read of at most one
+  row (no row is the zero state, as `isNoRows` gave). `history` now wraps a
+  row scan error in "read <kind> samples" too (it wrapped only the query).
+- **Reused binds.** momo renders one bind per use of an `@name`, so a use
+  that PostgreSQL must type on its own carries a cast: `@status::text` and
+  `@source::text` in List, `@status::text` in Apply's outcome update. The
+  supersede query's `@session::uuid IS NOT NULL AND session_id = @session`
+  is typed by the cast and the column.
+- **Statements pulled into helpers for the build test.** Upsert's three
+  statements (`suppressed`, `refresh`, `insert`), Dismiss's update
+  (`markDismissed`) and Apply's outcome update (`recordOutcome`) are small
+  functions on `momo.Querier`, as are `lock`, `audit` and `supersede`;
+  detect's last-explanation read (`lastExplained`) and the
+  never-registered read (`neverRegistered`) likewise. The offline tests
+  (`TestStatementsBuild` in both packages) call each on
+  `momo.NewOffline(dialect.Postgres)`, so a misspelled `@name` fails the
+  pull request tier. Neither package has an in-memory fake of its own, so
+  there is no mem/pg contract test; the DB-backed tests (env_test,
+  batch_db_test, the detector tests) cover behaviour in the integration job.
+- **Detector test fixtures** run on the same momo handle (`momo.Exec`,
+  `momo.Scalars`) with their native `$n` placeholders, which momo accepts
+  on PostgreSQL.
+
+## momo Phase 2: internal/webhook (2026-11-16, momo/webhook)
+
+- **Same SQL, named binds.** Every `webhook.PG` statement keeps its text;
+  `$n` became `@name` and `momo.Named`. Computed columns got aliases
+  (`events_json`, `extensions_json`, `pending`, `dead`, `payload`) so the
+  per-query scan structs match by name; aliases do not change what a
+  statement reads. The `text[]`/`bigint[]` literals (`pgArray`, `idArray`)
+  and their casts stay. `ListDeliveries` still builds its WHERE from fixed
+  fragments, now with `@endpoint_id`, `@status`, `@before` and `@limit`.
+  The handle is built inline in hello-control (`hellodb.New(db, log)`).
+- **Locks on momo's advisory package, keys unchanged.** The claim lock is
+  `advisory.XactLock(tx, 0x68656c6c6f776864)` and the create lock
+  `advisory.XactLockString(tx, "hello:webhooks:create")`, which send
+  `SELECT pg_advisory_xact_lock($1)` and
+  `SELECT pg_advisory_xact_lock(hashtext($1))`: the same function, key and
+  transaction scope as the raw statements, so old and new replicas exclude
+  each other during a rolling update. `TestPGLockKeys` pins both statements
+  and keys. `FOR UPDATE SKIP LOCKED` in the lease and `FOR UPDATE` in
+  UpdateEndpoint are unchanged.
+- **Transactions.** `PG.tx` is `momo.DB.Tx` (commit on nil, rollback on
+  error) with the old `sql.ErrNoRows` to `ErrNotFound` mapping. `Enqueue`
+  runs in the event ingest `*sql.Tx` through `db.AdoptTx`, which never
+  commits it; the TxHook contract is unchanged.
+- **Errors unchanged for callers.** A generic `one()` returns
+  `sql.ErrNoRows` for zero rows (G7), so ErrNotFound and Redeliver's
+  ErrInFlight check behave as before; other errors carry momo's prefix with
+  the driver error and `context.Canceled` still reachable.
+- **Hermetic test on a stub driver, not the offline handle.** Almost every
+  method opens a transaction, which `momo.NewOffline` refuses at BEGIN, so
+  `TestPGStatementsBuild` runs each method on a small recording momo driver
+  that answers one row (booleans true, integers 1), driving Claim through
+  its lease and Finish through disabling the endpoint, and zero rows for
+  the not-found paths. A misspelled `@name` fails as `ErrValidation` on the
+  pull request tier. Column names are not checked there (the stub names no
+  columns); the existing mem/pg rig (`forEachStore`), which runs the same
+  service and dispatcher assertions on Mem and on PostgreSQL, is the
+  contract test and proves them in the integration tier.
+
+## momo Phase 2: internal/events, and internal/queue has no SQL (2026-11-16, momo/events-queue)
+
+- **internal/queue is not converted: it has no SQL.** The six call sites
+  the inventory counted there are Valkey Lua scripts (`joinScript.Exec`
+  and the like in `valkey.go`). The PostgreSQL `queue.CallbackStore` lives
+  in `internal/store/queue_callbacks.go` and moves with `internal/store`
+  (Phase 3).
+- **The ingest transaction is momo's, the hooks still get a `*sql.Tx`.**
+  `events.Service.DB` is now a `*momo.DB` (built inline in hello-control
+  with `hellodb.New(db, log)`). `store` runs the batch in `DB.Tx` and hands
+  every hook the `*sql.Tx` behind it (`pgxdriver.UnwrapSQLTx`), so
+  `TxHook` keeps its signature and the crm, webhook and slack hooks write
+  in the same transaction as before, raw or through `db.AdoptTx`; none of
+  them commits it. A failing hook still rolls the whole batch back. A DB
+  that is not over database/sql (no `*sql.Tx` to hand out) refuses a batch
+  with hooks (`errNotSQLTx`) instead of running them outside the
+  transaction. As in crm, a momo transaction over `FromSQLDB` outlives the
+  context passed to Begin; every statement still gets the ingest context,
+  and a batch whose acknowledgement fails after the commit is read again
+  and found stored, as before.
+- **Same SQL, named binds.** The insert, the user lookup, the retention
+  purge and `History` keep their text with `@name` binds; History's WHERE
+  is still built from fixed fragments, now with named binds (`@after_ms`,
+  `@types`, `@limit`, ...). Rows are read with `momo.Query` into tuple
+  rows. History now buffers its page (at most `MaxLimit`, 1000 rows)
+  instead of streaming it; a row whose payload this version cannot decode
+  is still skipped.
+- **Tests.** `TestStatementsBuild` runs the insert, the user lookup, every
+  History filter and the purge on momo's offline handle (pull request
+  tier). `TestIngestHooksShareTheTransaction` (DB tier) proves that a hook
+  sees its event row, that a raw hook write and an `AdoptTx` momo write
+  commit with the event, and that a failing hook rolls back what earlier
+  hooks wrote. events has no in-memory store fake, so there is no mem/pg
+  contract test.
+
+## momo Phase 2: the directory sync store (2026-11-16, momo/directory)
+
+- **Scope.** `internal/directory/pg.go`, all 77 raw call sites (the
+  QueryContext/QueryRowContext/ExecContext/BeginTx/PrepareContext/Conn
+  calls), moves to momo v0.14.0. `directory.PG.DB` is now a `*momo.DB`,
+  built inline at hello-control's construction site with
+  `hellodb.New(db, log)`. `dirstore` has no SQL of its own: it passes the
+  directory transaction to the configuration store (`internal/store`, Phase
+  3), so the `Provisioner` interface keeps its `*sql.Tx`. No schema change.
+- **Same SQL, named binds, positional scans.** Every statement keeps its
+  text with `@name` binds. The rows are still scanned positionally by the
+  existing code (`scanConnector`, `scanRun`, LoadState's loops) through
+  `momo.RawRows`, whose Scan is `database/sql`'s, so NULL handling and
+  conversions are unchanged; `queryRow` returns `sql.ErrNoRows` on no row,
+  so `mapErr`, ClaimQueued's "nothing queued" and extAndRings' "no linked
+  extension" behave as before (G7). A reused bind renders one bind per use,
+  so RecordOutcome casts `@ok::boolean` and `@at::timestamptz`, update
+  casts `@set_managed`/`@adopt` to boolean and ListChanges casts
+  `@action::text`, the types PostgreSQL inferred for the single `$n`.
+- **Transactions unchanged.** SaveConnector, DeleteConnector,
+  ReplaceChanges, Apply and RecordPush run in `momo.DB.Tx` (commit on nil,
+  rollback on error, the fn's error returned as is), so every audit row,
+  the last-admin and break-glass refusals, the adopt rules and the revision
+  bump commit or roll back together exactly as before. The configuration
+  lock is `advisory.XactLock(tx, 0x68656c6c6f636667)`, which sends the same
+  `SELECT pg_advisory_xact_lock($1)` with the same key; the revision
+  NOTIFY is `pgxdriver.Notify`, the same `SELECT pg_notify($1, $2)` on the
+  same channel inside the transaction. Auto-provisioning hands the
+  transaction to the provisioner as its `*sql.Tx`
+  (`pgxdriver.UnwrapSQLTx`), so the store's numbering and routing check
+  run in it, under the lock, as before. loadTaken's read-only transaction
+  is a momo `Begin(ReadOnly)` that is always rolled back, as before.
+- **Prepared inserts.** ReplaceChanges and RecordPush prepared the change
+  insert once per transaction; they now run the same statement per change
+  in the same transaction (momo has no Prepare on raw SQL). Same rows, same
+  order; pgx's statement cache still prepares it once per connection.
+- **Per-connector lock (I-13).** TryLock pins one connection
+  (`momo.Pinner`), takes `advisory.TryLockString`, the same
+  `pg_try_advisory_lock(hashtext(key))`, and keeps the connection until the
+  unlock. An unlock that fails discards the connection (`momo.Discarder`,
+  which closes it so the pool drops it), as the `driver.ErrBadConn` trick
+  did.
+- **Errors.** A taken connector name is still the field error on `name`
+  (`momo.ErrUniqueViolation` or the 23505 `*pgconn.PgError`, which still
+  holds through momo's error). Other errors now read
+  `momo: <kind> (op=...): <driver error>`; `errors.Is`/`errors.As` reach the
+  driver error.
+- **Tests.** `TestPGStatementsBuild` runs every PG method and every Apply
+  operation on a scripted momo driver (no database, PR tier): momo builds
+  each statement before the driver sees it, so a misspelled `@name` fails;
+  the scripted driver answers the statements that built so each method runs
+  past its first one, including those inside transactions (the offline
+  handle stops at BEGIN). `TestStoreContractMem`/`PG` run the same
+  assertions on Mem and PG (error kinds, the credential, the run queue,
+  changes, the SCIM run of the hour, link and release, the lock); the
+  known differences are listed in the test's comment. The SCIM PG test
+  builds `directory.PG` on the momo handle too.
+
+## momo Phase 2: the SCIM store (2026-11-16, momo/scim)
+
+- **Scope.** `internal/scim/pg.go`, all 24 raw call sites plus the
+  dedicated connection of Lock, moves to momo v0.14.0; `scim.PG.DB` is a
+  `*momo.DB`, built inline in hello-control. The other "call sites" a grep
+  finds in the package (`URL.Query()` in handler.go) are not SQL. Stacked on
+  the directory PR (momo/directory): the SCIM PG test builds `directory.PG`
+  on the momo handle, which that PR introduces.
+- **Same SQL, named binds, positional scans.** As in the directory store:
+  every statement keeps its text with `@name` binds, rows are scanned by
+  the existing `scanToken`/`scanResource` through `momo.RawRows`, and
+  `queryRow` returns `sql.ErrNoRows` so the mapping to ErrNotFound (a
+  missing token, a moved resource version) is unchanged. FindDeleted's
+  reused externalId bind is cast `@external_id::text` at each use, the type
+  PostgreSQL inferred for the single `$4`. FindResources binds the hint as
+  `@value`.
+- **The mass-deprovision guard (I-25) and adoptExisting are unchanged.**
+  Neither lives in this store: the guard counts the SCIM runs' disables
+  through `directory.Store.PushDisables`/`RecordPush`/`SetPaused` (moved,
+  same statements, in the directory PR) and decides in the directory
+  engine (`push.go`); adoption is the service's `AdoptExisting` switch, the
+  engine's plan and `directory.PG.Apply`. This store's part
+  is the per-connector lock that serialises a push with a directory run,
+  which keeps its key and semantics (below).
+- **Lock.** Lock pins one connection (`momo.Pinner`) and takes
+  `advisory.LockString` with a deadline of lockWait: the same
+  `pg_advisory_lock(hashtext('hello:dirsync:<id>'))` the directory engine's
+  TryLock takes, so a push and a run still exclude each other across
+  replicas. A wait that fails is still ErrBusy when only the lock wait ran
+  out, and the connection is discarded (`momo.Discarder`) as the
+  `driver.ErrBadConn` path did; so is one whose unlock fails.
+- **Transactions and errors unchanged.** CreateToken, RevokeToken and
+  SaveResource run in `momo.DB.Tx` with their audit rows. SaveResource maps
+  a unique violation to ErrConflict and a foreign key violation (an unknown
+  member) to ErrNotFound, by momo's kinds or the 23505/23503
+  `*pgconn.PgError` check it always made.
+- **Tests.** `TestPGStatementsBuild` runs every method on a scripted momo
+  driver (a copy of the directory package's) on the PR tier.
+  `TestStoreContractMem`/`PG` run the same token, resource, membership,
+  count and lock assertions on Mem and PG; the known differences are in the
+  test's comment.
+
 ## momo Phase 2: the SSO store (2026-11-16, momo/sso)
 
 - **Scope.** `internal/sso/pg.go`, all 21 raw call sites, moves to momo

@@ -11,9 +11,10 @@ is no second connection pool. Statements are logged at debug level with the
 component `db`, and at warn when slower than `db.SlowQuery`; argument values
 are never logged.
 
-Moved so far: `internal/crm` (`crm.PG`), the CDR writer (`internal/cdr`),
+Moved so far: `internal/crm` (`crm.PG`) and the CDR writer (`internal/cdr`),
 which runs on hello-sip's pgx pool through `db.NewPool`, in the pool's own
-query execution mode, and the SSO store (`sso.PG`).
+query execution mode. `internal/webhook` (`webhook.PG`) takes its advisory
+locks through momo's `advisory` package with the same keys as before.
 
 ## Writing a statement
 
@@ -37,7 +38,11 @@ query execution mode, and the SSO store (`sso.PG`).
 - A test that runs every method on `momo.NewOffline(dialect.Postgres)` proves
   that each statement builds without a database (see
   `internal/crm/pg_offline_test.go`), so the pull request tier catches a
-  misspelled `@name`.
+  misspelled `@name`. A package whose statements mostly run inside
+  transactions, which the offline handle stops at BEGIN, uses a recording
+  stub driver instead (`internal/webhook/pg_offline_test.go`): it answers
+  every statement with one row so each method runs down its longest path,
+  and it pins the advisory lock statements and keys.
 
 ## Models
 
