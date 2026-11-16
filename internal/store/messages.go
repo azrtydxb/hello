@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/azrtydxb/momo"
 )
 
 // MessageChannel is the PostgreSQL channel a queued message notifies; SIP
@@ -256,9 +258,10 @@ func getMessageSettings(ctx context.Context, q rowQuerier) (MessageSettings, err
 // PutMessageSettings replaces the settings and audits it.
 func (s *Store) PutMessageSettings(ctx context.Context, actor string, m MessageSettings) (MessageSettings, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE message_settings SET enabled = $1, ttl_hours = $2, retention_days = $3,
-			rate_per_minute = $4, max_queued_per_extension = $5`,
-			m.Enabled, m.TTLHours, m.RetentionDays, m.RatePerMinute, m.MaxQueuedPerExtension); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE message_settings SET enabled = @enabled, ttl_hours = @ttl_hours, retention_days = @retention_days,
+			rate_per_minute = @rate_per_minute, max_queued_per_extension = @max_queued_per_extension`,
+			momo.Named("enabled", m.Enabled), momo.Named("ttl_hours", m.TTLHours), momo.Named("retention_days", m.RetentionDays),
+			momo.Named("rate_per_minute", m.RatePerMinute), momo.Named("max_queued_per_extension", m.MaxQueuedPerExtension)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update", "message_settings", "messages")
@@ -275,7 +278,7 @@ func resolveMessageTargets(ctx context.Context, tx *dbTx, in MessageInput) (reci
 	switch in.TargetKind {
 	case MsgKindExtension:
 		var n, kind string
-		if err = tx.QueryRowContext(ctx, `SELECT number, kind FROM extensions WHERE number = $1`, in.Target).Scan(&n, &kind); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT number, kind FROM extensions WHERE number = @number`, momo.Named("number", in.Target)).Scan(&n, &kind); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, "", "", ErrMessageTarget
 			}
@@ -293,20 +296,19 @@ func resolveMessageTargets(ctx context.Context, tx *dbTx, in MessageInput) (reci
 	case MsgScopeRingGroup:
 		var id int64
 		var name string
-		if err = tx.QueryRowContext(ctx, `SELECT id, name FROM ring_groups WHERE name = $1`, in.Target).Scan(&id, &name); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT id, name FROM ring_groups WHERE name = @name`, momo.Named("name", in.Target)).Scan(&id, &name); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, "", "", ErrMessageTarget
 			}
 			return nil, "", "", err
 		}
-		recipients, err = queryStrings(ctx, tx, `SELECT e.number FROM ring_group_members m
-			JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = $1 ORDER BY m.position`, id)
+		recipients, err = queryStrings(ctx, tx, ringGroupRecipients, momo.Named("group_id", id))
 		return recipients, MsgScopeRingGroup, name, err
 	case MsgScopePagingGroup:
 		var id int64
 		var name string
-		if err = tx.QueryRowContext(ctx, `SELECT id, name FROM paging_groups WHERE enabled AND (code = $1 OR name = $1)
-			ORDER BY (code = $1) DESC LIMIT 1`, in.Target).Scan(&id, &name); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT id, name FROM paging_groups WHERE enabled AND (code = @target OR name = @target)
+			ORDER BY (code = @target) DESC LIMIT 1`, momo.Named("target", in.Target)).Scan(&id, &name); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, "", "", ErrMessageTarget
 			}
@@ -316,26 +318,40 @@ func resolveMessageTargets(ctx context.Context, tx *dbTx, in MessageInput) (reci
 			// The page's caller list applies: no list means any internal
 			// extension, a list means those extensions only.
 			var restricted, allowed bool
-			if err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM paging_group_callers WHERE group_id = $1),
+			if err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM paging_group_callers WHERE group_id = @group_id),
 				EXISTS (SELECT 1 FROM paging_group_callers c JOIN extensions e ON e.id = c.extension_id
-				        WHERE c.group_id = $1 AND e.number = $2)`, id, in.Sender).Scan(&restricted, &allowed); err != nil {
+				        WHERE c.group_id = @group_id AND e.number = @sender)`,
+				momo.Named("group_id", id), momo.Named("sender", in.Sender)).Scan(&restricted, &allowed); err != nil {
 				return nil, "", "", err
 			}
 			if restricted && !allowed {
 				return nil, "", "", ErrMessageForbidden
 			}
 		}
-		recipients, err = queryStrings(ctx, tx, `SELECT e.number FROM paging_group_members m
-			JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = $1 ORDER BY m.position, e.number`, id)
+		recipients, err = queryStrings(ctx, tx, pagingGroupRecipients, momo.Named("group_id", id))
 		return recipients, MsgScopePagingGroup, name, err
 	case MsgScopeBroadcast:
-		recipients, err = queryStrings(ctx, tx, `SELECT DISTINCT e.number FROM extensions e
-			JOIN devices d ON d.extension_id = e.id AND d.enabled WHERE e.kind = 'user' ORDER BY e.number`)
+		recipients, err = queryStrings(ctx, tx, broadcastRecipients)
 		return recipients, MsgScopeBroadcast, "", err
 	}
 	return nil, "", "", fmt.Errorf("store: unknown message target kind %q", in.TargetKind)
 }
 
+// The recipient reads of a group send, through queryStrings (which the
+// statement sweep does not see, so TestMessagingStatementsOffline builds
+// them). The group reads bind @group_id.
+const (
+	ringGroupRecipients = `SELECT e.number FROM ring_group_members m
+			JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = @group_id ORDER BY m.position`
+	pagingGroupRecipients = `SELECT e.number FROM paging_group_members m
+			JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = @group_id ORDER BY m.position, e.number`
+	broadcastRecipients = `SELECT DISTINCT e.number FROM extensions e
+			JOIN devices d ON d.extension_id = e.id AND d.enabled WHERE e.kind = 'user' ORDER BY e.number`
+)
+
+// queryStrings runs q in tx with args, as given, and returns its one text
+// column. It binds nothing of its own: q's @name binds are its callers'
+// momo.Named arguments.
 func queryStrings(ctx context.Context, tx *dbTx, q string, args ...any) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -394,8 +410,8 @@ func (s *Store) sendMessageTx(ctx context.Context, tx *dbTx, in MessageInput, te
 	if in.SenderKind != MsgSenderSystem {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(DISTINCT batch) FROM messages
-			WHERE sender = $1 AND sender_kind = $2 AND created_at > now() - interval '1 minute'`,
-			in.Sender, in.SenderKind).Scan(&n); err != nil {
+			WHERE sender = @sender AND sender_kind = @sender_kind AND created_at > now() - interval '1 minute'`,
+			momo.Named("sender", in.Sender), momo.Named("sender_kind", in.SenderKind)).Scan(&n); err != nil {
 			return err
 		}
 		if n >= set.RatePerMinute {
@@ -447,12 +463,18 @@ func (s *Store) sendMessageTx(ctx context.Context, tx *dbTx, in MessageInput, te
 	rows, err := tx.QueryContext(ctx, `
 		INSERT INTO messages (batch, sender, sender_kind, sender_name, actor, recipient, recipient_kind, scope, scope_ref,
 			trunk_id, content_type, body_text, body_raw, status, claimed_by, claimed_at, expires_at, conversation_message_id)
-		SELECT $1, $2, $3, $4, $5, r, $6, $7, $8, $9::bigint, $10, $11::text, $12::bytea, $13::text, $14,
-			CASE WHEN $13::text = 'sending' THEN now() END, now() + make_interval(hours => $15::int), NULLIF($17::bigint, 0)
-		FROM unnest($16::text[]) WITH ORDINALITY AS t(r, ord) ORDER BY ord
+		SELECT @batch, @sender, @sender_kind, @sender_name, @actor, r, @recipient_kind, @scope, @scope_ref, @trunk_id::bigint,
+			@content_type, @body_text::text, @body_raw::bytea, @status::text, @claimed_by,
+			CASE WHEN @status::text = 'sending' THEN now() END, now() + make_interval(hours => @ttl_hours::int),
+			NULLIF(@conversation_message_id::bigint, 0)
+		FROM unnest(@recipients::text[]) WITH ORDINALITY AS t(r, ord) ORDER BY ord
 		RETURNING id, recipient, created_at`,
-		batch, in.Sender, in.SenderKind, in.SenderName, in.Actor, recipientKind, scope, ref,
-		trunk, in.ContentType, text, raw, status, claimBy, set.TTLHours, recipients, in.ConversationMessageID)
+		momo.Named("batch", batch), momo.Named("sender", in.Sender), momo.Named("sender_kind", in.SenderKind),
+		momo.Named("sender_name", in.SenderName), momo.Named("actor", in.Actor), momo.Named("recipient_kind", recipientKind),
+		momo.Named("scope", scope), momo.Named("scope_ref", ref), momo.Named("trunk_id", trunk),
+		momo.Named("content_type", in.ContentType), momo.Named("body_text", text), momo.Named("body_raw", raw),
+		momo.Named("status", status), momo.Named("claimed_by", claimBy), momo.Named("ttl_hours", set.TTLHours),
+		momo.Named("recipients", recipients), momo.Named("conversation_message_id", in.ConversationMessageID))
 	if err != nil {
 		return err
 	}
@@ -476,13 +498,13 @@ func (s *Store) sendMessageTx(ctx context.Context, tx *dbTx, in MessageInput, te
 			UPDATE messages SET status = 'failed', detail = 'queue full: dropped'
 			WHERE id IN (SELECT id FROM (
 				SELECT id, row_number() OVER (PARTITION BY recipient ORDER BY id DESC) AS rn FROM messages
-				WHERE status = 'pending' AND recipient_kind = 'extension' AND recipient = ANY($1)) q
-				WHERE rn > $2)`, recipients, set.MaxQueuedPerExtension); err != nil {
+				WHERE status = 'pending' AND recipient_kind = 'extension' AND recipient = ANY(@recipients)) q
+				WHERE rn > @max_queued)`, momo.Named("recipients", recipients), momo.Named("max_queued", set.MaxQueuedPerExtension)); err != nil {
 			return err
 		}
 	}
 	if !claimed {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2)`, MessageChannel, batch); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_notify(@channel, @batch)`, momo.Named("channel", MessageChannel), momo.Named("batch", batch)); err != nil {
 			return err
 		}
 	}
@@ -514,7 +536,7 @@ func (s *Store) ExternalMessagingEnabled(ctx context.Context) (bool, error) {
 // the primary one first, or ErrNoExtensionLink.
 func (s *Store) UserExtensionNumbers(ctx context.Context, userID int64) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT e.number FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id
-		WHERE ue.user_id = $1 ORDER BY ue.position, e.number`, userID)
+		WHERE ue.user_id = @user_id ORDER BY ue.position, e.number`, momo.Named("user_id", userID))
 	if err != nil {
 		return nil, err
 	}
@@ -539,7 +561,7 @@ func (s *Store) UserExtensionNumbers(ctx context.Context, userID int64) ([]strin
 // MessageExtensionName returns an extension's display name ("" if unknown).
 func (s *Store) MessageExtensionName(ctx context.Context, number string) string {
 	var n string
-	_ = s.db.QueryRowContext(ctx, `SELECT name FROM extensions WHERE number = $1`, number).Scan(&n)
+	_ = s.db.QueryRowContext(ctx, `SELECT name FROM extensions WHERE number = @number`, momo.Named("number", number)).Scan(&n)
 	return n
 }
 
@@ -604,11 +626,12 @@ func (s *Store) ClaimMessages(ctx context.Context, node string, extensions []str
 		WITH pick AS (
 			SELECT id FROM messages
 			WHERE status = 'pending' AND next_attempt_at <= now() AND expires_at > now()
-			  AND ((recipient_kind = 'extension' AND recipient = ANY($2)) OR ($3 AND recipient_kind = 'external'))
-			ORDER BY id LIMIT $4 FOR UPDATE SKIP LOCKED)
-		UPDATE messages SET status = 'sending', claimed_at = now(), claimed_by = $1
+			  AND ((recipient_kind = 'extension' AND recipient = ANY(@extensions)) OR (@external AND recipient_kind = 'external'))
+			ORDER BY id LIMIT @limit FOR UPDATE SKIP LOCKED)
+		UPDATE messages SET status = 'sending', claimed_at = now(), claimed_by = @node
 		WHERE id IN (SELECT id FROM pick)
-		RETURNING `+jobCols, node, extensions, external, limit)
+		RETURNING `+jobCols, momo.Named("node", node), momo.Named("extensions", extensions), momo.Named("external", external),
+		momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
@@ -657,20 +680,20 @@ func (s *Store) FinishMessage(ctx context.Context, id int64, result, detail stri
 	)
 	switch result {
 	case MsgResultDelivered:
-		res, err = s.db.ExecContext(ctx, `UPDATE messages SET status = 'delivered', detail = $2, delivered_at = now(),
-			attempts = attempts + 1 WHERE id = $1 AND status = 'sending'`, id, detail)
+		res, err = s.db.ExecContext(ctx, `UPDATE messages SET status = 'delivered', detail = @detail, delivered_at = now(),
+			attempts = attempts + 1 WHERE id = @id AND status = 'sending'`, momo.Named("id", id), momo.Named("detail", detail))
 	case MsgResultNotRegistered:
-		res, err = s.db.ExecContext(ctx, `UPDATE messages SET status = 'pending', detail = $2, next_attempt_at = now()
-			WHERE id = $1 AND status = 'sending'`, id, detail)
+		res, err = s.db.ExecContext(ctx, `UPDATE messages SET status = 'pending', detail = @detail, next_attempt_at = now()
+			WHERE id = @id AND status = 'sending'`, momo.Named("id", id), momo.Named("detail", detail))
 	case MsgResultRetry:
 		res, err = s.db.ExecContext(ctx, `
-			UPDATE messages SET attempts = attempts + 1, detail = $2,
-				status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE 'pending' END,
+			UPDATE messages SET attempts = attempts + 1, detail = @detail,
+				status = CASE WHEN attempts + 1 >= @max_attempts THEN 'failed' ELSE 'pending' END,
 				next_attempt_at = now() + make_interval(secs => LEAST(15 * power(2, attempts), 900))
-			WHERE id = $1 AND status = 'sending'`, id, detail, MaxMessageAttempts)
+			WHERE id = @id AND status = 'sending'`, momo.Named("id", id), momo.Named("detail", detail), momo.Named("max_attempts", MaxMessageAttempts))
 	default:
-		res, err = s.db.ExecContext(ctx, `UPDATE messages SET status = 'failed', detail = $2, attempts = attempts + 1
-			WHERE id = $1 AND status = 'sending'`, id, detail)
+		res, err = s.db.ExecContext(ctx, `UPDATE messages SET status = 'failed', detail = @detail, attempts = attempts + 1
+			WHERE id = @id AND status = 'sending'`, momo.Named("id", id), momo.Named("detail", detail))
 	}
 	if err != nil {
 		return err
@@ -700,13 +723,13 @@ func (s *Store) MaintainMessages(ctx context.Context) (expired, purged int64, er
 	}
 	if _, err = s.db.ExecContext(ctx, `
 		UPDATE messages SET attempts = attempts + 1, detail = 'node lost',
-			status = CASE WHEN attempts + 1 >= $2 THEN 'failed' ELSE 'pending' END, next_attempt_at = now()
-		WHERE status = 'sending' AND claimed_at < now() - make_interval(secs => $1)`,
-		messageStaleAfter.Seconds(), MaxMessageAttempts); err != nil {
+			status = CASE WHEN attempts + 1 >= @max_attempts THEN 'failed' ELSE 'pending' END, next_attempt_at = now()
+		WHERE status = 'sending' AND claimed_at < now() - make_interval(secs => @stale_secs)`,
+		momo.Named("stale_secs", messageStaleAfter.Seconds()), momo.Named("max_attempts", MaxMessageAttempts)); err != nil {
 		return expired, 0, err
 	}
-	res, err = s.db.ExecContext(ctx, `DELETE FROM messages WHERE created_at < now() - make_interval(days => $1)
-		AND status IN ('delivered', 'failed')`, set.RetentionDays)
+	res, err = s.db.ExecContext(ctx, `DELETE FROM messages WHERE created_at < now() - make_interval(days => @days)
+		AND status IN ('delivered', 'failed')`, momo.Named("days", set.RetentionDays))
 	if err != nil {
 		return expired, 0, err
 	}
@@ -719,8 +742,9 @@ func (s *Store) MaintainMessages(ctx context.Context) (expired, purged int64, er
 func (s *Store) PurgeMessages(ctx context.Context, actor string, olderThanDays int) (int64, error) {
 	var n int64
 	err := s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE created_at < now() - make_interval(days => $1)
-			AND status IN ('delivered', 'failed')`, olderThanDays)
+		res, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE created_at < now() - make_interval(days => @days)
+			AND status IN ('delivered', 'failed')`, momo.Named("days", olderThanDays))
+
 		if err != nil {
 			return err
 		}
@@ -738,28 +762,31 @@ const convKey = `CASE m.scope
 	WHEN 'broadcast' THEN 'broadcast'
 	ELSE m.scope || ':' || m.scope_ref END`
 
-// messageWhere builds the filter shared by the listings.
+// messageWhere builds the filter shared by the listings. Each condition
+// carries its own @name and appends its momo.Named to args only with it:
+// @extension, @extensions, @conversation, @status and @query, so a caller
+// must not bind those names itself.
 func messageWhere(f MessageFilter, args *[]any) string {
 	var w []string
-	add := func(cond string, v any) {
-		*args = append(*args, v)
-		w = append(w, strings.ReplaceAll(cond, "?", fmt.Sprintf("$%d", len(*args))))
+	add := func(cond, name string, v any) {
+		*args = append(*args, momo.Named(name, v))
+		w = append(w, cond)
 	}
 	if f.Extension != "" {
-		add("(m.sender = ? OR m.recipient = ?)", f.Extension)
+		add("(m.sender = @extension OR m.recipient = @extension)", "extension", f.Extension)
 	}
 	if len(f.Extensions) > 0 {
-		add("(m.sender = ANY(?) OR m.recipient = ANY(?))", f.Extensions)
+		add("(m.sender = ANY(@extensions) OR m.recipient = ANY(@extensions))", "extensions", f.Extensions)
 	}
 	if f.Conversation != "" {
-		add("("+convKey+") = ?", f.Conversation)
+		add("("+convKey+") = @conversation", "conversation", f.Conversation)
 	}
 	if f.Status != "" {
-		add("m.status = ?", f.Status)
+		add("m.status = @status", "status", f.Status)
 	}
 	if f.Query != "" {
-		add(`(position(lower(?) in lower(coalesce(m.body_text, ''))) > 0 OR position(lower(?) in lower(m.sender)) > 0
-			OR position(lower(?) in lower(m.recipient)) > 0 OR position(lower(?) in lower(m.scope_ref)) > 0)`, f.Query)
+		add(`(position(lower(@query::text) in lower(coalesce(m.body_text, ''))) > 0 OR position(lower(@query::text) in lower(m.sender)) > 0
+			OR position(lower(@query::text) in lower(m.recipient)) > 0 OR position(lower(@query::text) in lower(m.scope_ref)) > 0)`, "query", f.Query)
 	}
 	if len(w) == 0 {
 		return ""
@@ -773,16 +800,16 @@ func (s *Store) ListMessages(ctx context.Context, f MessageFilter, before int64,
 	args := []any{}
 	where := messageWhere(f, &args)
 	if before > 0 {
-		args = append(args, before)
-		cond := fmt.Sprintf("m.id < $%d", len(args))
+		args = append(args, momo.Named("before", before))
+		cond := "m.id < @before"
 		if where == "" {
 			where = " WHERE " + cond
 		} else {
 			where += " AND " + cond
 		}
 	}
-	args = append(args, limit)
-	//nolint:gosec // G202: only constants and numbered placeholders are joined into the SQL; values are bound.
+	args = append(args, momo.Named("limit", limit))
+	//nolint:gosec // G202: only constants with @name binds are joined into the SQL; values are bound.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, batch, sender, sender_kind, sender_name, actor, recipient, recipient_kind, scope, scope_ref, trunk, content_type,
 		       body_text, body_len, status, detail, attempts, created_at, expires_at, delivered_at, n, nd, np, nf
@@ -798,7 +825,7 @@ func (s *Store) ListMessages(ctx context.Context, f MessageFilter, before int64,
 			FROM messages m LEFT JOIN trunks t ON t.id = m.trunk_id`+where+`
 			WINDOW w AS (PARTITION BY m.batch)
 			ORDER BY m.batch, m.id) q
-		ORDER BY id DESC LIMIT $`+fmt.Sprint(len(args)), args...)
+		ORDER BY id DESC LIMIT @limit`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -848,8 +875,8 @@ func (s *Store) ListMessageConversations(ctx context.Context, f MessageFilter, l
 	f.Conversation = ""
 	args := []any{}
 	where := messageWhere(f, &args)
-	args = append(args, limit)
-	//nolint:gosec // G202: only constants and numbered placeholders are joined into the SQL; values are bound.
+	args = append(args, momo.Named("limit", limit))
+	//nolint:gosec // G202: only constants with @name binds are joined into the SQL; values are bound.
 	rows, err := s.db.QueryContext(ctx, `
 		WITH keyed AS (
 			SELECT m.id, m.batch, m.scope, m.scope_ref, (`+convKey+`) AS k FROM messages m`+where+`)
@@ -858,7 +885,8 @@ func (s *Store) ListMessageConversations(ctx context.Context, f MessageFilter, l
 		FROM (SELECT k, (array_agg(scope))[1] AS scope, (array_agg(scope_ref))[1] AS scope_ref,
 		             count(DISTINCT batch) AS n, max(id) AS last_id FROM keyed GROUP BY k) c
 		JOIN messages m ON m.id = c.last_id
-		ORDER BY c.last_id DESC LIMIT $`+fmt.Sprint(len(args)), args...)
+		ORDER BY c.last_id DESC LIMIT @limit`, args...)
+
 	if err != nil {
 		return nil, err
 	}

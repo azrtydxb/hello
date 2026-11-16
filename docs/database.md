@@ -31,6 +31,7 @@ Moved so far:
   - core and configuration: `store.go`, `batch.go`, `config.go`, `dialspace.go`, `dirprovision.go`, `flow_canvas.go`
   - phonebook: `phonebook.go`, `phonebook_lookup.go`, `personal_contacts.go`, `locations.go`
   - security and door: `scep.go`, `wifi.go`, `door.go`, `door_open.go`, `door_camera.go`, `door_webhook.go`
+  - messaging core: `messages.go`, `messaging.go`, `messaging_route.go`, `messaging_route_views.go`, `messaging_carrier.go`, `messaging_events.go`, and `messaging_calls.go` but for its visibility read, which joins the inbox's `visible` condition and binds `$n` until the inbox moves; ErasePeer's select for `queueRedactions` (privacy) binds `$1` as that helper numbers after it
 - `internal/store`, at its seam, with the files of the core and
   configuration domain converted to `@name` binds: `store.go`, `batch.go`,
   `config.go`, `dialspace.go`, `dirprovision.go` and `flow_canvas.go`, and
