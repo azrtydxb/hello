@@ -40,6 +40,12 @@ Moved so far:
   those of the users and authentication domain: `users.go`, `totp.go`,
   `oauth.go`, `ldap.go`, `onboarding.go` and `sidekey.go`. Its other files
   still bind `$n` and move one domain at a time (below).
+  those of the phonebook domain: `phonebook.go`, `phonebook_lookup.go`,
+  `personal_contacts.go` and `locations.go`; and those of the call
+  features domain: `ivr.go`, `queues.go`, `queue_callbacks.go`,
+  `followme.go`, `pickup.go`, `park.go`, `paging.go`, `ringmap.go`,
+  `ringtag.go`, `conference.go` and `multicast.go`. Its other files still bind
+  `$n` and move one domain at a time (below).
 
 Every package above builds its handle with `db.New` (or `db.NewPool`) where
 the binary constructs it, except `internal/store`, which builds its own in
