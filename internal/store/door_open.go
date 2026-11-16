@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/secret"
 )
 
@@ -47,11 +49,11 @@ func ValidDoorCode(code string) bool {
 // code. A station that was never configured has none set.
 func (s *Store) GetDoorOpen(ctx context.Context, id int64) (DoorOpen, error) {
 	var kind string
-	if err := s.db.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = $1`, id).Scan(&kind); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = @id`, momo.Named("id", id)).Scan(&kind); err != nil {
 		return DoorOpen{}, mapErr(err)
 	}
 	var d DoorOpen
-	err := s.db.QueryRowContext(ctx, `SELECT code_enc IS NOT NULL, hangup_after_open FROM door_open WHERE extension_id = $1`, id).
+	err := s.db.QueryRowContext(ctx, `SELECT code_enc IS NOT NULL, hangup_after_open FROM door_open WHERE extension_id = @extension_id`, momo.Named("extension_id", id)).
 		Scan(&d.CodeSet, &d.HangupAfterOpen)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return DoorOpen{}, mapErr(err)
@@ -66,13 +68,13 @@ func (s *Store) SetDoorOpen(ctx context.Context, actor string, id int64, c DoorO
 	var out DoorOpen
 	err := s.configChange(ctx, actor, "update", "door_open", check, func(tx *dbTx) (int64, error) {
 		var kind string
-		if err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = $1 FOR UPDATE`, id).Scan(&kind); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&kind); err != nil {
 			return id, err
 		}
 		if kind != ExtensionDoor {
 			return id, fieldError("kind", "only a door station has a door-open code")
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO door_open (extension_id) VALUES ($1) ON CONFLICT (extension_id) DO NOTHING`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO door_open (extension_id) VALUES (@extension_id) ON CONFLICT (extension_id) DO NOTHING`, momo.Named("extension_id", id)); err != nil {
 			return id, err
 		}
 		if c.Code != nil {
@@ -93,17 +95,18 @@ func (s *Store) SetDoorOpen(ctx context.Context, actor string, id int64, c DoorO
 					return id, fmt.Errorf("store: door-open code of %d does not round-trip under HELLO_SECRET_KEY", id)
 				}
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE door_open SET code_enc = $2, updated_at = now() WHERE extension_id = $1`, id, sealed); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE door_open SET code_enc = @code_enc, updated_at = now() WHERE extension_id = @extension_id`,
+				momo.Named("extension_id", id), momo.Named("code_enc", sealed)); err != nil {
 				return id, err
 			}
 		}
 		if c.HangupAfterOpen != nil {
-			if _, err := tx.ExecContext(ctx, `UPDATE door_open SET hangup_after_open = $2, updated_at = now() WHERE extension_id = $1`,
-				id, *c.HangupAfterOpen); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE door_open SET hangup_after_open = @hangup_after_open, updated_at = now() WHERE extension_id = @extension_id`,
+				momo.Named("extension_id", id), momo.Named("hangup_after_open", *c.HangupAfterOpen)); err != nil {
 				return id, err
 			}
 		}
-		return id, tx.QueryRowContext(ctx, `SELECT code_enc IS NOT NULL, hangup_after_open FROM door_open WHERE extension_id = $1`, id).
+		return id, tx.QueryRowContext(ctx, `SELECT code_enc IS NOT NULL, hangup_after_open FROM door_open WHERE extension_id = @extension_id`, momo.Named("extension_id", id)).
 			Scan(&out.CodeSet, &out.HangupAfterOpen)
 	})
 	if err != nil {

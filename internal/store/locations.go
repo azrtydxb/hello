@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/location"
 	"github.com/azrtydxb/hello/internal/routing"
 )
@@ -95,7 +97,7 @@ func (s *Store) ListLocations(ctx context.Context) ([]Location, error) {
 
 // GetLocation returns one location; ErrNotFound when there is none.
 func (s *Store) GetLocation(ctx context.Context, id int64) (Location, error) {
-	l, err := scanLocation(s.q(ctx).QueryRowContext(ctx, `SELECT `+locationCols+` FROM locations WHERE id = $1`, id))
+	l, err := scanLocation(s.q(ctx).QueryRowContext(ctx, `SELECT `+locationCols+` FROM locations WHERE id = @id`, momo.Named("id", id)))
 	if err != nil {
 		return Location{}, mapErr(err)
 	}
@@ -141,17 +143,22 @@ func writeLocation(ctx context.Context, tx *dbTx, id int64, n location.Node) (in
 		return 0, err
 	}
 	n.Name = strings.TrimSpace(n.Name)
-	args := []any{n.Kind, n.Name, n.ParentID, n.Country, n.State, n.City, n.Street, n.HouseNumber, n.PostalCode, n.Latitude, n.Longitude, n.RadiusM}
+	args := []any{
+		momo.Named("kind", n.Kind), momo.Named("name", n.Name), momo.Named("parent_id", n.ParentID),
+		momo.Named("country", n.Country), momo.Named("state", n.State), momo.Named("city", n.City),
+		momo.Named("street", n.Street), momo.Named("house_number", n.HouseNumber), momo.Named("postal_code", n.PostalCode),
+		momo.Named("latitude", n.Latitude), momo.Named("longitude", n.Longitude), momo.Named("radius_m", n.RadiusM),
+	}
 	if id == 0 {
 		err := tx.QueryRowContext(ctx, `
 			INSERT INTO locations (kind, name, parent_id, country, state, city, street, house_number, postal_code, latitude, longitude, radius_m)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`, args...).Scan(&id)
+			VALUES (@kind, @name, @parent_id, @country, @state, @city, @street, @house_number, @postal_code, @latitude, @longitude, @radius_m) RETURNING id`, args...).Scan(&id)
 		return id, err
 	}
 	_, err = tx.ExecContext(ctx, `
-		UPDATE locations SET kind = $1, name = $2, parent_id = $3, country = $4, state = $5, city = $6, street = $7,
-			house_number = $8, postal_code = $9, latitude = $10, longitude = $11, radius_m = $12, updated_at = now()
-		WHERE id = $13`, append(args, id)...)
+		UPDATE locations SET kind = @kind, name = @name, parent_id = @parent_id, country = @country, state = @state, city = @city, street = @street,
+			house_number = @house_number, postal_code = @postal_code, latitude = @latitude, longitude = @longitude, radius_m = @radius_m, updated_at = now()
+		WHERE id = @id`, append(args, momo.Named("id", id))...)
 	return id, err
 }
 
@@ -195,11 +202,11 @@ func (s *Store) DeleteLocation(ctx context.Context, actor string, id int64) erro
 	return s.provChange(ctx, actor, "delete", "location", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM locations WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM locations WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&one); err != nil {
 			return rid, false, err
 		}
 		var kids int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM locations WHERE parent_id = $1`, id).Scan(&kids); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM locations WHERE parent_id = @id`, momo.Named("id", id)).Scan(&kids); err != nil {
 			return rid, false, err
 		}
 		if kids > 0 {
@@ -219,7 +226,7 @@ func (s *Store) DeleteLocation(ctx context.Context, actor string, id int64) erro
 			}
 			return rid, false, conflict("the location is assigned to %d phone groups, extensions or phones (%s); unassign it first", len(as), strings.Join(names, ", "))
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM locations WHERE id = $1`, id)
+		_, err = tx.ExecContext(ctx, `DELETE FROM locations WHERE id = @id`, momo.Named("id", id))
 		return rid, true, err
 	})
 }
@@ -244,7 +251,7 @@ func listAssignments(ctx context.Context, q querier, only *int64) ([]LocationAss
 	where := ""
 	var args []any
 	if only != nil {
-		where, args = ` WHERE location_id = $1`, []any{*only}
+		where, args = ` WHERE location_id = @location_id`, []any{momo.Named("location_id", *only)}
 	}
 	rows, err := q.QueryContext(ctx, `
 		SELECT 'group', id, name, location_id FROM phone_groups`+where+`
@@ -288,14 +295,14 @@ func (s *Store) SetLocationAssignment(ctx context.Context, actor, kind string, i
 		rid := kind + ":" + strconv.FormatInt(id, 10)
 		if locationID != nil {
 			var one int
-			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM locations WHERE id = $1`, *locationID).Scan(&one); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM locations WHERE id = @id`, momo.Named("id", *locationID)).Scan(&one); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return rid, false, fieldError("locationId", "no such location")
 				}
 				return rid, false, err
 			}
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE `+table+` SET location_id = $1 WHERE id = $2`, locationID, id)
+		res, err := tx.ExecContext(ctx, `UPDATE `+table+` SET location_id = @location_id WHERE id = @id`, momo.Named("location_id", locationID), momo.Named("id", id))
 		if err != nil {
 			return rid, false, err
 		}
@@ -315,14 +322,14 @@ type PhoneEmergency struct {
 // GetPhoneGroupEmergency returns a group's E911 switch and alarm destination.
 func (s *Store) GetPhoneGroupEmergency(ctx context.Context, id int64) (PhoneEmergency, error) {
 	var e PhoneEmergency
-	err := s.q(ctx).QueryRowContext(ctx, `SELECT e911_enabled, alarm_target FROM phone_groups WHERE id = $1`, id).Scan(&e.E911Enabled, &e.AlarmTarget)
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT e911_enabled, alarm_target FROM phone_groups WHERE id = @id`, momo.Named("id", id)).Scan(&e.E911Enabled, &e.AlarmTarget)
 	return e, mapErr(err)
 }
 
 // requireDialTarget checks that number is an extension or a ring group.
 func requireDialTarget(ctx context.Context, tx *dbTx, field, number string) error {
 	var one int
-	err := tx.QueryRowContext(ctx, `SELECT 1 FROM extensions WHERE number = $1 UNION ALL SELECT 1 FROM ring_groups WHERE name = $1 LIMIT 1`, number).Scan(&one)
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM extensions WHERE number = @number UNION ALL SELECT 1 FROM ring_groups WHERE name = @number LIMIT 1`, momo.Named("number", number)).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fieldError(field, "must be an extension or a ring group")
 	}
@@ -335,7 +342,7 @@ func (s *Store) SetPhoneGroupEmergency(ctx context.Context, actor string, id int
 	err := s.provChange(ctx, actor, "update", "phone_group_emergency", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&one); err != nil {
 			return rid, false, err
 		}
 		if in.AlarmTarget != "" {
@@ -343,8 +350,8 @@ func (s *Store) SetPhoneGroupEmergency(ctx context.Context, actor string, id int
 				return rid, false, err
 			}
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE phone_groups SET e911_enabled = $1, alarm_target = $2, updated_at = now() WHERE id = $3`,
-			in.E911Enabled, in.AlarmTarget, id)
+		_, err := tx.ExecContext(ctx, `UPDATE phone_groups SET e911_enabled = @enabled, alarm_target = @alarm_target, updated_at = now() WHERE id = @id`,
+			momo.Named("enabled", in.E911Enabled), momo.Named("alarm_target", in.AlarmTarget), momo.Named("id", id))
 		return rid, true, err
 	})
 	if err != nil {
@@ -373,14 +380,14 @@ func (s *Store) PutEmergencySettings(ctx context.Context, actor string, in Emerg
 	err := s.provChange(ctx, actor, "update", "emergency_settings", func(tx *dbTx) (string, bool, error) {
 		if in.NotifyGroup != "" {
 			var one int
-			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM ring_groups WHERE name = $1`, in.NotifyGroup).Scan(&one); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM ring_groups WHERE name = @name`, momo.Named("name", in.NotifyGroup)).Scan(&one); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return "1", false, fieldError("notifyGroup", "must be a ring group")
 				}
 				return "1", false, err
 			}
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE emergency_settings SET notify_group = $1, updated_at = now() WHERE id = 1`, in.NotifyGroup)
+		_, err := tx.ExecContext(ctx, `UPDATE emergency_settings SET notify_group = @notify_group, updated_at = now() WHERE id = 1`, momo.Named("notify_group", in.NotifyGroup))
 		return "1", true, err
 	})
 	if err != nil {
@@ -415,7 +422,7 @@ func (s *Store) PhoneLocation(ctx context.Context, phoneID int64) (PhoneLocation
 		LEFT JOIN devices d ON d.id = p.device_id
 		LEFT JOIN extensions e ON e.id = d.extension_id
 		LEFT JOIN phone_groups g ON g.id = p.group_id
-		WHERE p.id = $1`, phoneID).Scan(&pl, &el, &gl, &e911)
+		WHERE p.id = @phone_id`, momo.Named("phone_id", phoneID)).Scan(&pl, &el, &gl, &e911)
 	if err != nil {
 		return PhoneLocation{}, mapErr(err)
 	}
