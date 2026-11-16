@@ -140,6 +140,10 @@ func (c *call) queueResume(detail string) {
 // the flow looks at the outcome.
 var queueOfferedHook atomic.Pointer[func(c *call)]
 
+// queueFreeHook, when set (tests), runs once an offer has found free agents,
+// before it takes their leases.
+var queueFreeHook atomic.Pointer[func(c *call)]
+
 // queueSession puts the (answered) caller in q and carries the call to its
 // end: an agent, or a failover destination.
 func (c *call) queueSession(ctx context.Context, snap *snapshot.Snapshot, q snapshot.Queue, entered int64) {
@@ -652,6 +656,9 @@ func (c *call) queueOffer(ctx context.Context, snap *snapshot.Snapshot, q snapsh
 	if len(free) == 0 {
 		return nil, "", nil
 	}
+	if h := queueFreeHook.Load(); h != nil {
+		(*h)(c)
+	}
 	token := s.cfg.NodeID + "/" + c.id
 	rr := uint64(0)
 	if q.Strategy == queue.RoundRobin {
@@ -678,7 +685,7 @@ func (c *call) queueOffer(ctx context.Context, snap *snapshot.Snapshot, q snapsh
 		if ctx.Err() != nil {
 			return nil, "", nil
 		}
-		held := c.queueLeaseAgents(round, token, timeout+5*time.Second)
+		held := c.queueStillFree(ctx, snap, q, c.queueLeaseAgents(round, token, timeout+5*time.Second), token)
 		if len(held) == 0 {
 			continue
 		}
@@ -718,6 +725,35 @@ func (c *call) queueLeaseAgents(round []string, token string, ttl time.Duration)
 		}
 	}
 	return held
+}
+
+// queueStillFree keeps the agents of held (whose leases this call holds)
+// that are still free, and releases the others. The free list was read before
+// the leases were taken: an agent the queue bridged to another caller in
+// between shows as busy only now, since the winner releases the agent's lease
+// once the agent shows busy. Without this second look the agent, on a call,
+// would be rung for this caller too.
+func (c *call) queueStillFree(ctx context.Context, snap *snapshot.Snapshot, q snapshot.Queue, held []string, token string) []string {
+	if len(held) == 0 {
+		return nil
+	}
+	s := c.s
+	_, free := c.queueAgents(ctx, snap, q)
+	ok := make(map[string]bool, len(free))
+	for _, f := range free {
+		ok[f.Ext] = true
+	}
+	still := held[:0]
+	for _, ext := range held {
+		if ok[ext] {
+			still = append(still, ext)
+			continue
+		}
+		lctx, cancel := s.stateCtx()
+		_ = s.queueStore().Release(lctx, queue.AgentLease(ext), token)
+		cancel()
+	}
+	return still
 }
 
 // queueRing rings the agents together and waits for the first to answer.

@@ -711,3 +711,64 @@ func TestQueueAnsweredAgentHungUpWhenCallEnds(t *testing.T) {
 	waitReq(t, b.invites, "INVITE to the agent")
 	waitReq(t, b.byes, "the answered agent is hung up")
 }
+
+// TestQueueAgentBridgedMeanwhileNotOfferedAgain: a caller's offer reads the
+// free agents while the agent rings for the caller ahead, and takes the
+// agent's lease only after that caller was bridged to the agent (the winner
+// releases the lease once the agent shows busy). It fails if the agent, now
+// on a call, is rung for the second caller too, or the second caller leaves
+// the queue.
+func TestQueueAgentBridgedMeanwhileNotOfferedAgain(t *testing.T) {
+	st := queue.NewMemStore()
+	q := testQueue("sales", "600", queue.RingAll, static("200", 0, 1))
+	q.AgentTimeout = 5
+	pbx, _ := queuePBX(t, st, nil, q)
+	a, b, c := registerABC(t, pbx)
+	answer := make(chan struct{})
+	b.setCallee(answerAfter(answer))
+	stalled, bridged := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	hook := func(qc *call) {
+		if qc.callerNum != "300" {
+			return
+		}
+		once.Do(func() {
+			// The second caller has read the agent as free while the agent
+			// rings for the first: it takes the lease only after the first
+			// caller is bridged and the lease is released.
+			close(stalled)
+			<-bridged
+		})
+	}
+	queueFreeHook.Store(&hook)
+	t.Cleanup(func() { queueFreeHook.Store(nil) })
+	ra := waitCall(t, dial(t.Context(), a, "600"))
+	if ra.err != nil {
+		t.Fatal(ra.err)
+	}
+	waitReq(t, b.invites, "the agent rings for the first caller")
+	rc := waitCall(t, dial(t.Context(), c, "600"))
+	if rc.err != nil {
+		t.Fatal(rc.err)
+	}
+	select {
+	case <-stalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second caller's offer never found the ringing agent free")
+	}
+	close(answer)
+	eventually(t, "the first caller is bridged and the agent's lease released", func() bool {
+		if pbx.metric(t, "hello_queue_calls_total", map[string]string{"queue": "sales", "event": "answered"}) != 1 {
+			return false
+		}
+		_, held, err := st.Holder(t.Context(), queue.AgentLease("200"))
+		return err == nil && !held
+	})
+	close(bridged)
+	noReq(t, b.invites, 1200*time.Millisecond, "the agent on a call is not rung for the second caller")
+	if ws, _ := st.Waiting(t.Context(), "sales"); len(ws) != 1 || ws[0].Caller != "300" {
+		t.Fatalf("waiting = %+v, want the second caller still waiting", ws)
+	}
+	hangup(t, ra.dcs)
+	hangup(t, rc.dcs)
+}

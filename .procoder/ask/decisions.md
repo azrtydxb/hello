@@ -6137,6 +6137,42 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   identity and just-in-time assertions on Mem and PG; the known differences
   are in the test's comment.
 
+## Queue failover flake: an agent bridged meanwhile was rung again (2026-11-16, fix/queue-failover-flake)
+
+- **Product bug, not test timing.** TestQueueSurvivesNodeFailover failed once
+  in CI (run 43861480723, attempt 1, branch momo/webhook, which does not
+  touch internal/sip) with `waiting after the first answer = []`: after the
+  survivor bridged caller 100 to agent 200, caller 210 had left the queue
+  too. 0 failures in 50 local `-race` runs of the test and 0 in 100 runs of
+  an instrumented build, which logged every queue Leave and call end: the
+  dead owner never removes an entry (its flows return on `s.done`, or yield
+  with `haYielded` set), so the only way out for 210 was being answered.
+- **Cause.** `queueOffer` reads the free agents (`queueAgents`, which skips
+  busy ones) and only then takes their leases. `NextInLine` lets 210 make
+  an offer while the agent rings for 100 (100's `Offering` is set), so 210
+  can read 200 as free before 100's 2xx. 100's flow keeps 200's lease until
+  the bridge is up and the agent shows busy (`release()` after
+  `ivrConnect`). If 210's offer stalls between the read and the lease
+  request across that window, it gets the lease and rings an agent who is on
+  a call. In the test the agent auto-answers, so 210 is answered and leaves.
+  The same race exists across nodes in production: an agent gets a second
+  queue call while on the first.
+- **Fix.** `queueStillFree`: once the leases are held, read the free agents
+  again and release the leases of agents that are no longer free. The winner
+  releases its lease only after the agent shows busy (its call has a winner
+  locally and the live call is published as connected), so a lease taken
+  after that release always sees the agent busy. One extra agents/stats read
+  per offer round that leased an agent.
+- **Deterministic reproduction.** A test hook `queueFreeHook` runs after an
+  offer finds free agents and before it takes the leases.
+  TestQueueAgentBridgedMeanwhileNotOfferedAgain stalls the second caller
+  there until the first is bridged and the agent's lease is released. Before
+  the fix it failed 3/3 (the agent got a second INVITE). With the fix it
+  passed 20/20. A temporary copy of the failover test with the same stall
+  failed 3/3 with the CI message `waiting after the first answer = []`, and
+  passed with the fix. The copy was not kept. The failover test is
+  unchanged. With the fix it passed 50/50 under `-race`.
+
 ## momo Phase 3: the internal/store seam (2026-11-16, momo/store-seam)
 
 - **Scope: the seam only.** `internal/store` (81 files, about 1,400 call
