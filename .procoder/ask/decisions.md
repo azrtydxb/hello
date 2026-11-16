@@ -6472,3 +6472,39 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   binds `@group_id` and `@phone_id`. `prov_offline_test.go` builds these on
   a recording driver (a batch context, so no database), as
   `TestStatementsBuild` cannot see them.
+
+## momo Phase 3, domain 6: internal/store routing and time on @name (2026-11-16, momo/store-routing)
+
+- **Scope.** `routing.go`, `timecond.go`, `blocklist.go`, `originate.go`,
+  `boss.go` and `calendar_dnd.go` in `internal/store` bind by name: every
+  `$n` became `@name` with `momo.Named`, through the seam, with the Scan
+  code, `FOR UPDATE` / `FOR UPDATE OF b`, the configuration lock, error
+  handling and SQL text otherwise unchanged. No schema change, no migration,
+  `go.mod` and `internal/db` unchanged.
+- **hello-sip's call path keeps its plans.** hello-sip reaches these files
+  during a call only through the *28 day/night feature code
+  (`ApplyTimeConditionToggle`): `listTimeConditions` with
+  `WHERE t.toggle_number = @toggle_number` and `WHERE t.id = @id`,
+  `loadTimeConditionSet` (`listSchedules`, `listCalendars` and their
+  `ANY(@ids)` reads, `listTimeConditions`) and `setOverride`'s UPDATE. Each
+  uses every bind once, so PostgreSQL gets the same statement with the same
+  parameter types; only `setOverride` numbers its four binds in the order
+  they appear instead of `id` first. `TestTimeConditionToggleStatements`
+  pins the SQL and arguments they send. The snapshot hello-sip routes with
+  (time conditions, blocklist, routes) is read by `internal/snapshot`, not
+  by these files.
+- **Casts on reused binds**, each to the type PostgreSQL inferred for the
+  old `$n`: `ListBlocklist`'s `@q`, `@action`, `@scope` (`::text`, typed by
+  `$n = ''`); `SetOriginateState`'s `@cdr_correlation_id` (`::text`);
+  `tcReferences`' `@name` in the IVR menu, time condition and queue lookups
+  (`::text`, the TEXT target columns); `extensionRoutes`' `@number`
+  (`::text`, `destination` and `source_extensions` TEXT[]); `DeleteTrunk`'s
+  `@trunk_id` (`::bigint`).
+- **Run-time statements.** The WHERE fragments of `listTrunks`,
+  `listOutbound`, `listInbound`, `listSchedules`, `listCalendars` and
+  `listTimeConditions` each carry their `@name`, and the caller passes the
+  matching `Named` with the fragment. `deleteByID` binds `@id`;
+  `routeTables`' `setPosition` binds `@position` and `@id`; `ListBlocklist`
+  builds its three filter `Named` once for the count and the page.
+  `TestRoutingRuntimeStatements` runs these on a recording driver so a
+  misspelled name fails on the pull request tier.

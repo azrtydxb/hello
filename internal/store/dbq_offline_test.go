@@ -34,6 +34,9 @@ var namedFiles = map[string]bool{
 	"conference.go":        true,
 	"clientquality.go":     true,
 	"clients.go":           true,
+	"blocklist.go":         true,
+	"boss.go":              true,
+	"calendar_dnd.go":      true,
 	"config.go":            true,
 	"dialspace.go":         true,
 	"dirprovision.go":      true,
@@ -78,6 +81,9 @@ var namedFiles = map[string]bool{
 	"prov_push.go":         true,
 	"rtcpxr.go":            true,
 	"syslog.go":            true,
+	"originate.go":         true,
+	"routing.go":           true,
+	"timecond.go":          true,
 }
 
 // TestStatementsBuild renders every statement the store's code passes as a
