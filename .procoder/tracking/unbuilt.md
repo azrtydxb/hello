@@ -139,7 +139,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status             |
 | --------------------------------------------------------------------------------------------------------- | ------------------ |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-01144e9) |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-8edadd4) |
 | MCP skills, JSON bodies                                                                                   | done (#189)        |
 | Ring-group voicemail box                                                                                  | done (#194)        |
 | Transfer-to-voicemail phone key                                                                           | done (#200)        |
