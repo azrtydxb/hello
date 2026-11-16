@@ -10,6 +10,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // Pickup limits.
@@ -34,6 +36,8 @@ type PickupGroupInput struct {
 	Members []int64 // extension ids
 }
 
+// listPickupGroups reads the groups the where fragment selects; args are the
+// momo.Named binds of the fragment's @names.
 func listPickupGroups(ctx context.Context, q querier, where string, args ...any) ([]PickupGroup, error) {
 	rows, err := q.QueryContext(ctx, `SELECT g.id, g.name, g.created_at, g.updated_at FROM pickup_groups g `+where+` ORDER BY g.name, g.id`, args...)
 	if err != nil {
@@ -63,7 +67,7 @@ func listPickupGroups(ctx context.Context, q querier, where string, args ...any)
 		byID[out[i].ID] = &out[i]
 	}
 	mrows, err := q.QueryContext(ctx, `SELECT m.group_id, m.extension_id, e.number, e.name FROM pickup_group_members m
-		JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = ANY($1) ORDER BY m.group_id, e.number`, ids)
+		JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = ANY(@ids) ORDER BY m.group_id, e.number`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +90,7 @@ func (s *Store) ListPickupGroups(ctx context.Context) ([]PickupGroup, error) {
 
 // GetPickupGroup returns one pickup group.
 func (s *Store) GetPickupGroup(ctx context.Context, id int64) (PickupGroup, error) {
-	gs, err := listPickupGroups(ctx, s.q(ctx), `WHERE g.id = $1`, id)
+	gs, err := listPickupGroups(ctx, s.q(ctx), `WHERE g.id = @id`, momo.Named("id", id))
 	if err != nil {
 		return PickupGroup{}, err
 	}
@@ -97,14 +101,14 @@ func (s *Store) GetPickupGroup(ctx context.Context, id int64) (PickupGroup, erro
 }
 
 func writePickupMembers(ctx context.Context, tx *dbTx, id int64, members []int64) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM pickup_group_members WHERE group_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM pickup_group_members WHERE group_id = @group_id`, momo.Named("group_id", id)); err != nil {
 		return err
 	}
 	if err := checkNoDoor(ctx, tx, "members", members); err != nil {
 		return err
 	}
 	for _, ext := range members {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO pickup_group_members (group_id, extension_id) VALUES ($1, $2)`, id, ext); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO pickup_group_members (group_id, extension_id) VALUES (@group_id, @extension_id)`, momo.Named("group_id", id), momo.Named("extension_id", ext)); err != nil {
 			return pagingFK(err, "members")
 		}
 	}
@@ -123,13 +127,13 @@ func (s *Store) CreatePickupGroup(ctx context.Context, actor string, in PickupGr
 			return 0, &InUseError{Msg: fmt.Sprintf("at most %d pickup groups", MaxPickupGroups)}
 		}
 		var id int64
-		if err := tx.QueryRowContext(ctx, `INSERT INTO pickup_groups (name) VALUES ($1) RETURNING id`, in.Name).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO pickup_groups (name) VALUES (@name) RETURNING id`, momo.Named("name", in.Name)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := writePickupMembers(ctx, tx, id, in.Members); err != nil {
 			return id, err
 		}
-		gs, err := listPickupGroups(ctx, tx, `WHERE g.id = $1`, id)
+		gs, err := listPickupGroups(ctx, tx, `WHERE g.id = @id`, momo.Named("id", id))
 		if err == nil && len(gs) == 1 {
 			g = gs[0]
 		}
@@ -142,7 +146,7 @@ func (s *Store) CreatePickupGroup(ctx context.Context, actor string, in PickupGr
 func (s *Store) UpdatePickupGroup(ctx context.Context, actor string, id int64, in PickupGroupInput, check Check) (PickupGroup, error) {
 	var g PickupGroup
 	err := s.configChange(ctx, actor, "update", "pickup_group", check, func(tx *dbTx) (int64, error) {
-		res, err := tx.ExecContext(ctx, `UPDATE pickup_groups SET name = $2, updated_at = now() WHERE id = $1`, id, in.Name)
+		res, err := tx.ExecContext(ctx, `UPDATE pickup_groups SET name = @name, updated_at = now() WHERE id = @id`, momo.Named("id", id), momo.Named("name", in.Name))
 		if err != nil {
 			return id, err
 		}
@@ -152,7 +156,7 @@ func (s *Store) UpdatePickupGroup(ctx context.Context, actor string, id int64, i
 		if err := writePickupMembers(ctx, tx, id, in.Members); err != nil {
 			return id, err
 		}
-		gs, err := listPickupGroups(ctx, tx, `WHERE g.id = $1`, id)
+		gs, err := listPickupGroups(ctx, tx, `WHERE g.id = @id`, momo.Named("id", id))
 		if err == nil && len(gs) == 1 {
 			g = gs[0]
 		}
@@ -164,7 +168,7 @@ func (s *Store) UpdatePickupGroup(ctx context.Context, actor string, id int64, i
 // DeletePickupGroup removes a pickup group and, by cascade, its members.
 func (s *Store) DeletePickupGroup(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "pickup_group", check, func(tx *dbTx) (int64, error) {
-		res, err := tx.ExecContext(ctx, `DELETE FROM pickup_groups WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM pickup_groups WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}

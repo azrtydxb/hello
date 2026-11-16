@@ -9,6 +9,8 @@ import (
 	"errors"
 	"net/netip"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/prov"
 )
 
@@ -46,7 +48,7 @@ func (s *Store) syslogInfo(ctx context.Context, phoneID int64) (*prov.SyslogInfo
 	var enabled bool
 	var level string
 	err := s.db.QueryRowContext(ctx, `SELECT g.syslog_enabled, g.syslog_level
-		FROM phones p JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).Scan(&enabled, &level)
+		FROM phones p JOIN phone_groups g ON g.id = p.group_id WHERE p.id = @id`, momo.Named("id", phoneID)).Scan(&enabled, &level)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) { // a phone without a group
 			return nil, nil

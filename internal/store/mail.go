@@ -11,6 +11,8 @@ import (
 	"errors"
 	"strconv"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // SMTPSettings are the stored SMTP settings without the password.
@@ -98,11 +100,13 @@ func (s *Store) PutSMTPSettings(ctx context.Context, actor string, in SMTPInput)
 	err := s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO smtp_settings (id, host, port, security, username, from_address, password_sealed)
-			VALUES (TRUE, $1, $2, $3, $4, $5, $6)
-			ON CONFLICT (id) DO UPDATE SET host = $1, port = $2, security = $3, username = $4, from_address = $5,
-				password_sealed = CASE WHEN $7::boolean THEN NULL WHEN $6::bytea IS NOT NULL THEN $6::bytea ELSE smtp_settings.password_sealed END,
+			VALUES (TRUE, @host, @port, @security, @username, @from_address, @password_sealed)
+			ON CONFLICT (id) DO UPDATE SET host = @host, port = @port, security = @security, username = @username, from_address = @from_address,
+				password_sealed = CASE WHEN @clear::boolean THEN NULL WHEN @password_sealed::bytea IS NOT NULL THEN @password_sealed::bytea ELSE smtp_settings.password_sealed END,
 				updated_at = now()`,
-			in.Host, in.Port, in.Security, in.Username, in.From, sealed, clear); err != nil {
+			momo.Named("host", in.Host), momo.Named("port", in.Port), momo.Named("security", in.Security),
+			momo.Named("username", in.Username), momo.Named("from_address", in.From),
+			momo.Named("password_sealed", sealed), momo.Named("clear", clear)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update", "smtp_settings", "1")
@@ -138,7 +142,7 @@ func (s *Store) FanOutEmails(ctx context.Context, limit int) (int, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
 		rows, err := tx.QueryContext(ctx, `
 			SELECT m.id FROM voicemail_messages m WHERE m.email_status = 'pending'
-			ORDER BY m.id LIMIT $1 FOR UPDATE OF m SKIP LOCKED`, limit)
+			ORDER BY m.id LIMIT @limit FOR UPDATE OF m SKIP LOCKED`, momo.Named("limit", limit))
 		if err != nil {
 			return err
 		}
@@ -165,22 +169,22 @@ func (s *Store) FanOutEmails(ctx context.Context, limit int) (int, error) {
 			JOIN voicemail_boxes b ON b.id = m.box_id
 			JOIN user_extensions ue ON ue.extension_id = b.extension_id
 			JOIN users u ON u.id = ue.user_id
-			WHERE m.id = ANY($1::bigint[]) AND u.enabled AND u.email <> '' AND u.vm_email_notify
-			ON CONFLICT DO NOTHING`, ids); err != nil {
+			WHERE m.id = ANY(@ids::bigint[]) AND u.enabled AND u.email <> '' AND u.vm_email_notify
+			ON CONFLICT DO NOTHING`, momo.Named("ids", ids)); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO voicemail_notifications (message_id, to_email)
 			SELECT m.id, b.email FROM voicemail_messages m JOIN voicemail_boxes b ON b.id = m.box_id
-			WHERE m.id = ANY($1::bigint[]) AND b.email <> ''
-			ON CONFLICT DO NOTHING`, ids); err != nil {
+			WHERE m.id = ANY(@ids::bigint[]) AND b.email <> ''
+			ON CONFLICT DO NOTHING`, momo.Named("ids", ids)); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `
 			UPDATE voicemail_messages m SET email_status = CASE
 				WHEN EXISTS (SELECT 1 FROM voicemail_notifications n WHERE n.message_id = m.id) THEN 'queued'
 				ELSE 'skipped' END
-			WHERE m.id = ANY($1::bigint[])`, ids)
+			WHERE m.id = ANY(@ids::bigint[])`, momo.Named("ids", ids))
 		n = len(ids)
 		return err
 	})
@@ -198,12 +202,13 @@ func (s *Store) ClaimEmails(ctx context.Context, limit int, stale time.Duration)
 			WHERE n.id IN (
 				SELECT id FROM voicemail_notifications
 				WHERE (status = 'pending' AND next_attempt_at <= now())
-				   OR (status = 'sending' AND claimed_at < now() - make_interval(secs => $2))
-				ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED)
+				   OR (status = 'sending' AND claimed_at < now() - make_interval(secs => @stale))
+				ORDER BY id LIMIT @limit FOR UPDATE SKIP LOCKED)
 			RETURNING n.id, n.message_id, n.to_email, n.attach, n.after_action, n.attempts, n.created_at)
 		SELECT c.id, c.message_id, c.to_email, c.attach, c.after_action, c.attempts, c.created_at,
 			m.caller, m.duration_ms, m.created_at, m.minio_object
-		FROM c JOIN voicemail_messages m ON m.id = c.message_id ORDER BY c.id`, limit, stale.Seconds())
+		FROM c JOIN voicemail_messages m ON m.id = c.message_id ORDER BY c.id`,
+		momo.Named("limit", limit), momo.Named("stale", stale.Seconds()))
 	if err != nil {
 		return nil, err
 	}
@@ -241,13 +246,13 @@ func (s *Store) FinishEmail(ctx context.Context, id int64, r EmailResult) (remov
 		var msg int64
 		switch {
 		case r.Err == "":
-			err = tx.QueryRowContext(ctx, `UPDATE voicemail_notifications SET status = 'sent', last_error = '' WHERE id = $1 RETURNING message_id`, id).Scan(&msg)
+			err = tx.QueryRowContext(ctx, `UPDATE voicemail_notifications SET status = 'sent', last_error = '' WHERE id = @id RETURNING message_id`, momo.Named("id", id)).Scan(&msg)
 		case r.Final:
-			err = tx.QueryRowContext(ctx, `UPDATE voicemail_notifications SET status = 'failed', last_error = $2 WHERE id = $1 RETURNING message_id`,
-				id, truncate(r.Err, 500)).Scan(&msg)
+			err = tx.QueryRowContext(ctx, `UPDATE voicemail_notifications SET status = 'failed', last_error = @last_error WHERE id = @id RETURNING message_id`,
+				momo.Named("id", id), momo.Named("last_error", truncate(r.Err, 500))).Scan(&msg)
 		default:
-			err = tx.QueryRowContext(ctx, `UPDATE voicemail_notifications SET status = 'pending', next_attempt_at = $3, last_error = $2 WHERE id = $1 RETURNING message_id`,
-				id, truncate(r.Err, 500), r.RetryAt).Scan(&msg)
+			err = tx.QueryRowContext(ctx, `UPDATE voicemail_notifications SET status = 'pending', next_attempt_at = @next_attempt_at, last_error = @last_error WHERE id = @id RETURNING message_id`,
+				momo.Named("id", id), momo.Named("last_error", truncate(r.Err, 500)), momo.Named("next_attempt_at", r.RetryAt)).Scan(&msg)
 			if err == nil {
 				return nil
 			}
@@ -274,7 +279,7 @@ func settleMessage(ctx context.Context, tx *dbTx, msg int64, remove *string) err
 			count(*) FILTER (WHERE status = 'failed'),
 			count(*) FILTER (WHERE status = 'sent' AND after_action = 'delete'),
 			count(*) FILTER (WHERE status = 'sent' AND after_action = 'mark_read')
-		FROM voicemail_notifications WHERE message_id = $1`, msg).Scan(&open, &failed, &del, &read); err != nil {
+		FROM voicemail_notifications WHERE message_id = @message_id`, momo.Named("message_id", msg)).Scan(&open, &failed, &del, &read); err != nil {
 		return err
 	}
 	if open > 0 {
@@ -286,7 +291,8 @@ func settleMessage(ctx context.Context, tx *dbTx, msg int64, remove *string) err
 	}
 	var box int64
 	var object string
-	err := tx.QueryRowContext(ctx, `UPDATE voicemail_messages SET email_status = $2 WHERE id = $1 RETURNING box_id, minio_object`, msg, status).
+	err := tx.QueryRowContext(ctx, `UPDATE voicemail_messages SET email_status = @email_status WHERE id = @id RETURNING box_id, minio_object`,
+		momo.Named("id", msg), momo.Named("email_status", status)).
 		Scan(&box, &object)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
@@ -296,7 +302,7 @@ func settleMessage(ctx context.Context, tx *dbTx, msg int64, remove *string) err
 	}
 	switch {
 	case del > 0:
-		if _, err := tx.ExecContext(ctx, `DELETE FROM voicemail_messages WHERE id = $1`, msg); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM voicemail_messages WHERE id = @id`, momo.Named("id", msg)); err != nil {
 			return err
 		}
 		// A copy delivered to a voicemail group shares the object: it goes
@@ -311,7 +317,7 @@ func settleMessage(ctx context.Context, tx *dbTx, msg int64, remove *string) err
 		}
 		return notifyMailbox(ctx, tx, box)
 	case read > 0:
-		if _, err := tx.ExecContext(ctx, `UPDATE voicemail_messages SET heard = TRUE WHERE id = $1`, msg); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE voicemail_messages SET heard = TRUE WHERE id = @id`, momo.Named("id", msg)); err != nil {
 			return err
 		}
 		if err := insertAudit(ctx, tx, "system:mailer", "mark-read-after-email", "voicemail_message", itoa(msg)); err != nil {

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/prov"
 )
 
@@ -45,7 +47,9 @@ func ownerArgs(scope prov.OverrideScope, id int64) (group, phone sql.NullInt64) 
 	return sql.NullInt64{}, sql.NullInt64{Int64: id, Valid: true}
 }
 
-const ownerIs = `group_id IS NOT DISTINCT FROM $1 AND phone_id IS NOT DISTINCT FROM $2`
+// ownerIs selects the overrides of one owner; it binds @group_id and
+// @phone_id (ownerArgs).
+const ownerIs = `group_id IS NOT DISTINCT FROM @group_id AND phone_id IS NOT DISTINCT FROM @phone_id`
 
 // ListSettingOverrides returns the overrides of a group or a phone by key,
 // secrets masked. prov.ErrNotFound when the owner is gone.
@@ -55,7 +59,7 @@ func (s *Store) ListSettingOverrides(ctx context.Context, scope prov.OverrideSco
 	}
 	g, p := ownerArgs(scope, ownerID)
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT key, value, secret, updated_at FROM prov_setting_overrides
-		WHERE `+ownerIs+` ORDER BY key`, g, p)
+		WHERE `+ownerIs+` ORDER BY key`, momo.Named("group_id", g), momo.Named("phone_id", p))
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +84,7 @@ func (s *Store) overrideOwner(ctx context.Context, q querier, scope prov.Overrid
 		table = "phone_groups"
 	}
 	var one int
-	err := q.QueryRowContext(ctx, `SELECT 1 FROM `+table+` WHERE id = $1`, ownerID).Scan(&one)
+	err := q.QueryRowContext(ctx, `SELECT 1 FROM `+table+` WHERE id = @id`, momo.Named("id", ownerID)).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return prov.ErrNotFound
 	}
@@ -97,7 +101,7 @@ func (s *Store) ReplaceSettingOverrides(ctx context.Context, actor string, scope
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var vendor prov.Vendor
 		if scope == prov.ScopePhone {
-			if err := tx.QueryRowContext(ctx, `SELECT vendor FROM phones WHERE id = $1 FOR UPDATE`, ownerID).Scan(&vendor); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT vendor FROM phones WHERE id = @id FOR UPDATE`, momo.Named("id", ownerID)).Scan(&vendor); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return prov.ErrNotFound
 				}
@@ -109,7 +113,7 @@ func (s *Store) ReplaceSettingOverrides(ctx context.Context, actor string, scope
 		g, p := ownerArgs(scope, ownerID)
 		// The sealed values already stored, for a secret sent back masked.
 		kept := map[string][]byte{}
-		rows, err := tx.QueryContext(ctx, `SELECT key, value_enc FROM prov_setting_overrides WHERE `+ownerIs+` AND secret`, g, p)
+		rows, err := tx.QueryContext(ctx, `SELECT key, value_enc FROM prov_setting_overrides WHERE `+ownerIs+` AND secret`, momo.Named("group_id", g), momo.Named("phone_id", p))
 		if err != nil {
 			return err
 		}
@@ -170,7 +174,7 @@ func (s *Store) ReplaceSettingOverrides(ctx context.Context, actor string, scope
 				write = append(write, row{key: o.Key, value: val})
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM prov_setting_overrides WHERE `+ownerIs, g, p); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM prov_setting_overrides WHERE `+ownerIs, momo.Named("group_id", g), momo.Named("phone_id", p)); err != nil {
 			return err
 		}
 		for _, w := range write {
@@ -179,7 +183,8 @@ func (s *Store) ReplaceSettingOverrides(ctx context.Context, actor string, scope
 				enc = w.enc
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO prov_setting_overrides (group_id, phone_id, key, value, value_enc, secret)
-				VALUES ($1, $2, $3, $4, $5, $6)`, g, p, w.key, w.value, enc, w.enc != nil); err != nil {
+				VALUES (@group_id, @phone_id, @key, @value, @value_enc, @secret)`, momo.Named("group_id", g), momo.Named("phone_id", p),
+				momo.Named("key", w.key), momo.Named("value", w.value), momo.Named("value_enc", enc), momo.Named("secret", w.enc != nil)); err != nil {
 				return err
 			}
 		}
@@ -206,7 +211,7 @@ func (s *Store) renderOverrides(ctx context.Context, phoneID int64, groupID sql.
 	load := func(scope prov.OverrideScope, id int64) ([]prov.Override, error) {
 		g, p := ownerArgs(scope, id)
 		rows, err := s.db.QueryContext(ctx, `SELECT key, value, value_enc, secret FROM prov_setting_overrides
-			WHERE `+ownerIs, g, p)
+			WHERE `+ownerIs, momo.Named("group_id", g), momo.Named("phone_id", p))
 		if err != nil {
 			return nil, err
 		}

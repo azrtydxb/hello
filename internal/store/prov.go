@@ -414,7 +414,7 @@ func (s *Store) GetPhone(ctx context.Context, id int64) (Phone, error) {
 func getPhone(ctx context.Context, q querier, id int64) (Phone, error) {
 	ps := make([]Phone, 1)
 	var err error
-	if ps[0], err = scanPhone(q.QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1`, id)); err != nil {
+	if ps[0], err = scanPhone(q.QueryRowContext(ctx, phoneSelect+` WHERE p.id = @id`, momo.Named("id", id))); err != nil {
 		return ps[0], mapErr(err)
 	}
 	err = attachLines(ctx, q, ps)
@@ -487,7 +487,7 @@ func (s *Store) ImportPhones(ctx context.Context, actor string, in []PhoneInput)
 // do. fn returns the resource id for the audit row.
 func (s *Store) provChange(ctx context.Context, actor, action, resource string, fn func(*dbTx) (string, bool, error)) error {
 	return s.tx(ctx, func(tx *dbTx) error {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
+		if err := lockConfig(ctx, tx); err != nil {
 			return err
 		}
 		id, bump, err := fn(tx)
@@ -514,8 +514,7 @@ func bumpRevision(ctx context.Context, tx *dbTx) error {
 		`UPDATE schema_info SET config_revision = config_revision + 1 RETURNING config_revision`).Scan(&rev); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, NotifyChannel, strconv.FormatInt(rev, 10))
-	return err
+	return notifyConfig(ctx, tx, rev)
 }
 
 // conflict is a 409 whose message names what is in the way.
@@ -541,11 +540,11 @@ func (s *Store) createPhone(ctx context.Context, tx *dbTx, actor string, in Phon
 		return out, errors.New("store: no secret box to seal provisioning secrets")
 	}
 	// A phone created by hand (or imported) leaves the onboarding queue.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM onboarding_candidates WHERE mac = $1`, in.MAC); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM onboarding_candidates WHERE mac = @mac`, momo.Named("mac", in.MAC)); err != nil {
 		return out, err
 	}
 	var existing int64
-	switch err := tx.QueryRowContext(ctx, `SELECT id FROM phones WHERE mac = $1`, in.MAC).Scan(&existing); {
+	switch err := tx.QueryRowContext(ctx, `SELECT id FROM phones WHERE mac = @mac`, momo.Named("mac", in.MAC)).Scan(&existing); {
 	case err == nil:
 		return out, conflict("MAC %s is already phone %d", FormatMAC(in.MAC), existing)
 	case !errors.Is(err, sql.ErrNoRows):
@@ -556,7 +555,7 @@ func (s *Store) createPhone(ctx context.Context, tx *dbTx, actor string, in Phon
 	}
 	if in.GroupID != nil {
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1`, *in.GroupID).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = @id`, momo.Named("id", *in.GroupID)).Scan(&one); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return out, fieldError("groupId", "no such phone group")
 			}
@@ -589,9 +588,12 @@ func (s *Store) createPhone(ctx context.Context, tx *dbTx, actor string, in Phon
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO phones (id, mac, serial, vendor, model, label, device_id, template_id, blf, enabled,
 		                    token_hash, token_enc, admin_password_enc, redirect_status, group_id)
-		VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-		id, in.MAC, in.Serial, in.Vendor, in.Model, in.Label, devID, in.TemplateID, string(blf), in.Enabled,
-		hash, tokenEnc, adminEnc, string(statusJSON), in.GroupID); err != nil {
+		VALUES (@id, @mac, NULLIF(@serial, ''), @vendor, @model, @label, @device_id, @template_id, @blf, @enabled,
+		        @token_hash, @token_enc, @admin_password_enc, @redirect_status, @group_id)`,
+		momo.Named("id", id), momo.Named("mac", in.MAC), momo.Named("serial", in.Serial), momo.Named("vendor", in.Vendor),
+		momo.Named("model", in.Model), momo.Named("label", in.Label), momo.Named("device_id", devID), momo.Named("template_id", in.TemplateID),
+		momo.Named("blf", string(blf)), momo.Named("enabled", in.Enabled), momo.Named("token_hash", hash), momo.Named("token_enc", tokenEnc),
+		momo.Named("admin_password_enc", adminEnc), momo.Named("redirect_status", string(statusJSON)), momo.Named("group_id", in.GroupID)); err != nil {
 		return out, err
 	}
 	p, err := getPhone(ctx, tx, id)
@@ -602,8 +604,8 @@ func (s *Store) createPhone(ctx context.Context, tx *dbTx, actor string, in Phon
 // override template that does not exist, naming the field.
 func checkPhoneRefs(ctx context.Context, tx *dbTx, blf []string, templateID *int64) error {
 	if len(blf) > 0 {
-		rows, err := tx.QueryContext(ctx, `SELECT number FROM extensions WHERE number = ANY($1)
-			UNION SELECT number FROM conference_rooms WHERE number = ANY($1)`, blf)
+		rows, err := tx.QueryContext(ctx, `SELECT number FROM extensions WHERE number = ANY(@numbers)
+			UNION SELECT number FROM conference_rooms WHERE number = ANY(@numbers)`, momo.Named("numbers", blf))
 		if err != nil {
 			return err
 		}
@@ -628,7 +630,7 @@ func checkPhoneRefs(ctx context.Context, tx *dbTx, blf []string, templateID *int
 	}
 	if templateID != nil {
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM prov_templates WHERE id = $1`, *templateID).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM prov_templates WHERE id = @id`, momo.Named("id", *templateID)).Scan(&one); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return fieldError("templateId", "no such template")
 			}
@@ -651,7 +653,7 @@ func (s *Store) bindDevice(ctx context.Context, tx *dbTx, actor string, extensio
 // (S-10): a device is one line of one phone.
 func (s *Store) bindDeviceLine(ctx context.Context, tx *dbTx, actor string, extensionID, deviceID int64, mac, realm string, phone int64, line int) (int64, bool, error) {
 	var number string
-	if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1`, extensionID).Scan(&number); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = @id`, momo.Named("id", extensionID)).Scan(&number); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, false, fieldError("extensionId", "no such extension")
 		}
@@ -661,12 +663,12 @@ func (s *Store) bindDeviceLine(ctx context.Context, tx *dbTx, actor string, exte
 	if deviceID == 0 {
 		username := number + "-" + mac[6:]
 		var ext int64
-		err := tx.QueryRowContext(ctx, `SELECT id, extension_id FROM devices WHERE sip_username = $1 FOR UPDATE`, username).Scan(&deviceID, &ext)
+		err := tx.QueryRowContext(ctx, `SELECT id, extension_id FROM devices WHERE sip_username = @username FOR UPDATE`, momo.Named("username", username)).Scan(&deviceID, &ext)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			if err := tx.QueryRowContext(ctx, `
 				INSERT INTO devices (extension_id, sip_username, realm, ha1_md5, ha1_sha256, enabled)
-				VALUES ($1, $2, $3, '', '', TRUE) RETURNING id`, extensionID, username, realm).Scan(&deviceID); err != nil {
+				VALUES (@extension_id, @username, @realm, '', '', TRUE) RETURNING id`, momo.Named("extension_id", extensionID), momo.Named("username", username), momo.Named("realm", realm)).Scan(&deviceID); err != nil {
 				return 0, false, err
 			}
 			if err := insertAudit(ctx, tx, actor, "create", "device", strconv.FormatInt(deviceID, 10)); err != nil {
@@ -680,7 +682,7 @@ func (s *Store) bindDeviceLine(ctx context.Context, tx *dbTx, actor string, exte
 		}
 	} else {
 		var ext int64
-		if err := tx.QueryRowContext(ctx, `SELECT extension_id FROM devices WHERE id = $1 FOR UPDATE`, deviceID).Scan(&ext); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT extension_id FROM devices WHERE id = @id FOR UPDATE`, momo.Named("id", deviceID)).Scan(&ext); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return 0, false, fieldError("deviceId", "no such device")
 			}
@@ -708,7 +710,7 @@ func (s *Store) bindDeviceLine(ctx context.Context, tx *dbTx, actor string, exte
 // sealed, in secret_enc.
 func (s *Store) sealDeviceSecret(ctx context.Context, tx *dbTx, deviceID int64, realm, secret string) error {
 	var username string
-	if err := tx.QueryRowContext(ctx, `SELECT sip_username FROM devices WHERE id = $1`, deviceID).Scan(&username); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT sip_username FROM devices WHERE id = @id`, momo.Named("id", deviceID)).Scan(&username); err != nil {
 		return err
 	}
 	sealed, err := s.box.Seal(secret, prov.DeviceSecretAAD(deviceID))
@@ -717,8 +719,8 @@ func (s *Store) sealDeviceSecret(ctx context.Context, tx *dbTx, deviceID int64, 
 	}
 	md5Hex, shaHex := auth.HA1(username, realm, secret)
 	_, err = tx.ExecContext(ctx, `
-		UPDATE devices SET realm = $2, ha1_md5 = $3, ha1_sha256 = $4, secret_enc = $5, updated_at = now()
-		WHERE id = $1`, deviceID, realm, md5Hex, shaHex, sealed)
+		UPDATE devices SET realm = @realm, ha1_md5 = @ha1_md5, ha1_sha256 = @ha1_sha256, secret_enc = @secret_enc, updated_at = now()
+		WHERE id = @id`, momo.Named("id", deviceID), momo.Named("realm", realm), momo.Named("ha1_md5", md5Hex), momo.Named("ha1_sha256", shaHex), momo.Named("secret_enc", sealed))
 	return err
 }
 
@@ -734,7 +736,7 @@ func (s *Store) DeviceSecret(ctx context.Context, username string) (string, erro
 		id  int64
 		enc []byte
 	)
-	if err := s.db.QueryRowContext(ctx, `SELECT id, secret_enc FROM devices WHERE sip_username = $1 AND enabled`, username).Scan(&id, &enc); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT id, secret_enc FROM devices WHERE sip_username = @username AND enabled`, momo.Named("username", username)).Scan(&id, &enc); err != nil {
 		return "", err
 	}
 	if len(enc) == 0 {
@@ -749,7 +751,7 @@ func (s *Store) DeviceSecret(ctx context.Context, username string) (string, erro
 
 // unbindDevice drops a device's sealed secret; it keeps its HA1 values.
 func unbindDevice(ctx context.Context, tx *dbTx, deviceID int64) error {
-	_, err := tx.ExecContext(ctx, `UPDATE devices SET secret_enc = NULL, updated_at = now() WHERE id = $1`, deviceID)
+	_, err := tx.ExecContext(ctx, `UPDATE devices SET secret_enc = NULL, updated_at = now() WHERE id = @id`, momo.Named("id", deviceID))
 	return err
 }
 
@@ -810,7 +812,7 @@ type Binding struct {
 // existing device.
 func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c PhoneChange) (p Phone, secretRotated bool, err error) {
 	err = s.provChange(ctx, actor, "update", "phone", func(tx *dbTx) (string, bool, error) {
-		cur, err := scanPhone(tx.QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1 FOR UPDATE OF p`, id))
+		cur, err := scanPhone(tx.QueryRowContext(ctx, phoneSelect+` WHERE p.id = @id FOR UPDATE OF p`, momo.Named("id", id)))
 		if err != nil {
 			return "", false, err
 		}
@@ -829,7 +831,7 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 		setGroup, groupArg := c.GroupID != nil, any(nil)
 		if setGroup && *c.GroupID != nil {
 			var one int
-			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1`, **c.GroupID).Scan(&one); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = @id`, momo.Named("id", **c.GroupID)).Scan(&one); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return sid, false, fieldError("groupId", "no such phone group")
 				}
@@ -860,7 +862,7 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 					return sid, false, err
 				}
 				// The old device may be the one being rebound by name.
-				if _, err := tx.ExecContext(ctx, `UPDATE phones SET device_id = NULL, enabled = FALSE WHERE id = $1`, id); err != nil {
+				if _, err := tx.ExecContext(ctx, `UPDATE phones SET device_id = NULL, enabled = FALSE WHERE id = @id`, momo.Named("id", id)); err != nil {
 					return sid, false, err
 				}
 			}
@@ -889,7 +891,7 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 				model = *c.Model
 			}
 			var extra int
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phone_lines WHERE phone_id = $1`, id).Scan(&extra); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phone_lines WHERE phone_id = @phone_id`, momo.Named("phone_id", id)).Scan(&extra); err != nil {
 				return sid, false, err
 			}
 			if extra > 0 && 1+extra > prov.MaxLines(nv, model) {
@@ -933,17 +935,20 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 			sideArg = **c.SideKey
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE phones SET serial = CASE WHEN $2::text IS NULL THEN serial ELSE NULLIF($2, '') END,
-			       vendor = $3, model = COALESCE($4, model), label = COALESCE($5, label),
-			       blf = COALESCE($6::jsonb, blf), enabled = $7,
-			       template_id = CASE WHEN $8 THEN $9::bigint ELSE template_id END,
-			       group_id = CASE WHEN $11 THEN $12::bigint ELSE group_id END,
-			       ptt_channel_id = CASE WHEN $13 THEN $14::bigint ELSE ptt_channel_id END,
-			       sharing_role = COALESCE($15, sharing_role),
-			       side_key = CASE WHEN $16 THEN $17::text ELSE side_key END,
-			       device_id = $10, updated_at = now()
-			WHERE id = $1`, id, serial, vendor, c.Model, c.Label, blfArg, enabled, setTpl, tplArg, device,
-			setGroup, groupArg, setPTT, pttArg, c.SharingRole, setSide, sideArg); err != nil {
+			UPDATE phones SET serial = CASE WHEN @serial::text IS NULL THEN serial ELSE NULLIF(@serial::text, '') END,
+			       vendor = @vendor, model = COALESCE(@model, model), label = COALESCE(@label, label),
+			       blf = COALESCE(@blf::jsonb, blf), enabled = @enabled,
+			       template_id = CASE WHEN @set_template THEN @template_id::bigint ELSE template_id END,
+			       group_id = CASE WHEN @set_group THEN @group_id::bigint ELSE group_id END,
+			       ptt_channel_id = CASE WHEN @set_ptt THEN @ptt_channel_id::bigint ELSE ptt_channel_id END,
+			       sharing_role = COALESCE(@sharing_role, sharing_role),
+			       side_key = CASE WHEN @set_side_key THEN @side_key::text ELSE side_key END,
+			       device_id = @device_id, updated_at = now()
+			WHERE id = @id`, momo.Named("id", id), momo.Named("serial", serial), momo.Named("vendor", vendor), momo.Named("model", c.Model),
+			momo.Named("label", c.Label), momo.Named("blf", blfArg), momo.Named("enabled", enabled), momo.Named("set_template", setTpl),
+			momo.Named("template_id", tplArg), momo.Named("device_id", device), momo.Named("set_group", setGroup), momo.Named("group_id", groupArg),
+			momo.Named("set_ptt", setPTT), momo.Named("ptt_channel_id", pttArg), momo.Named("sharing_role", c.SharingRole),
+			momo.Named("set_side_key", setSide), momo.Named("side_key", sideArg)); err != nil {
 			return sid, false, err
 		}
 		p, err = getPhone(ctx, tx, id)
@@ -962,7 +967,7 @@ func (s *Store) DeletePhone(ctx context.Context, actor string, id int64) error {
 			vendor prov.Vendor
 			device sql.NullInt64
 		)
-		if err := tx.QueryRowContext(ctx, `SELECT mac, vendor, device_id FROM phones WHERE id = $1 FOR UPDATE`, id).
+		if err := tx.QueryRowContext(ctx, `SELECT mac, vendor, device_id FROM phones WHERE id = @id FOR UPDATE`, momo.Named("id", id)).
 			Scan(&mac, &vendor, &device); err != nil {
 			return sid, false, err
 		}
@@ -970,7 +975,7 @@ func (s *Store) DeletePhone(ctx context.Context, actor string, id int64) error {
 		if err != nil {
 			return sid, false, err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM phones WHERE id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM phones WHERE id = @id`, momo.Named("id", id)); err != nil {
 			return sid, false, err
 		}
 		for _, d := range lineDevs {
@@ -1013,7 +1018,7 @@ func (s *Store) newToken(ctx context.Context, actor, action string, id int64, im
 			mac    string
 			vendor prov.Vendor
 		)
-		if err := tx.QueryRowContext(ctx, `SELECT mac, vendor FROM phones WHERE id = $1 FOR UPDATE`, id).Scan(&mac, &vendor); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT mac, vendor FROM phones WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&mac, &vendor); err != nil {
 			return sid, false, err
 		}
 		token, hash := prov.NewToken()
@@ -1029,14 +1034,15 @@ func (s *Store) newToken(ctx context.Context, actor, action string, id int64, im
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE phones SET
-			       prev_token_hash = CASE WHEN $4 THEN NULL ELSE token_hash END,
-			       prev_token_expires = CASE WHEN $4 THEN NULL ELSE now() + make_interval(secs => $5) END,
-			       token_hash = $2, token_enc = $3,
+			       prev_token_hash = CASE WHEN @immediate::boolean THEN NULL ELSE token_hash END,
+			       prev_token_expires = CASE WHEN @immediate::boolean THEN NULL ELSE now() + make_interval(secs => @grace) END,
+			       token_hash = @token_hash, token_enc = @token_enc,
 			       token_exposed = FALSE,
-			       boot_armed = CASE WHEN $6 THEN TRUE ELSE boot_armed END,
-			       boot_reclaimed = CASE WHEN $6 THEN FALSE ELSE boot_reclaimed END,
+			       boot_armed = CASE WHEN @rearm::boolean THEN TRUE ELSE boot_armed END,
+			       boot_reclaimed = CASE WHEN @rearm::boolean THEN FALSE ELSE boot_reclaimed END,
 			       updated_at = now()
-			WHERE id = $1`, id, hash, enc, immediate, grace.Seconds(), rearm); err != nil {
+			WHERE id = @id`, momo.Named("id", id), momo.Named("token_hash", hash), momo.Named("token_enc", enc), momo.Named("immediate", immediate),
+			momo.Named("grace", grace.Seconds()), momo.Named("rearm", rearm)); err != nil {
 			return sid, false, err
 		}
 		st, err := s.queueRedirect(ctx, tx, vendor, mac, redirect.OpRegister)
@@ -1064,7 +1070,7 @@ func (s *Store) RevealAdminPassword(ctx context.Context, actor string, id int64)
 	}
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var enc []byte
-		if err := tx.QueryRowContext(ctx, `SELECT admin_password_enc FROM phones WHERE id = $1`, id).Scan(&enc); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT admin_password_enc FROM phones WHERE id = @id`, momo.Named("id", id)).Scan(&enc); err != nil {
 			return err
 		}
 		var err error
@@ -1088,7 +1094,7 @@ func (s *Store) RotateAdminPassword(ctx context.Context, actor string, id int64)
 		if err != nil {
 			return sid, false, err
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE phones SET admin_password_enc = $2, updated_at = now() WHERE id = $1`, id, enc)
+		res, err := tx.ExecContext(ctx, `UPDATE phones SET admin_password_enc = @admin_password_enc, updated_at = now() WHERE id = @id`, momo.Named("id", id), momo.Named("admin_password_enc", enc))
 		if err != nil {
 			return sid, false, err
 		}
@@ -1098,7 +1104,7 @@ func (s *Store) RotateAdminPassword(ctx context.Context, actor string, id int64)
 
 // ExistingMACs returns the phone id of each listed MAC that is taken.
 func (s *Store) ExistingMACs(ctx context.Context, macs []string) (map[string]int64, error) {
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT mac, id FROM phones WHERE mac = ANY($1)`, macs)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT mac, id FROM phones WHERE mac = ANY(@macs)`, momo.Named("macs", macs))
 	if err != nil {
 		return nil, err
 	}
@@ -1135,8 +1141,8 @@ type Fetch struct {
 func (s *Store) ListPhoneFetches(ctx context.Context, phoneID, before int64, limit int) ([]Fetch, string, error) {
 	rows, err := s.q(ctx).QueryContext(ctx, `
 		SELECT id, at, COALESCE(host(ip), ''), user_agent, path_redacted, kind, result, status, bytes
-		FROM prov_fetches WHERE phone_id = $1 AND ($2::bigint = 0 OR id < $2::bigint)
-		ORDER BY id DESC LIMIT $3`, phoneID, before, limit+1)
+		FROM prov_fetches WHERE phone_id = @phone_id AND (@before::bigint = 0 OR id < @before::bigint)
+		ORDER BY id DESC LIMIT @limit`, momo.Named("phone_id", phoneID), momo.Named("before", before), momo.Named("limit", limit+1))
 	if err != nil {
 		return nil, "", err
 	}
@@ -1166,7 +1172,7 @@ func (s *Store) ListPhoneFetches(ctx context.Context, phoneID, before int64, lim
 
 // PruneFetches deletes fetch audit rows older than before.
 func (s *Store) PruneFetches(ctx context.Context, before time.Time) (int64, error) {
-	res, err := s.q(ctx).ExecContext(ctx, `DELETE FROM prov_fetches WHERE at < $1`, before)
+	res, err := s.q(ctx).ExecContext(ctx, `DELETE FROM prov_fetches WHERE at < @before`, momo.Named("before", before))
 	if err != nil {
 		return 0, err
 	}
@@ -1179,9 +1185,9 @@ func (s *Store) PruneFetches(ctx context.Context, before time.Time) (int64, erro
 func (s *Store) PhoneFetchStates(ctx context.Context, staleBefore time.Time) (neverFetched, fetched, stale int, err error) {
 	err = s.q(ctx).QueryRowContext(ctx, `SELECT
 		count(*) FILTER (WHERE last_fetch_at IS NULL),
-		count(*) FILTER (WHERE last_fetch_at >= $1),
-		count(*) FILTER (WHERE last_fetch_at < $1)
-		FROM phones`, staleBefore).Scan(&neverFetched, &fetched, &stale)
+		count(*) FILTER (WHERE last_fetch_at >= @stale_before),
+		count(*) FILTER (WHERE last_fetch_at < @stale_before)
+		FROM phones`, momo.Named("stale_before", staleBefore)).Scan(&neverFetched, &fetched, &stale)
 	return neverFetched, fetched, stale, err
 }
 
@@ -1238,7 +1244,7 @@ func (s *Store) queueRedirect(ctx context.Context, tx *dbTx, v prov.Vendor, mac 
 	}
 	configured := s.prov.Deployment[v]
 	if !configured {
-		err := tx.QueryRowContext(ctx, `SELECT enabled AND credentials_enc IS NOT NULL FROM prov_redirect_accounts WHERE vendor = $1`, v).Scan(&configured)
+		err := tx.QueryRowContext(ctx, `SELECT enabled AND credentials_enc IS NOT NULL FROM prov_redirect_accounts WHERE vendor = @vendor`, momo.Named("vendor", v)).Scan(&configured)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return redirect.Status{}, err
 		}
@@ -1246,15 +1252,16 @@ func (s *Store) queueRedirect(ctx context.Context, tx *dbTx, v prov.Vendor, mac 
 	if !configured {
 		return redirect.Status{State: redirect.StateNotConfigured}, nil
 	}
-	if err := upsertJob(ctx, tx, `VALUES ($1, $2, $3)`, v, mac, op); err != nil {
+	if err := upsertJob(ctx, tx, `VALUES (@vendor, @mac, @op)`, momo.Named("vendor", v), momo.Named("mac", mac), momo.Named("op", op)); err != nil {
 		return redirect.Status{}, err
 	}
 	return redirect.Status{State: redirect.StatePending, At: time.Now().UTC()}, nil
 }
 
 // upsertJob inserts jobs from source (a VALUES list or a SELECT of vendor,
-// mac, op). A replacement takes a new seq and starts over; the 24-hour
-// give-up keeps counting while the operation stays the same.
+// mac, op), which binds by name with args. A replacement takes a new seq and
+// starts over; the 24-hour give-up keeps counting while the operation stays
+// the same.
 func upsertJob(ctx context.Context, tx *dbTx, source string, args ...any) error {
 	//nolint:gosec // G202: source is a caller's constant VALUES list or SELECT.
 	_, err := tx.ExecContext(ctx, `
@@ -1272,7 +1279,7 @@ func setRedirectStatus(ctx context.Context, tx *dbTx, id int64, st redirect.Stat
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE phones SET redirect_status = $2 WHERE id = $1`, id, string(b))
+	_, err = tx.ExecContext(ctx, `UPDATE phones SET redirect_status = @redirect_status WHERE id = @id`, momo.Named("id", id), momo.Named("redirect_status", string(b)))
 	return err
 }
 

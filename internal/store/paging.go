@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/azrtydxb/hello/internal/phonebook"
@@ -80,6 +81,8 @@ type PagingMulticast struct {
 	Enabled bool   `json:"enabled"`
 }
 
+// listPagingGroups reads the groups the where fragment selects; args are the
+// momo.Named binds of the fragment's @names.
 func listPagingGroups(ctx context.Context, q querier, where string, args ...any) ([]PagingGroup, error) {
 	rows, err := q.QueryContext(ctx, `SELECT g.id, g.name, g.code, g.priority, g.enabled, g.created_at, g.updated_at,
 			g.multicast_channel_id, c.id, c.label, c.address, c.port, c.codec, c.enabled
@@ -119,9 +122,9 @@ func listPagingGroups(ctx context.Context, q querier, where string, args ...any)
 		byID[out[i].ID] = &out[i]
 	}
 	const members = `SELECT m.group_id, m.extension_id, e.number, e.name FROM paging_group_members m
-		JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = ANY($1) ORDER BY m.group_id, m.position, e.number`
+		JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = ANY(@ids) ORDER BY m.group_id, m.position, e.number`
 	const callers = `SELECT m.group_id, m.extension_id, e.number, e.name FROM paging_group_callers m
-		JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = ANY($1) ORDER BY m.group_id, e.number`
+		JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = ANY(@ids) ORDER BY m.group_id, e.number`
 	for _, kind := range []struct {
 		query string
 		add   func(g *PagingGroup, pe PagingExtension)
@@ -129,7 +132,7 @@ func listPagingGroups(ctx context.Context, q querier, where string, args ...any)
 		{members, func(g *PagingGroup, pe PagingExtension) { g.Members = append(g.Members, pe) }},
 		{callers, func(g *PagingGroup, pe PagingExtension) { g.Callers = append(g.Callers, pe) }},
 	} {
-		mrows, err := q.QueryContext(ctx, kind.query, ids)
+		mrows, err := q.QueryContext(ctx, kind.query, momo.Named("ids", ids))
 		if err != nil {
 			return nil, err
 		}
@@ -157,7 +160,7 @@ func (s *Store) ListPagingGroups(ctx context.Context) ([]PagingGroup, error) {
 
 // GetPagingGroup returns one paging group.
 func (s *Store) GetPagingGroup(ctx context.Context, id int64) (PagingGroup, error) {
-	gs, err := listPagingGroups(ctx, s.q(ctx), ` WHERE g.id = $1`, id)
+	gs, err := listPagingGroups(ctx, s.q(ctx), ` WHERE g.id = @id`, momo.Named("id", id))
 	if err != nil {
 		return PagingGroup{}, err
 	}
@@ -202,7 +205,7 @@ func checkPagingChannel(ctx context.Context, tx *dbTx, id *int64) error {
 	}
 	var kind, codec string
 	var enabled bool
-	err := tx.QueryRowContext(ctx, `SELECT kind, codec, enabled FROM multicast_channels WHERE id = $1`, *id).Scan(&kind, &codec, &enabled)
+	err := tx.QueryRowContext(ctx, `SELECT kind, codec, enabled FROM multicast_channels WHERE id = @id`, momo.Named("id", *id)).Scan(&kind, &codec, &enabled)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return fieldError("multicastChannelId", "no such multicast channel")
@@ -220,10 +223,10 @@ func checkPagingChannel(ctx context.Context, tx *dbTx, id *int64) error {
 
 func writePagingLists(ctx context.Context, tx *dbTx, id int64, in PagingGroupInput) error {
 	for _, q := range []string{
-		`DELETE FROM paging_group_members WHERE group_id = $1`,
-		`DELETE FROM paging_group_callers WHERE group_id = $1`,
+		`DELETE FROM paging_group_members WHERE group_id = @group_id`,
+		`DELETE FROM paging_group_callers WHERE group_id = @group_id`,
 	} {
-		if _, err := tx.ExecContext(ctx, q, id); err != nil {
+		if _, err := tx.ExecContext(ctx, q, momo.Named("group_id", id)); err != nil {
 			return err
 		}
 	}
@@ -232,13 +235,13 @@ func writePagingLists(ctx context.Context, tx *dbTx, id int64, in PagingGroupInp
 	}
 	for i, ext := range in.Members {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO paging_group_members (group_id, extension_id, position)
-			VALUES ($1, $2, $3)`, id, ext, i+1); err != nil {
+			VALUES (@group_id, @extension_id, @position)`, momo.Named("group_id", id), momo.Named("extension_id", ext), momo.Named("position", i+1)); err != nil {
 			return pagingFK(err, "members")
 		}
 	}
 	for _, ext := range in.Callers {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO paging_group_callers (group_id, extension_id)
-			VALUES ($1, $2)`, id, ext); err != nil {
+			VALUES (@group_id, @extension_id)`, momo.Named("group_id", id), momo.Named("extension_id", ext)); err != nil {
 			return pagingFK(err, "callers")
 		}
 	}
@@ -274,14 +277,16 @@ func (s *Store) CreatePagingGroup(ctx context.Context, actor string, in PagingGr
 		var id int64
 		if err := dialGuard(ctx, tx, "code", func() error {
 			return tx.QueryRowContext(ctx, `INSERT INTO paging_groups (name, code, priority, enabled, multicast_channel_id)
-				VALUES ($1, $2, $3, $4, $5) RETURNING id`, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID).Scan(&id)
+				VALUES (@name, @code, @priority, @enabled, @multicast_channel_id) RETURNING id`,
+				momo.Named("name", in.Name), momo.Named("code", in.Code), momo.Named("priority", in.Priority), momo.Named("enabled", in.Enabled),
+				momo.Named("multicast_channel_id", in.MulticastChannelID)).Scan(&id)
 		}); err != nil {
 			return 0, err
 		}
 		if err := writePagingLists(ctx, tx, id, in); err != nil {
 			return id, err
 		}
-		gs, err := listPagingGroups(ctx, tx, ` WHERE g.id = $1`, id)
+		gs, err := listPagingGroups(ctx, tx, ` WHERE g.id = @id`, momo.Named("id", id))
 		if err == nil && len(gs) == 1 {
 			g = gs[0]
 		}
@@ -295,7 +300,7 @@ func (s *Store) UpdatePagingGroup(ctx context.Context, actor string, id int64, i
 	var g PagingGroup
 	err := s.configChange(ctx, actor, "update", "paging_group", check, func(tx *dbTx) (int64, error) {
 		var cur string
-		if err := tx.QueryRowContext(ctx, `SELECT code FROM paging_groups WHERE id = $1`, id).Scan(&cur); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT code FROM paging_groups WHERE id = @id`, momo.Named("id", id)).Scan(&cur); err != nil {
 			return id, err
 		}
 		if cur != in.Code {
@@ -310,8 +315,10 @@ func (s *Store) UpdatePagingGroup(ctx context.Context, actor string, id int64, i
 			return id, err
 		}
 		if err := dialGuard(ctx, tx, "code", func() error {
-			res, err := tx.ExecContext(ctx, `UPDATE paging_groups SET name = $2, code = $3, priority = $4, enabled = $5,
-				multicast_channel_id = $6, updated_at = now() WHERE id = $1`, id, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID)
+			res, err := tx.ExecContext(ctx, `UPDATE paging_groups SET name = @name, code = @code, priority = @priority, enabled = @enabled,
+				multicast_channel_id = @multicast_channel_id, updated_at = now() WHERE id = @id`,
+				momo.Named("id", id), momo.Named("name", in.Name), momo.Named("code", in.Code), momo.Named("priority", in.Priority), momo.Named("enabled", in.Enabled),
+				momo.Named("multicast_channel_id", in.MulticastChannelID))
 			if err != nil {
 				return err
 			}
@@ -322,7 +329,7 @@ func (s *Store) UpdatePagingGroup(ctx context.Context, actor string, id int64, i
 		if err := writePagingLists(ctx, tx, id, in); err != nil {
 			return id, err
 		}
-		gs, err := listPagingGroups(ctx, tx, ` WHERE g.id = $1`, id)
+		gs, err := listPagingGroups(ctx, tx, ` WHERE g.id = @id`, momo.Named("id", id))
 		if err == nil && len(gs) == 1 {
 			g = gs[0]
 		}
@@ -335,13 +342,13 @@ func (s *Store) UpdatePagingGroup(ctx context.Context, actor string, id int64, i
 func (s *Store) DeletePagingGroup(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "paging_group", check, func(tx *dbTx) (int64, error) {
 		var code string
-		if err := tx.QueryRowContext(ctx, `SELECT code FROM paging_groups WHERE id = $1`, id).Scan(&code); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT code FROM paging_groups WHERE id = @id`, momo.Named("id", id)).Scan(&code); err != nil {
 			return id, err
 		}
 		if err := refuseIfIVRPoints(ctx, tx, "paging group "+code, code, IVRPaging); err != nil {
 			return id, err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM paging_groups WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM paging_groups WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}

@@ -10,6 +10,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/azrtydxb/momo"
 )
 
 // Follow-me strategies and target kinds.
@@ -68,18 +70,18 @@ type fmQueryer interface {
 func getFollowMe(ctx context.Context, q fmQueryer, id int64) (FollowMe, error) {
 	f := DefaultFollowMe()
 	f.ExtensionID = id
-	if err := q.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1`, id).Scan(&f.Number); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = @id`, momo.Named("id", id)).Scan(&f.Number); err != nil {
 		return FollowMe{}, mapErr(err)
 	}
 	err := q.QueryRowContext(ctx, `
 		SELECT enabled, strategy, ring_own_devices, timeout_seconds, confirm_external, dnd_blocks
-		FROM follow_me WHERE extension_id = $1`, id).
+		FROM follow_me WHERE extension_id = @extension_id`, momo.Named("extension_id", id)).
 		Scan(&f.Enabled, &f.Strategy, &f.RingOwnDevices, &f.TimeoutSeconds, &f.ConfirmExternal, &f.DNDBlocks)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return FollowMe{}, err
 	}
 	rows, err := q.QueryContext(ctx, `
-		SELECT kind, target, delay_seconds FROM follow_me_targets WHERE extension_id = $1 ORDER BY position`, id)
+		SELECT kind, target, delay_seconds FROM follow_me_targets WHERE extension_id = @extension_id ORDER BY position`, momo.Named("extension_id", id))
 	if err != nil {
 		return FollowMe{}, err
 	}
@@ -112,7 +114,7 @@ type FollowMeInput struct {
 func (s *Store) PutFollowMe(ctx context.Context, actor string, id int64, in FollowMeInput) (FollowMe, error) {
 	err := s.configChangeID(ctx, actor, "update", "follow_me", nil, func(tx *dbTx) (string, error) {
 		var number string
-		if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1`, id).Scan(&number); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = @id`, momo.Named("id", id)).Scan(&number); err != nil {
 			return "", err
 		}
 		sid := fmt.Sprint(id)
@@ -121,20 +123,21 @@ func (s *Store) PutFollowMe(ctx context.Context, actor string, id int64, in Foll
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO follow_me (extension_id, enabled, strategy, ring_own_devices, timeout_seconds, confirm_external, dnd_blocks)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			VALUES (@extension_id, @enabled, @strategy, @ring_own_devices, @timeout_seconds, @confirm_external, @dnd_blocks)
 			ON CONFLICT (extension_id) DO UPDATE SET enabled = EXCLUDED.enabled, strategy = EXCLUDED.strategy,
 				ring_own_devices = EXCLUDED.ring_own_devices, timeout_seconds = EXCLUDED.timeout_seconds,
 				confirm_external = EXCLUDED.confirm_external, dnd_blocks = EXCLUDED.dnd_blocks, updated_at = now()`,
-			id, in.Enabled, in.Strategy, in.RingOwnDevices, in.TimeoutSeconds, in.ConfirmExternal, in.DNDBlocks); err != nil {
+			momo.Named("extension_id", id), momo.Named("enabled", in.Enabled), momo.Named("strategy", in.Strategy), momo.Named("ring_own_devices", in.RingOwnDevices),
+			momo.Named("timeout_seconds", in.TimeoutSeconds), momo.Named("confirm_external", in.ConfirmExternal), momo.Named("dnd_blocks", in.DNDBlocks)); err != nil {
 			return sid, err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM follow_me_targets WHERE extension_id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM follow_me_targets WHERE extension_id = @extension_id`, momo.Named("extension_id", id)); err != nil {
 			return sid, err
 		}
 		for i, t := range in.Targets {
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO follow_me_targets (extension_id, position, kind, target, delay_seconds)
-				VALUES ($1, $2, $3, $4, $5)`, id, i+1, t.Kind, t.Target, t.DelaySeconds); err != nil {
+				VALUES (@extension_id, @position, @kind, @target, @delay_seconds)`, momo.Named("extension_id", id), momo.Named("position", i+1), momo.Named("kind", t.Kind), momo.Named("target", t.Target), momo.Named("delay_seconds", t.DelaySeconds)); err != nil {
 				return sid, err
 			}
 		}
@@ -164,19 +167,19 @@ func validateFollowMe(ctx context.Context, tx *dbTx, own string, in FollowMeInpu
 		if t.Target == own && t.Kind != FollowMeRingGroup {
 			return fieldError(path+".target", "a target cannot be the extension itself")
 		}
-		var q string
+		var q string // binds @target
 		switch t.Kind {
 		case FollowMeExternal:
 			continue
 		case FollowMeExtension:
-			q = `SELECT count(*) FROM extensions WHERE number = $1`
+			q = `SELECT count(*) FROM extensions WHERE number = @target`
 		case FollowMeRingGroup:
-			q = `SELECT count(*) FROM ring_groups WHERE name = $1`
+			q = `SELECT count(*) FROM ring_groups WHERE name = @target`
 		default:
 			return fieldError(path+".kind", "must be external, extension or ring_group")
 		}
 		var n int
-		if err := tx.QueryRowContext(ctx, q, t.Target).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, q, momo.Named("target", t.Target)).Scan(&n); err != nil {
 			return err
 		}
 		if n == 0 {
