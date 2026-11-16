@@ -117,7 +117,9 @@ func (s *Server) replacesMetric(dialog, result string) {
 	}
 }
 
-// replacesFail refuses the replacing INVITE and records its CDR.
+// replacesFail refuses the replacing INVITE and records its CDR. The refusal
+// is counted before the response goes out, so whoever sees the refusal (the
+// phone, a scrape after it) sees it counted.
 func (c *call) replacesFail(tx sip.ServerTransaction, dialog string, code int, why string) {
 	result := replacesRefused
 	switch code {
@@ -128,10 +130,10 @@ func (c *call) replacesFail(tx sip.ServerTransaction, dialog string, code int, w
 	case sip.StatusBusyHere:
 		result = replacesBusy
 	}
+	c.s.replacesMetric(dialog, result)
 	c.addTrace("Replaces refused: " + why)
 	c.s.respond(tx, c.inv, code, statusText(code))
 	c.record(code, cdr.SideSystem, why, ResultNotFound)
-	c.s.replacesMetric(dialog, result)
 }
 
 // handleReplaces serves an INVITE with Replaces from an authenticated phone;

@@ -314,8 +314,16 @@ func TestPrackAndReplaces(t *testing.T) {
 		if !sawCaller {
 			t.Errorf("the replacing caller's CDR does not name the call it replaced: %+v", got)
 		}
-		if v := pbx.metric(t, "hello_replaces_total", map[string]string{"dialog": "confirmed", "result": "ok"}); v != 3 {
-			t.Errorf("hello_replaces_total{confirmed,ok} = %v, want 3", v)
+		// A takeover counts as ok once the replacing phone has ACKed its 200,
+		// after the BYE to the phone that left, so the last one may still be
+		// on its way when the test gets here.
+		var okCount float64
+		eventually(t, "hello_replaces_total{confirmed,ok} reaches 3", func() bool {
+			okCount = pbx.metric(t, "hello_replaces_total", map[string]string{"dialog": "confirmed", "result": "ok"})
+			return okCount >= 3
+		})
+		if okCount != 3 {
+			t.Errorf("hello_replaces_total{confirmed,ok} = %v, want 3", okCount)
 		}
 	})
 }

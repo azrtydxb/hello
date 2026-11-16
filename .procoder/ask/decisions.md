@@ -6347,3 +6347,26 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   These, the `wifiIDs` reads and ListSCEPCertificates are assembled or
   passed at run time, so the DB tier checks them, not
   `TestStatementsBuild`.
+
+## TestPrackAndReplaces: a Replaces refusal is counted before it is sent (2026-11-17)
+
+CI flaked `confirmed dialog` with `hello_replaces_total{confirmed,forbidden}
+= 0` (run 43931278463, a branch that does not touch `internal/sip`). It
+was the product. `replacesFail` sent the refusal, wrote the CDR and only
+then counted it. The test moves on once it has the refusal and the CDR, so a
+handler goroutine stalled after the CDR left the count unread through the
+next two refusals. A forced 300 ms sleep at that point reproduces the CI
+failure every time. The refusal is now counted before the response goes out,
+so anyone who sees the refusal (the phone, a scrape after it) sees it
+counted. With the same sleep after the response and the CDR, the test
+passes.
+
+- **The ok counts stay where they are.** A takeover is ok only once the
+  replacing phone has ACKed its 200, after the BYE to the phone that left, so
+  it cannot be counted before the response. A forced sleep there gives
+  `{confirmed,ok} = 2, want 3`. The test now waits up to 10 s for the count
+  to reach 3 and still fails unless it is exactly 3.
+- **Not changed, reported.** `replaceRemote` (the call is on another node)
+  returns without counting when `answerSelf` fails. The local takeover paths
+  count that as refused. This is a separate inconsistency and is left for a
+  decision.
