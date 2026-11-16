@@ -163,7 +163,7 @@ func TestRestoreIntegration(t *testing.T) {
 	}
 	service := func(db *sql.DB, cfg *pgx.ConnConfig, objs *memObjects) *backup.Service {
 		return backup.New(backup.Config{
-			DB: store.New(db), Key: key, Live: objs, Tools: backup.PGTools{Conn: cfg}, Tmp: t.TempDir(),
+			DB: store.New(db, nil), Key: key, Live: objs, Tools: backup.PGTools{Conn: cfg}, Tmp: t.TempDir(),
 			Dest: func(context.Context, backup.SecretSettings) (backup.Store, string, error) {
 				return objs, backup.DefaultBucket, nil
 			},

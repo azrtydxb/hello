@@ -63,7 +63,7 @@ func (s *Store) GetFaxDestination(ctx context.Context, id int64) (fax.Destinatio
 	return d, err
 }
 
-func extensionID(ctx context.Context, tx *sql.Tx, number string) (int64, error) {
+func extensionID(ctx context.Context, tx *dbTx, number string) (int64, error) {
 	var id int64
 	err := tx.QueryRowContext(ctx, `SELECT id FROM extensions WHERE number = $1`, number).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -75,7 +75,7 @@ func extensionID(ctx context.Context, tx *sql.Tx, number string) (int64, error) 
 // CreateFaxDestination adds a destination; a taken name is ErrConflict.
 func (s *Store) CreateFaxDestination(ctx context.Context, actor string, in FaxDestinationInput) (fax.Destination, error) {
 	var id int64
-	err := s.configChange(ctx, actor, "create", "fax_destination", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "fax_destination", nil, func(tx *dbTx) (int64, error) {
 		ext, err := extensionID(ctx, tx, in.Extension)
 		if err != nil {
 			return 0, err
@@ -93,7 +93,7 @@ func (s *Store) CreateFaxDestination(ctx context.Context, actor string, in FaxDe
 // UpdateFaxDestination changes the owner and the address; the name never
 // changes, because routes and IVR keys refer to it.
 func (s *Store) UpdateFaxDestination(ctx context.Context, actor string, id int64, in FaxDestinationInput) (fax.Destination, error) {
-	err := s.configChange(ctx, actor, "update", "fax_destination", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "fax_destination", nil, func(tx *dbTx) (int64, error) {
 		ext, err := extensionID(ctx, tx, in.Extension)
 		if err != nil {
 			return id, err
@@ -112,7 +112,7 @@ func (s *Store) UpdateFaxDestination(ctx context.Context, actor string, id int64
 
 // DeleteFaxDestination removes a destination no route and no IVR key names.
 func (s *Store) DeleteFaxDestination(ctx context.Context, actor string, id int64) error {
-	return s.configChange(ctx, actor, "delete", "fax_destination", nil, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "fax_destination", nil, func(tx *dbTx) (int64, error) {
 		var name string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM fax_destinations WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -329,7 +329,7 @@ func (s *Store) FaxOwnerExtensions(ctx context.Context, userID int64) ([]string,
 
 // Faxes is the fax.Store over PostgreSQL for hello-sip. Times are the
 // database's clock, so nodes with skewed clocks agree on leases.
-type Faxes struct{ db *sql.DB }
+type Faxes struct{ db *dbPool }
 
 var _ fax.Store = (*Faxes)(nil)
 

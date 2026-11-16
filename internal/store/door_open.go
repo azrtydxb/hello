@@ -64,7 +64,7 @@ func (s *Store) GetDoorOpen(ctx context.Context, id int64) (DoorOpen, error) {
 // extension and never the code.
 func (s *Store) SetDoorOpen(ctx context.Context, actor string, id int64, c DoorOpenChange, check Check) (DoorOpen, error) {
 	var out DoorOpen
-	err := s.configChange(ctx, actor, "update", "door_open", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "door_open", check, func(tx *dbTx) (int64, error) {
 		var kind string
 		if err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = $1 FOR UPDATE`, id).Scan(&kind); err != nil {
 			return id, err

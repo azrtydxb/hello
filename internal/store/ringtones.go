@@ -74,7 +74,7 @@ func RingtoneObjectKey(name, sha256 string) string { return name + "/" + sha256 
 // CreateRingtone adds a tone; a name the library has is a conflict.
 func (s *Store) CreateRingtone(ctx context.Context, actor, name string, info prov.ToneInfo, size int64, sha256 string) (RingtoneFile, error) {
 	var out RingtoneFile
-	err := s.provChange(ctx, actor, "create", "ringtones", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "create", "ringtones", func(tx *dbTx) (string, bool, error) {
 		var id int64
 		switch err := tx.QueryRowContext(ctx, `SELECT id FROM ringtones WHERE name = $1`, name).Scan(&id); {
 		case err == nil:
@@ -101,7 +101,7 @@ func (s *Store) CreateRingtone(ctx context.Context, actor, name string, info pro
 // for an unknown id.
 func (s *Store) DeleteRingtone(ctx context.Context, actor string, id int64) (string, error) {
 	var key string
-	err := s.provChange(ctx, actor, "delete", "ringtones", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "delete", "ringtones", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(id, 10)
 		var name string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM ringtones WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {

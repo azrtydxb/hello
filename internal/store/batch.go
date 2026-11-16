@@ -10,7 +10,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -27,13 +26,6 @@ const BatchViaPrefix = "batch:"
 
 // BatchRetention is how long applied batches are kept.
 const BatchRetention = 90 * 24 * time.Hour
-
-// dbq is what both *sql.DB and *sql.Tx offer.
-type dbq interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
 
 // q is the handle a query made under ctx runs on: the open batch's
 // transaction, so a later operation of a batch sees the earlier ones, or the
@@ -69,7 +61,7 @@ type batchTouch struct {
 // Batch is one open configuration batch.
 type Batch struct {
 	s        *Store
-	tx       *sql.Tx
+	tx       *dbTx
 	id       string
 	revision int64
 	op       int

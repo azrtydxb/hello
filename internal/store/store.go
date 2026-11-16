@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"slices"
 	"strconv"
@@ -18,11 +19,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/azrtydxb/momo"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/azrtydxb/hello/internal/auth"
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/secret"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var (
@@ -77,7 +81,7 @@ const MailboxChannel = "hello_mwi"
 
 // Store wraps the hello-control database.
 type Store struct {
-	db   *sql.DB
+	db   *dbPool
 	box  *secret.Box
 	prov ProvSettings
 	// msgEvents receives the inbox's events; nil drops them. It is set at
@@ -85,8 +89,14 @@ type Store struct {
 	msgEvents atomic.Pointer[messaging.EventSink]
 }
 
-// New wraps db.
-func New(db *sql.DB) *Store { return &Store{db: db} }
+// New wraps db. Statements run on momo's handle over db (internal/db.New),
+// logged through log at debug level, or not at all when log is nil.
+func New(db *sql.DB, log *slog.Logger) *Store {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Store{db: newPool(db, hellodb.New(db, log))}
+}
 
 // WithSecretBox sets the box that seals trunk passwords and returns s.
 // Without one, setting a trunk password fails.
@@ -95,32 +105,51 @@ func (s *Store) WithSecretBox(b *secret.Box) *Store {
 	return s
 }
 
-// mapErr turns driver errors into the package sentinels.
+// mapErr turns driver errors into the package sentinels. momo classifies a
+// statement's PostgreSQL error (momo.ErrUniqueViolation and so on, with the
+// constraint name); the *pgconn.PgError stays reachable under it, and is the
+// fallback for an error momo did not classify (raw database/sql) and the
+// source of the foreign-key message, which momo does not expose.
 func mapErr(err error) error {
+	if err == nil {
+		return nil
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
-	var pg *pgconn.PgError
-	if errors.As(err, &pg) {
-		switch pg.Code {
-		case "23505": // unique_violation
-			return fmt.Errorf("%w: %s", ErrConflict, pg.ConstraintName)
-		case "23503": // foreign_key_violation
-			// A delete refused by an ON DELETE RESTRICT key (a device or
-			// template a phone names, a pinned firmware) is a conflict,
-			// not a missing row (provisioning contract 8). The callers
-			// check first and name the referencing row; this covers a
-			// reference added concurrently.
-			if strings.HasPrefix(pg.Message, "update or delete on table") {
-				return &InUseError{Msg: "still referenced (" + pg.ConstraintName + "); remove the reference first"}
-			}
-			return fmt.Errorf("%w: %s", ErrNotFound, pg.ConstraintName)
+	var (
+		me *momo.Error
+		pg *pgconn.PgError
+	)
+	errors.As(err, &me)
+	isPG := errors.As(err, &pg)
+	constraint := func() string {
+		if me != nil && me.Constraint != "" {
+			return me.Constraint
 		}
+		if isPG {
+			return pg.ConstraintName
+		}
+		return ""
+	}
+	switch {
+	case errors.Is(err, momo.ErrUniqueViolation), isPG && pg.Code == "23505": // unique_violation
+		return fmt.Errorf("%w: %s", ErrConflict, constraint())
+	case errors.Is(err, momo.ErrForeignKeyViolation), isPG && pg.Code == "23503": // foreign_key_violation
+		// A delete refused by an ON DELETE RESTRICT key (a device or
+		// template a phone names, a pinned firmware) is a conflict, not a
+		// missing row (provisioning contract 8). The callers check first
+		// and name the referencing row; this covers a reference added
+		// concurrently.
+		if isPG && strings.HasPrefix(pg.Message, "update or delete on table") {
+			return &InUseError{Msg: "still referenced (" + constraint() + "); remove the reference first"}
+		}
+		return fmt.Errorf("%w: %s", ErrNotFound, constraint())
 	}
 	return err
 }
 
-func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
+func (s *Store) tx(ctx context.Context, fn func(*dbTx) error) error {
 	if b := s.batchOf(ctx); b != nil {
 		// Inside a batch the batch owns the transaction: it commits or rolls
 		// back everything together.
@@ -190,14 +219,14 @@ func fieldError(path, msg string) error {
 // configChange runs fn and, in the same transaction, checks the resulting
 // routing configuration, records the audit event, bumps the configuration
 // revision and notifies hello-sip. fn returns the affected resource's id.
-func (s *Store) configChange(ctx context.Context, actor, action, resource string, check Check, fn func(*sql.Tx) (int64, error)) error {
-	return s.configChangeID(ctx, actor, action, resource, check, func(tx *sql.Tx) (string, error) {
+func (s *Store) configChange(ctx context.Context, actor, action, resource string, check Check, fn func(*dbTx) (int64, error)) error {
+	return s.configChangeID(ctx, actor, action, resource, check, func(tx *dbTx) (string, error) {
 		id, err := fn(tx)
 		return strconv.FormatInt(id, 10), err
 	})
 }
 
-func (s *Store) configChangeID(ctx context.Context, actor, action, resource string, check Check, fn func(*sql.Tx) (string, error)) error {
+func (s *Store) configChangeID(ctx context.Context, actor, action, resource string, check Check, fn func(*dbTx) (string, error)) error {
 	if b := s.batchOf(ctx); b != nil {
 		// Inside a batch the lock is already held, the check runs once at
 		// the end and the revision moves once (RunBatch).
@@ -208,7 +237,7 @@ func (s *Store) configChangeID(ctx context.Context, actor, action, resource stri
 		b.record(check, resource, id)
 		return insertAudit(ctx, b.tx, actor, action, resource, id)
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
 			return err
 		}
@@ -261,7 +290,7 @@ func (s *Store) configChangeID(ctx context.Context, actor, action, resource stri
 
 // bumpConfigRevision moves the configuration revision and tells the nodes,
 // for a change made outside configChange that hello-sip's snapshot reads.
-func bumpConfigRevision(ctx context.Context, tx *sql.Tx) error {
+func bumpConfigRevision(ctx context.Context, tx *dbTx) error {
 	var rev int64
 	if err := tx.QueryRowContext(ctx,
 		`UPDATE schema_info SET config_revision = config_revision + 1 RETURNING config_revision`).Scan(&rev); err != nil {
@@ -307,7 +336,7 @@ func errorKeys(cfg routing.Config, fields []routing.FieldError) map[string]bool 
 // configPath is the routing.Config path of the changed item — for example
 // "outbound[2]" or `extensions["101"]` — or "" when it has none (a delete,
 // a reorder).
-func configPath(ctx context.Context, tx *sql.Tx, cfg routing.Config, resource, id string) (string, error) {
+func configPath(ctx context.Context, tx *dbTx, cfg routing.Config, resource, id string) (string, error) {
 	n, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		return "", nil
@@ -385,7 +414,7 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 // concurrently starting replicas create at most one bootstrap user.
 func (s *Store) CreateFirstUser(ctx context.Context, username, passwordHash string) (bool, error) {
 	created := false
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var id int64
 		err := tx.QueryRowContext(ctx, `
 			INSERT INTO users (username, password_hash, role)
@@ -619,7 +648,7 @@ func (s *Store) CreateToken(ctx context.Context, actor string, userID int64, in 
 	if in.Scopes == nil {
 		t.Kind, t.Scopes, scopes = "legacy", slices.Clone(auth.AllScopes), nil
 	}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO api_tokens (user_id, name, token_hash, kind, scopes, expires_at)
 			VALUES ($1, $2, $3, $4, $5::text[], $6) RETURNING id, created_at`,
@@ -633,7 +662,7 @@ func (s *Store) CreateToken(ctx context.Context, actor string, userID int64, in 
 
 // DeleteToken revokes one of userID's API tokens.
 func (s *Store) DeleteToken(ctx context.Context, actor string, userID, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM api_tokens WHERE id = $1 AND user_id = $2`, id, userID)
 		if err != nil {
 			return err

@@ -135,7 +135,7 @@ func scanUser(r interface{ Scan(...any) error }) (User, error) {
 // CreateAccount.
 func (s *Store) CreateUser(ctx context.Context, actor, username, passwordHash string, role auth.Role) (int64, error) {
 	var id int64
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var managed bool
 		switch err := tx.QueryRowContext(ctx, `SELECT source_connector_id IS NOT NULL FROM users WHERE username = $1`, username).Scan(&managed); {
 		case err == nil && managed:
@@ -176,7 +176,7 @@ func (s *Store) CreateAccount(ctx context.Context, actor string, in NewAccount) 
 		// The zero value is not a valid column value; "none" is the default.
 		in.Voicemail.After = "none"
 	}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO users (username, password_hash, role, display_name, email, must_change_password,
@@ -248,7 +248,7 @@ type AccountChange struct {
 // Disabling a user, and resetting a password, end their sessions.
 func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c AccountChange) (User, error) {
 	var u User
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		admins, err := lockAdmins(ctx, tx)
 		if err != nil {
 			return err
@@ -378,7 +378,7 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 // disabled or going), otherwise the ones on an extension the user is no
 // longer linked to. The configuration revision moves when any changed, so
 // hello-sip drops their registrations.
-func revokeClientDevices(ctx context.Context, tx *sql.Tx, id int64, keepLinked bool) error {
+func revokeClientDevices(ctx context.Context, tx *dbTx, id int64, keepLinked bool) error {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE devices SET enabled = FALSE, updated_at = now()
 		WHERE user_id = $1 AND kind <> 'desk' AND enabled
@@ -416,7 +416,7 @@ func prefAfter(p *VoicemailEmailPrefs) *string {
 // DeleteUser removes a user with its sessions, tokens and personal book.
 // Deleting the last enabled admin returns ErrLastAdmin.
 func (s *Store) DeleteUser(ctx context.Context, actor string, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		admins, err := lockAdmins(ctx, tx)
 		if err != nil {
 			return err
@@ -469,14 +469,14 @@ func (s *Store) SetUserExtension(ctx context.Context, actor string, id int64, ex
 
 // countBreakGlass counts the enabled break-glass admins; the caller holds the
 // admin rows (lockAdmins), so concurrent changes serialise.
-func countBreakGlass(ctx context.Context, tx *sql.Tx) (int, error) {
+func countBreakGlass(ctx context.Context, tx *dbTx) (int, error) {
 	var n int
 	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE role = 'admin' AND enabled AND break_glass`).Scan(&n)
 	return n, err
 }
 
 // lockAdmins locks every enabled admin row and counts them.
-func lockAdmins(ctx context.Context, tx *sql.Tx) (int, error) {
+func lockAdmins(ctx context.Context, tx *dbTx) (int, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM users WHERE role = 'admin' AND enabled FOR UPDATE`)
 	if err != nil {
 		return 0, err
@@ -492,7 +492,7 @@ func lockAdmins(ctx context.Context, tx *sql.Tx) (int, error) {
 // setUserExtensions replaces the extensions of user id with ids, in order;
 // the first is the primary one. An unknown extension is a field error and
 // one linked to another user a conflict naming that user.
-func setUserExtensions(ctx context.Context, tx *sql.Tx, id int64, ids []int64) error {
+func setUserExtensions(ctx context.Context, tx *dbTx, id int64, ids []int64) error {
 	seen := map[int64]bool{}
 	var clean []int64
 	for _, e := range ids {
@@ -596,7 +596,7 @@ func (s *Store) UpgradePasswordHash(ctx context.Context, id int64, oldHash, newH
 // ChangeOwnPassword sets a user's own new password, clears the forced-change
 // flag and ends every session but keep (the one making the change).
 func (s *Store) ChangeOwnPassword(ctx context.Context, id int64, newHash string, keep []byte) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE users SET password_hash = $2, must_change_password = FALSE WHERE id = $1`, id, newHash); err != nil {
 			return mapErr(err)
@@ -625,7 +625,7 @@ type ProfileChange struct {
 // UpdateProfile changes the caller's own profile.
 func (s *Store) UpdateProfile(ctx context.Context, actor string, id int64, c ProfileChange) (User, error) {
 	var u User
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `
 			UPDATE users SET
 				display_name = COALESCE($2, display_name),

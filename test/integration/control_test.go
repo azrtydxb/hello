@@ -52,7 +52,7 @@ func TestConfigChangeAuditedAndRevisioned(t *testing.T) {
 	if _, err := migrate.Up(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	st := store.New(db)
+	st := store.New(db, nil)
 	hash, err := auth.HashPassword("pw-for-alice")
 	if err != nil {
 		t.Fatal(err)

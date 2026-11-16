@@ -381,7 +381,7 @@ type convRow struct {
 }
 
 // lockConversation locks a conversation the caller reaches for update.
-func lockConversation(ctx context.Context, tx *sql.Tx, acc InboxAccess, id int64) (convRow, error) {
+func lockConversation(ctx context.Context, tx *dbTx, acc InboxAccess, id int64) (convRow, error) {
 	var c convRow
 	err := tx.QueryRowContext(ctx, `
 		SELECT c.id, c.channel_id, c.address_id, c.peer_key, c.status, c.assignee_user_id
@@ -397,7 +397,7 @@ const inboxEventLock = 0x68656c6c6f696e62 // "helloinb"
 
 // emitConversationEvent tells everyone the conversation concerns: its
 // assignee, or every supervisor while it is unassigned, plus extra users.
-func emitConversationEvent(ctx context.Context, tx *sql.Tx, convID, msgID int64, typ string, extra []int64) error {
+func emitConversationEvent(ctx context.Context, tx *dbTx, convID, msgID int64, typ string, extra []int64) error {
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(inboxEventLock)); err != nil {
 		return err
 	}
@@ -420,7 +420,7 @@ func emitConversationEvent(ctx context.Context, tx *sql.Tx, convID, msgID int64,
 
 // addLine writes a note or a system line into a conversation. It does not
 // move the conversation's last message.
-func addLine(ctx context.Context, tx *sql.Tx, c convRow, kind, senderKind string, userID int64, name, body string) (int64, error) {
+func addLine(ctx context.Context, tx *dbTx, c convRow, kind, senderKind string, userID int64, name, body string) (int64, error) {
 	var user any
 	if userID > 0 {
 		user = userID
@@ -437,7 +437,7 @@ func addLine(ctx context.Context, tx *sql.Tx, c convRow, kind, senderKind string
 // sent.
 func (s *Store) AddNote(ctx context.Context, acc InboxAccess, convID int64, body string) (ConvMessage, error) {
 	var out ConvMessage
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		c, err := lockConversation(ctx, tx, acc, convID)
 		if err != nil {
 			return err
@@ -481,7 +481,7 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 		sinkEvent *messaging.Event
 		claimedBy int64
 	)
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		sinkEvent, claimedBy = nil, 0
 		c, err := lockConversation(ctx, tx, acc, in.ConversationID)
 		if err != nil {
@@ -628,7 +628,7 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 }
 
 // optedOut reports whether the customer opted out of the address.
-func optedOut(ctx context.Context, tx *sql.Tx, s *Store, addressID int64, peerKey string) (bool, error) {
+func optedOut(ctx context.Context, tx *dbTx, s *Store, addressID int64, peerKey string) (bool, error) {
 	h, err := s.peerHash(peerKey)
 	if err != nil {
 		return false, err
@@ -673,7 +673,7 @@ func eligibleAgent(ctx context.Context, tx rowQuerier, userID int64) (string, er
 // assignment is a compare-and-set in PostgreSQL, so two agents (or two
 // control pods) cannot both win: the loser gets ErrConversationState.
 func (s *Store) ClaimConversation(ctx context.Context, acc InboxAccess, convID int64) (Conversation, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		c, err := lockConversation(ctx, tx, acc, convID)
 		if err != nil {
 			return err
@@ -709,7 +709,7 @@ func (s *Store) ClaimConversation(ctx context.Context, acc InboxAccess, convID i
 
 // emitPoolEvent tells the supervisors and the new assignee that a
 // conversation left the pool or moved.
-func emitPoolEvent(ctx context.Context, tx *sql.Tx, convID int64, typ string, toUser int64) error {
+func emitPoolEvent(ctx context.Context, tx *dbTx, convID int64, typ string, toUser int64) error {
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(inboxEventLock)); err != nil {
 		return err
 	}
@@ -725,7 +725,7 @@ func emitPoolEvent(ctx context.Context, tx *sql.Tx, convID int64, typ string, to
 // only one assigned to them.
 func (s *Store) AssignConversation(ctx context.Context, acc InboxAccess, convID, toUser int64) (Conversation, error) {
 	var ev *messaging.Event
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		ev = nil
 		c, err := lockConversation(ctx, tx, acc, convID)
 		if err != nil {
@@ -804,7 +804,7 @@ func (s *Store) conversationByID(ctx context.Context, userID int64, all bool, id
 // future time; resolving stamps resolved_at and reopening clears it.
 func (s *Store) SetConversationStatus(ctx context.Context, acc InboxAccess, convID int64, status string, until *time.Time) (Conversation, error) {
 	var ev *messaging.Event
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		ev = nil
 		c, err := lockConversation(ctx, tx, acc, convID)
 		if err != nil {
@@ -855,7 +855,7 @@ func (s *Store) SetConversationStatus(ctx context.Context, acc InboxAccess, conv
 
 // SetConversationTags replaces a conversation's tags (already cleaned).
 func (s *Store) SetConversationTags(ctx context.Context, acc InboxAccess, convID int64, tags []string) (Conversation, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		c, err := lockConversation(ctx, tx, acc, convID)
 		if err != nil {
 			return err
@@ -874,7 +874,7 @@ func (s *Store) SetConversationTags(ctx context.Context, acc InboxAccess, convID
 // MarkConversationRead records that the caller has read up to the
 // conversation's last message.
 func (s *Store) MarkConversationRead(ctx context.Context, acc InboxAccess, convID int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		c, err := lockConversation(ctx, tx, acc, convID)
 		if err != nil {
 			return err
@@ -922,7 +922,7 @@ func (s *Store) BulkConversations(ctx context.Context, acc InboxAccess, ids []in
 		}
 		res.Done++
 	}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		return insertAudit(ctx, tx, acc.Actor, fmt.Sprintf("bulk_%s done=%d failed=%d", action, res.Done, res.Failed), "conversation", "-")
 	})
 	return res, err
@@ -1112,7 +1112,7 @@ func (s *Store) IngestTrunkText(ctx context.Context, in TrunkText) (IngestResult
 	var ev *messaging.Event
 	for attempt := 0; ; attempt++ {
 		res, ev = IngestResult{}, nil
-		err := s.tx(ctx, func(tx *sql.Tx) error {
+		err := s.tx(ctx, func(tx *dbTx) error {
 			res, ev = IngestResult{}, nil
 			return s.ingestTrunkText(ctx, tx, in, &res, &ev)
 		})
@@ -1128,7 +1128,7 @@ func (s *Store) IngestTrunkText(ctx context.Context, in TrunkText) (IngestResult
 	}
 }
 
-func (s *Store) ingestTrunkText(ctx context.Context, tx *sql.Tx, in TrunkText, res *IngestResult, ev **messaging.Event) error {
+func (s *Store) ingestTrunkText(ctx context.Context, tx *dbTx, in TrunkText, res *IngestResult, ev **messaging.Event) error {
 	var (
 		channelID, addressID  int64
 		address, kind, label  string
@@ -1397,7 +1397,7 @@ type InboxNotice struct {
 // marked, so each is looked at once whichever replica runs it.
 func (s *Store) ClaimInboxNotices(ctx context.Context, limit int) ([]InboxNotice, error) {
 	var out []InboxNotice
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		out = nil
 		set, err := getMessagingSettings(ctx, tx)
 		if err != nil {
@@ -1501,7 +1501,7 @@ func (s *Store) syncStuckConversationMessages(ctx context.Context) error {
 // failed, sent once every part was accepted by the trunk, still sending
 // otherwise.
 func (s *Store) syncConversationMessages(ctx context.Context, ids []int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		rows, err := tx.QueryContext(ctx, `
 			WITH r AS (
 				SELECT m.conversation_message_id AS id,

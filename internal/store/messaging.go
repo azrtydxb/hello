@@ -142,7 +142,7 @@ func newHookID() (string, error) {
 }
 
 // checkChannelTrunk refuses a channel whose trunk does not exist.
-func checkChannelTrunk(ctx context.Context, tx *sql.Tx, in MsgChannelInput) error {
+func checkChannelTrunk(ctx context.Context, tx *dbTx, in MsgChannelInput) error {
 	if in.Provider != messaging.ProviderSIPTrunk {
 		if in.TrunkID != nil {
 			return fieldError("trunkId", "a carrier channel does not use a SIP trunk")
@@ -169,7 +169,7 @@ func (s *Store) CreateMsgChannel(ctx context.Context, actor string, in MsgChanne
 		return MsgChannel{}, err
 	}
 	var id int64
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		if err := checkChannelTrunk(ctx, tx, in); err != nil {
 			return err
 		}
@@ -198,7 +198,7 @@ func (s *Store) CreateMsgChannel(ctx context.Context, actor string, in MsgChanne
 // UpdateMsgChannel replaces a channel's settings; its kind and provider
 // stay.
 func (s *Store) UpdateMsgChannel(ctx context.Context, actor string, id int64, in MsgChannelInput) (MsgChannel, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var provider string
 		if err := tx.QueryRowContext(ctx, `SELECT provider FROM msg_channels WHERE id = $1 FOR UPDATE`, id).Scan(&provider); err != nil {
 			return err
@@ -232,7 +232,7 @@ func (s *Store) UpdateMsgChannel(ctx context.Context, actor string, id int64, in
 // DeleteMsgChannel removes a channel with no conversations; one that has
 // history is refused (erase or let retention remove it first).
 func (s *Store) DeleteMsgChannel(ctx context.Context, actor string, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE channel_id = $1`, id).Scan(&n); err != nil {
 			return err
@@ -351,7 +351,7 @@ func (s *Store) GetMsgAddress(ctx context.Context, id int64) (MsgAddress, error)
 // CreateMsgAddress adds a number to a channel.
 func (s *Store) CreateMsgAddress(ctx context.Context, actor string, in MsgAddressInput) (MsgAddress, error) {
 	var id int64
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var ok bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM msg_channels WHERE id = $1)`, in.ChannelID).Scan(&ok); err != nil {
 			return err
@@ -395,7 +395,7 @@ func ownerArg(id *int64) any {
 
 // checkOwnerExtension refuses an owner that is not a user extension: a door
 // station or a missing extension cannot text.
-func checkOwnerExtension(ctx context.Context, tx *sql.Tx, id *int64) error {
+func checkOwnerExtension(ctx context.Context, tx *dbTx, id *int64) error {
 	if id == nil {
 		return nil
 	}
@@ -422,7 +422,7 @@ func keywordsArg(words []string) []string {
 // UpdateMsgAddress replaces a number's settings; its channel and number
 // stay.
 func (s *Store) UpdateMsgAddress(ctx context.Context, actor string, id int64, in MsgAddressInput) (MsgAddress, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if err := checkOwnerExtension(ctx, tx, in.OwnerExtensionID); err != nil {
 			return err
 		}
@@ -448,7 +448,7 @@ func (s *Store) UpdateMsgAddress(ctx context.Context, actor string, id int64, in
 
 // DeleteMsgAddress removes a number with no conversations.
 func (s *Store) DeleteMsgAddress(ctx context.Context, actor string, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE address_id = $1`, id).Scan(&n); err != nil {
 			return err
@@ -501,7 +501,7 @@ func getMessagingSettings(ctx context.Context, q rowQuerier) (MessagingSettings,
 
 // PutMessagingSettings replaces the settings.
 func (s *Store) PutMessagingSettings(ctx context.Context, actor string, m MessagingSettings) (MessagingSettings, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE messaging_settings SET retention_sms_days = $1, retention_chat_days = $2, reopen_days = $3, email_notify = $4,
 				first_contact = $5, first_contact_user_hour = $6, first_contact_address_day = $7, retention_media_days = $8`,
@@ -583,7 +583,7 @@ func (s *Store) RecordOptOut(ctx context.Context, actor string, addressID int64,
 		return MsgOptOut{}, err
 	}
 	var id int64
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		var ok bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM msg_addresses WHERE id = $1)`, addressID).Scan(&ok); err != nil {
 			return err
@@ -619,7 +619,7 @@ func (s *Store) getOptOut(ctx context.Context, id int64) (MsgOptOut, error) {
 // Reconsent records a customer's verbal re-consent, which clears the
 // opt-out. It is audited, with the note an administrator wrote.
 func (s *Store) Reconsent(ctx context.Context, actor string, id int64, note string) (MsgOptOut, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE sms_opt_outs SET state = 'in', source = 'admin', note = $2, at = now() WHERE id = $1`, id, note)
 		if err != nil {
 			return err
@@ -691,7 +691,7 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 	}
 	rep.Batch = newRedactionBatch("erase")
 	var providers []string
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		var err error
 		providers, err = queryStrings(ctx, tx, `
 			SELECT DISTINCT ch.provider FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id
@@ -790,7 +790,7 @@ func (s *Store) MaintainMessaging(ctx context.Context) (MessagingMaintenance, er
 	if err != nil {
 		return out, err
 	}
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		rows, err := tx.QueryContext(ctx, `
 			UPDATE conversations SET status = 'open', snoozed_until = NULL
 			WHERE status = 'snoozed' AND snoozed_until <= now() RETURNING id`)
@@ -861,7 +861,7 @@ func (s *Store) MaintainMessaging(ctx context.Context) (MessagingMaintenance, er
 	}
 	out.Events += chat
 	if out.Conversations > 0 {
-		err = s.tx(ctx, func(tx *sql.Tx) error {
+		err = s.tx(ctx, func(tx *dbTx) error {
 			return insertAudit(ctx, tx, "system", fmt.Sprintf("purge conversations=%d", out.Conversations), "messaging", "-")
 		})
 	}

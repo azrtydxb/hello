@@ -64,7 +64,7 @@ func (r *rig) newStoreOn() *store.Store {
 		r.t.Fatal(err)
 	}
 	r.t.Cleanup(func() { _ = db.Close() })
-	return store.New(db).WithSecretBox(testBox(r.t))
+	return store.New(db, nil).WithSecretBox(testBox(r.t))
 }
 
 func testBox(t *testing.T) *secret.Box {
@@ -109,7 +109,7 @@ func newRig(t *testing.T) *rig {
 	if _, err := migrate.Up(ctx, r.db); err != nil {
 		t.Fatal(err)
 	}
-	r.st = store.New(r.db).WithSecretBox(testBox(t))
+	r.st = store.New(r.db, nil).WithSecretBox(testBox(t))
 	if r.admin, err = r.st.CreateUser(ctx, "test", "admin", "x", auth.RoleAdmin); err != nil {
 		t.Fatal(err)
 	}

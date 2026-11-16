@@ -69,6 +69,10 @@ func rangeNumbers(lo, hi string, fn func(string) bool) {
 // paging code is a prefix of (or that is a prefix of such a code: a phone
 // dials the code and its argument as one string).
 func (s *Store) DialNumbersTaken(ctx context.Context, tx *sql.Tx, lo, hi string) (map[string]bool, error) {
+	return dialNumbersTaken(ctx, s.db.adopt(tx), lo, hi)
+}
+
+func dialNumbersTaken(ctx context.Context, tx *dbTx, lo, hi string) (map[string]bool, error) {
 	items, names, err := loadDialItems(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -107,7 +111,8 @@ func (s *Store) DialNumbersTaken(ctx context.Context, tx *sql.Tx, lo, hi string)
 // voicemail box and, when asked, one device, runs check like every
 // configuration change (only errors the change introduces count) and audits
 // each object as actor. The caller bumps the configuration revision.
-func (s *Store) ProvisionDirectoryExtension(ctx context.Context, tx *sql.Tx, actor string, in DirectoryExtension, check Check) (DirectoryExtensionResult, error) {
+func (s *Store) ProvisionDirectoryExtension(ctx context.Context, sqlTx *sql.Tx, actor string, in DirectoryExtension, check Check) (DirectoryExtensionResult, error) {
+	tx := s.db.adopt(sqlTx)
 	var res DirectoryExtensionResult
 	var baseline map[string]bool
 	if check != nil {
@@ -117,7 +122,7 @@ func (s *Store) ProvisionDirectoryExtension(ctx context.Context, tx *sql.Tx, act
 		}
 		baseline = errorKeys(before.Config, check(before.Config))
 	}
-	taken, err := s.DialNumbersTaken(ctx, tx, in.RangeStart, in.RangeEnd)
+	taken, err := dialNumbersTaken(ctx, tx, in.RangeStart, in.RangeEnd)
 	if err != nil {
 		return res, err
 	}
@@ -125,7 +130,7 @@ func (s *Store) ProvisionDirectoryExtension(ctx context.Context, tx *sql.Tx, act
 	if provNumberRe.MatchString(in.Preferred) {
 		// The preferred number may lie outside the range (the range changed
 		// since it was allocated): it is checked on its own.
-		own, err := s.DialNumbersTaken(ctx, tx, in.Preferred, in.Preferred)
+		own, err := dialNumbersTaken(ctx, tx, in.Preferred, in.Preferred)
 		if err != nil {
 			return res, err
 		}
@@ -205,7 +210,7 @@ func (s *Store) ProvisionDirectoryExtension(ctx context.Context, tx *sql.Tx, act
 
 // freeSIPUsername is base, or base-2, base-3, ... when a device already has
 // the name.
-func freeSIPUsername(ctx context.Context, tx *sql.Tx, base string) (string, error) {
+func freeSIPUsername(ctx context.Context, tx *dbTx, base string) (string, error) {
 	for i := 1; i <= 100; i++ {
 		name := base
 		if i > 1 {

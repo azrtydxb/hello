@@ -312,7 +312,7 @@ func TestUserAccountsMigration(t *testing.T) {
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
-	u, err := New(db).GetUser(ctx, uid)
+	u, err := New(db, nil).GetUser(ctx, uid)
 	if err != nil {
 		t.Fatal(err)
 	}

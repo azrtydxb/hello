@@ -113,7 +113,7 @@ func (s *Store) GetRecording(ctx context.Context, id int64) (Recording, error) {
 // store.
 func (s *Store) DeleteRecording(ctx context.Context, actor string, id int64) (string, error) {
 	var object string
-	err := s.configChange(ctx, actor, "delete", "recording", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "delete", "recording", nil, func(tx *dbTx) (int64, error) {
 		if err := tx.QueryRowContext(ctx,
 			`SELECT minio_object FROM recordings WHERE id = $1`, id).Scan(&object); err != nil {
 			return id, err
@@ -205,7 +205,7 @@ func (s *Store) AnnouncementByName(ctx context.Context, name string) (Announceme
 // object store at object. A taken name is ErrConflict.
 func (s *Store) CreateAnnouncement(ctx context.Context, actor, name, object string, check Check) (Announcement, error) {
 	var a Announcement
-	err := s.configChange(ctx, actor, "create", "announcement", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "announcement", check, func(tx *dbTx) (int64, error) {
 		var err error
 		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
 			INSERT INTO announcements (name, minio_object) VALUES ($1, $2) RETURNING `+announcementCols,
@@ -221,7 +221,7 @@ func (s *Store) CreateAnnouncement(ctx context.Context, actor, name, object stri
 // change (audit, revision bump, NOTIFY), so hello-sip reloads the audio.
 func (s *Store) ReplaceAnnouncement(ctx context.Context, actor string, id int64) (Announcement, error) {
 	var a Announcement
-	err := s.configChange(ctx, actor, "update", "announcement", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "announcement", nil, func(tx *dbTx) (int64, error) {
 		var err error
 		// Uploaded audio replaces generated audio: the old generation record
 		// no longer describes what is stored.
@@ -238,7 +238,7 @@ func (s *Store) ReplaceAnnouncement(ctx context.Context, actor string, id int64)
 // is audited but does not bump the configuration revision.
 func (s *Store) SaveAnnouncementPrompt(ctx context.Context, actor string, id int64, text, voice, model string) (Announcement, error) {
 	var a Announcement
-	err := s.provChange(ctx, actor, "update", "announcement", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "announcement", func(tx *dbTx) (string, bool, error) {
 		var err error
 		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
 			UPDATE announcements SET source_text = $2, voice_id = $3, model_id = $4
@@ -252,7 +252,7 @@ func (s *Store) SaveAnnouncementPrompt(ctx context.Context, actor string, id int
 // generated from the given prompt and stored at object.
 func (s *Store) CreateGeneratedAnnouncement(ctx context.Context, actor, name, object, text, voice, model string, check Check) (Announcement, error) {
 	var a Announcement
-	err := s.configChange(ctx, actor, "generate", "announcement", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "generate", "announcement", check, func(tx *dbTx) (int64, error) {
 		var err error
 		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
 			INSERT INTO announcements (name, minio_object, source_text, voice_id, model_id, generated_at, text_hash)
@@ -268,7 +268,7 @@ func (s *Store) CreateGeneratedAnnouncement(ctx context.Context, actor, name, ob
 // revision bump and NOTIFY so hello-sip reloads the audio.
 func (s *Store) MarkAnnouncementGenerated(ctx context.Context, actor string, id int64, text, voice, model string) (Announcement, error) {
 	var a Announcement
-	err := s.configChange(ctx, actor, "generate", "announcement", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "generate", "announcement", nil, func(tx *dbTx) (int64, error) {
 		var err error
 		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
 			UPDATE announcements SET updated_at = now(), source_text = $2, voice_id = $3, model_id = $4,
@@ -284,7 +284,7 @@ func (s *Store) MarkAnnouncementGenerated(ctx context.Context, actor string, id 
 // object key; the caller removes the object.
 func (s *Store) DeleteAnnouncement(ctx context.Context, actor string, id int64, check Check) (string, error) {
 	var object string
-	err := s.configChange(ctx, actor, "delete", "announcement", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "delete", "announcement", check, func(tx *dbTx) (int64, error) {
 		var name string
 		if err := tx.QueryRowContext(ctx,
 			`SELECT minio_object, name FROM announcements WHERE id = $1`, id).Scan(&object, &name); err != nil {

@@ -8,7 +8,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
@@ -118,7 +117,7 @@ func (s *Store) ConferenceByNumber(ctx context.Context, number string) (Conferen
 }
 
 // setConferencePIN seals one PIN for room id, or clears it.
-func (s *Store) setConferencePIN(ctx context.Context, tx *sql.Tx, id int64, which string, ch PINChange) error {
+func (s *Store) setConferencePIN(ctx context.Context, tx *dbTx, id int64, which string, ch PINChange) error {
 	if !ch.Set {
 		return nil
 	}
@@ -146,7 +145,7 @@ func (s *Store) setConferencePIN(ctx context.Context, tx *sql.Tx, id int64, whic
 
 // ConferencePINs opens a room's PINs inside a change so the caller can
 // reject equal PINs; "" means unset.
-func (s *Store) conferencePINs(ctx context.Context, tx *sql.Tx, id int64) (user, leader string, err error) {
+func (s *Store) conferencePINs(ctx context.Context, tx *dbTx, id int64) (user, leader string, err error) {
 	var u, l []byte
 	if err := tx.QueryRowContext(ctx, `SELECT user_pin_enc, leader_pin_enc FROM conference_rooms WHERE id = $1`, id).Scan(&u, &l); err != nil {
 		return "", "", err
@@ -169,7 +168,7 @@ func (s *Store) conferencePINs(ctx context.Context, tx *sql.Tx, id int64) (user,
 
 // checkPINsDiffer refuses a room whose two PINs are equal: the leader PIN
 // would be unreachable.
-func (s *Store) checkPINsDiffer(ctx context.Context, tx *sql.Tx, id int64) error {
+func (s *Store) checkPINsDiffer(ctx context.Context, tx *dbTx, id int64) error {
 	user, leader, err := s.conferencePINs(ctx, tx, id)
 	if err != nil {
 		return err
@@ -184,7 +183,7 @@ func (s *Store) checkPINsDiffer(ctx context.Context, tx *sql.Tx, id int64) error
 // same transaction.
 func (s *Store) CreateConference(ctx context.Context, actor string, in ConferenceInput, userPIN, leaderPIN PINChange, check Check) (Conference, error) {
 	var c Conference
-	err := s.configChange(ctx, actor, "create", "conference_room", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "conference_room", check, func(tx *dbTx) (int64, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conference_rooms`).Scan(&n); err != nil {
 			return 0, err
@@ -224,7 +223,7 @@ func (s *Store) CreateConference(ctx context.Context, actor string, in Conferenc
 // routes.
 func (s *Store) UpdateConference(ctx context.Context, actor string, id int64, in ConferenceInput, userPIN, leaderPIN PINChange, check Check) (Conference, error) {
 	var c Conference
-	err := s.configChange(ctx, actor, "update", "conference_room", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "conference_room", check, func(tx *dbTx) (int64, error) {
 		var old string
 		if err := tx.QueryRowContext(ctx, `SELECT number FROM conference_rooms WHERE id = $1 FOR UPDATE`, id).Scan(&old); err != nil {
 			return id, mapErr(err)
@@ -267,7 +266,7 @@ func (s *Store) UpdateConference(ctx context.Context, actor string, id int64, in
 // DeleteConference removes a room. A room an inbound route still targets is
 // an *InUseError naming the routes.
 func (s *Store) DeleteConference(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "conference_room", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "conference_room", check, func(tx *dbTx) (int64, error) {
 		var number, name string
 		if err := tx.QueryRowContext(ctx, `SELECT number, name FROM conference_rooms WHERE id = $1 FOR UPDATE`, id).Scan(&number, &name); err != nil {
 			return id, mapErr(err)

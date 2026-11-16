@@ -452,7 +452,7 @@ type CreatedPhone struct {
 // its audit rows; the binding bumps the configuration revision.
 func (s *Store) CreatePhone(ctx context.Context, actor string, in PhoneInput) (CreatedPhone, error) {
 	var out CreatedPhone
-	err := s.provChange(ctx, actor, "create", "phone", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "create", "phone", func(tx *dbTx) (string, bool, error) {
 		var err error
 		out, err = s.createPhone(ctx, tx, actor, in)
 		return strconv.FormatInt(out.Phone.ID, 10), true, err
@@ -463,7 +463,7 @@ func (s *Store) CreatePhone(ctx context.Context, actor string, in PhoneInput) (C
 // ImportPhones creates every phone in one transaction, or none.
 func (s *Store) ImportPhones(ctx context.Context, actor string, in []PhoneInput) ([]Phone, error) {
 	out := make([]Phone, 0, len(in))
-	err := s.provChange(ctx, actor, "import", "phone", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "import", "phone", func(tx *dbTx) (string, bool, error) {
 		for i, p := range in {
 			c, err := s.createPhone(ctx, tx, actor, p)
 			if err != nil {
@@ -483,8 +483,8 @@ func (s *Store) ImportPhones(ctx context.Context, actor string, in []PhoneInput)
 // writes the audit row; when fn reports bump, it also bumps the
 // configuration revision and notifies hello-sip, as Phase 1 device changes
 // do. fn returns the resource id for the audit row.
-func (s *Store) provChange(ctx context.Context, actor, action, resource string, fn func(*sql.Tx) (string, bool, error)) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+func (s *Store) provChange(ctx context.Context, actor, action, resource string, fn func(*dbTx) (string, bool, error)) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
 			return err
 		}
@@ -506,7 +506,7 @@ func (s *Store) provChange(ctx context.Context, actor, action, resource string, 
 	})
 }
 
-func bumpRevision(ctx context.Context, tx *sql.Tx) error {
+func bumpRevision(ctx context.Context, tx *dbTx) error {
 	var rev int64
 	if err := tx.QueryRowContext(ctx,
 		`UPDATE schema_info SET config_revision = config_revision + 1 RETURNING config_revision`).Scan(&rev); err != nil {
@@ -533,7 +533,7 @@ func FormatMAC(mac string) string {
 	return strings.Join(parts, ":")
 }
 
-func (s *Store) createPhone(ctx context.Context, tx *sql.Tx, actor string, in PhoneInput) (CreatedPhone, error) {
+func (s *Store) createPhone(ctx context.Context, tx *dbTx, actor string, in PhoneInput) (CreatedPhone, error) {
 	var out CreatedPhone
 	if s.box == nil {
 		return out, errors.New("store: no secret box to seal provisioning secrets")
@@ -598,7 +598,7 @@ func (s *Store) createPhone(ctx context.Context, tx *sql.Tx, actor string, in Ph
 
 // checkPhoneRefs refuses BLF numbers that are not extensions and an
 // override template that does not exist, naming the field.
-func checkPhoneRefs(ctx context.Context, tx *sql.Tx, blf []string, templateID *int64) error {
+func checkPhoneRefs(ctx context.Context, tx *dbTx, blf []string, templateID *int64) error {
 	if len(blf) > 0 {
 		rows, err := tx.QueryContext(ctx, `SELECT number FROM extensions WHERE number = ANY($1)
 			UNION SELECT number FROM conference_rooms WHERE number = ANY($1)`, blf)
@@ -641,13 +641,13 @@ func checkPhoneRefs(ctx context.Context, tx *sql.Tx, blf []string, templateID *i
 // 0 creates the device <extension>-<last 6 MAC hex> on extensionID, or
 // reuses an unbound one of that name on it (a phone deleted and added
 // again). It reports whether an existing device's secret was rotated.
-func (s *Store) bindDevice(ctx context.Context, tx *sql.Tx, actor string, extensionID, deviceID int64, mac, realm string, phone int64) (int64, bool, error) {
+func (s *Store) bindDevice(ctx context.Context, tx *dbTx, actor string, extensionID, deviceID int64, mac, realm string, phone int64) (int64, bool, error) {
 	return s.bindDeviceLine(ctx, tx, actor, extensionID, deviceID, mac, realm, phone, 1)
 }
 
 // bindDeviceLine is bindDevice for line 1 or a further line of the phone
 // (S-10): a device is one line of one phone.
-func (s *Store) bindDeviceLine(ctx context.Context, tx *sql.Tx, actor string, extensionID, deviceID int64, mac, realm string, phone int64, line int) (int64, bool, error) {
+func (s *Store) bindDeviceLine(ctx context.Context, tx *dbTx, actor string, extensionID, deviceID int64, mac, realm string, phone int64, line int) (int64, bool, error) {
 	var number string
 	if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1`, extensionID).Scan(&number); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -704,7 +704,7 @@ func (s *Store) bindDeviceLine(ctx context.Context, tx *sql.Tx, actor string, ex
 
 // sealDeviceSecret stores secret as the device's HA1 values for realm and,
 // sealed, in secret_enc.
-func (s *Store) sealDeviceSecret(ctx context.Context, tx *sql.Tx, deviceID int64, realm, secret string) error {
+func (s *Store) sealDeviceSecret(ctx context.Context, tx *dbTx, deviceID int64, realm, secret string) error {
 	var username string
 	if err := tx.QueryRowContext(ctx, `SELECT sip_username FROM devices WHERE id = $1`, deviceID).Scan(&username); err != nil {
 		return err
@@ -746,7 +746,7 @@ func (s *Store) DeviceSecret(ctx context.Context, username string) (string, erro
 }
 
 // unbindDevice drops a device's sealed secret; it keeps its HA1 values.
-func unbindDevice(ctx context.Context, tx *sql.Tx, deviceID int64) error {
+func unbindDevice(ctx context.Context, tx *dbTx, deviceID int64) error {
 	_, err := tx.ExecContext(ctx, `UPDATE devices SET secret_enc = NULL, updated_at = now() WHERE id = $1`, deviceID)
 	return err
 }
@@ -807,7 +807,7 @@ type Binding struct {
 // it alone bumps the configuration revision. secretRotated reports a bound
 // existing device.
 func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c PhoneChange) (p Phone, secretRotated bool, err error) {
-	err = s.provChange(ctx, actor, "update", "phone", func(tx *sql.Tx) (string, bool, error) {
+	err = s.provChange(ctx, actor, "update", "phone", func(tx *dbTx) (string, bool, error) {
 		cur, err := scanPhone(tx.QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1 FOR UPDATE OF p`, id))
 		if err != nil {
 			return "", false, err
@@ -953,7 +953,7 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 // DeletePhone removes a phone. Its device stays (with its HA1 values) but
 // loses the sealed secret; the vendor redirect registration is withdrawn.
 func (s *Store) DeletePhone(ctx context.Context, actor string, id int64) error {
-	return s.provChange(ctx, actor, "delete", "phone", func(tx *sql.Tx) (string, bool, error) {
+	return s.provChange(ctx, actor, "delete", "phone", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(id, 10)
 		var (
 			mac    string
@@ -1005,7 +1005,7 @@ func (s *Store) newToken(ctx context.Context, actor, action string, id int64, im
 	if s.box == nil {
 		return out, errors.New("store: no secret box to seal provisioning secrets")
 	}
-	err := s.provChange(ctx, actor, action, "phone", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, action, "phone", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(id, 10)
 		var (
 			mac    string
@@ -1060,7 +1060,7 @@ func (s *Store) RevealAdminPassword(ctx context.Context, actor string, id int64)
 	if s.box == nil {
 		return "", errors.New("store: no secret box to open provisioning secrets")
 	}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var enc []byte
 		if err := tx.QueryRowContext(ctx, `SELECT admin_password_enc FROM phones WHERE id = $1`, id).Scan(&enc); err != nil {
 			return err
@@ -1080,7 +1080,7 @@ func (s *Store) RotateAdminPassword(ctx context.Context, actor string, id int64)
 	if s.box == nil {
 		return errors.New("store: no secret box to seal provisioning secrets")
 	}
-	return s.provChange(ctx, actor, "rotate-admin-password", "phone", func(tx *sql.Tx) (string, bool, error) {
+	return s.provChange(ctx, actor, "rotate-admin-password", "phone", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(id, 10)
 		enc, err := s.box.Seal(newAdminPassword(), prov.PhoneAdminAAD(id))
 		if err != nil {
@@ -1185,7 +1185,7 @@ func (s *Store) PhoneFetchStates(ctx context.Context, staleBefore time.Time) (ne
 
 // boundPhone names the phone bound to one of a set of devices, for the
 // 409 that refuses deleting them (contract 8).
-func boundPhone(ctx context.Context, tx *sql.Tx, where string, arg int64) error {
+func boundPhone(ctx context.Context, tx *dbTx, where string, arg int64) error {
 	var (
 		mac string
 		id  int64
@@ -1227,7 +1227,7 @@ func RedirectSupported(v prov.Vendor) bool { return slices.Contains(redirectSupp
 // Fanvil; their redirect clients report Supported false), not_configured
 // otherwise. A newer operation for the same vendor and MAC replaces an
 // older one with a new seq.
-func (s *Store) queueRedirect(ctx context.Context, tx *sql.Tx, v prov.Vendor, mac string, op redirect.Op) (redirect.Status, error) {
+func (s *Store) queueRedirect(ctx context.Context, tx *dbTx, v prov.Vendor, mac string, op redirect.Op) (redirect.Status, error) {
 	switch {
 	case v == prov.Poly || v == prov.Fanvil:
 		return redirect.Status{State: redirect.StateManual}, nil
@@ -1253,7 +1253,7 @@ func (s *Store) queueRedirect(ctx context.Context, tx *sql.Tx, v prov.Vendor, ma
 // upsertJob inserts jobs from source (a VALUES list or a SELECT of vendor,
 // mac, op). A replacement takes a new seq and starts over; the 24-hour
 // give-up keeps counting while the operation stays the same.
-func upsertJob(ctx context.Context, tx *sql.Tx, source string, args ...any) error {
+func upsertJob(ctx context.Context, tx *dbTx, source string, args ...any) error {
 	//nolint:gosec // G202: source is a caller's constant VALUES list or SELECT.
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO prov_redirect_jobs (vendor, mac, op) `+source+`
@@ -1265,7 +1265,7 @@ func upsertJob(ctx context.Context, tx *sql.Tx, source string, args ...any) erro
 	return err
 }
 
-func setRedirectStatus(ctx context.Context, tx *sql.Tx, id int64, st redirect.Status) error {
+func setRedirectStatus(ctx context.Context, tx *dbTx, id int64, st redirect.Status) error {
 	b, err := json.Marshal(st)
 	if err != nil {
 		return err

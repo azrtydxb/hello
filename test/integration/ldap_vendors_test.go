@@ -52,7 +52,7 @@ func TestLDAPAsVendors(t *testing.T) {
 		t.Fatal(err)
 	}
 	const base = "dc=hello,dc=local"
-	st := store.New(db).WithSecretBox(box).WithProv(store.ProvSettings{
+	st := store.New(db, nil).WithSecretBox(box).WithProv(store.ProvSettings{
 		PublicURL: "https://prov.hello.test", SIPServer: "192.0.2.1:5060", Domain: "hello.test",
 		Expiry: time.Hour, Resync: 24 * time.Hour, TokenGrace: time.Hour, LDAPBase: base, LDAPPort: 636,
 	})

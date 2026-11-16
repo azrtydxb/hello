@@ -78,7 +78,7 @@ func (s *Store) GetRingTag(ctx context.Context, name string) (RingTag, error) {
 
 // CreateRingTag adds a custom tag (at most ringtag.MaxCustomTags).
 func (s *Store) CreateRingTag(ctx context.Context, actor string, in RingTagInput) (RingTag, error) {
-	err := s.configChangeID(ctx, actor, "create", "ring_tag", nil, func(tx *sql.Tx) (string, error) {
+	err := s.configChangeID(ctx, actor, "create", "ring_tag", nil, func(tx *dbTx) (string, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ring_tags WHERE NOT builtin`).Scan(&n); err != nil {
 			return in.Name, err
@@ -106,7 +106,7 @@ func (s *Store) CreateRingTag(ctx context.Context, actor string, in RingTagInput
 // UpdateRingTag changes a tag's Bellcore slot and description; the name never
 // changes.
 func (s *Store) UpdateRingTag(ctx context.Context, actor, name string, in RingTagInput) (RingTag, error) {
-	err := s.configChangeID(ctx, actor, "update", "ring_tag", nil, func(tx *sql.Tx) (string, error) {
+	err := s.configChangeID(ctx, actor, "update", "ring_tag", nil, func(tx *dbTx) (string, error) {
 		res, err := tx.ExecContext(ctx, `UPDATE ring_tags SET bellcore_slot = $2, description = $3, updated_at = now() WHERE name = $1`,
 			name, in.BellcoreSlot, in.Description)
 		if err != nil {
@@ -122,7 +122,7 @@ func (s *Store) UpdateRingTag(ctx context.Context, actor, name string, in RingTa
 
 // DeleteRingTag removes a custom tag nothing uses.
 func (s *Store) DeleteRingTag(ctx context.Context, actor, name string) error {
-	return s.configChangeID(ctx, actor, "delete", "ring_tag", nil, func(tx *sql.Tx) (string, error) {
+	return s.configChangeID(ctx, actor, "delete", "ring_tag", nil, func(tx *dbTx) (string, error) {
 		var builtin bool
 		if err := tx.QueryRowContext(ctx, `SELECT builtin FROM ring_tags WHERE name = $1`, name).Scan(&builtin); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -203,7 +203,7 @@ func listRingRules(ctx context.Context, q querier) ([]RingRule, error) {
 // ringtag.MaxRules); the position of a rule is its index plus one.
 func (s *Store) ReplaceRingRules(ctx context.Context, actor string, in []RingRuleInput) ([]RingRule, error) {
 	var out []RingRule
-	err := s.configChange(ctx, actor, "update", "ring_rules", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "ring_rules", nil, func(tx *dbTx) (int64, error) {
 		if len(in) > ringtag.MaxRules {
 			return 0, fieldError("rules", fmt.Sprintf("must have at most %d rules", ringtag.MaxRules))
 		}

@@ -116,7 +116,7 @@ func wifiNameError(err error, name string) error {
 
 // checkWifiDot1X refuses an enterprise profile whose 802.1X profile does not
 // exist or uses EAP-MD5, a method Wi-Fi does not offer.
-func checkWifiDot1X(ctx context.Context, tx *sql.Tx, in WifiProfileInput) error {
+func checkWifiDot1X(ctx context.Context, tx *dbTx, in WifiProfileInput) error {
 	if in.Dot1XID == 0 {
 		return nil
 	}
@@ -142,7 +142,7 @@ func nullID(id int64) any {
 
 // sealWifi stores the sealed secret of a profile column with the update
 // statement (wifiSetPSK): nil keeps it, "" clears it.
-func (s *Store) sealWifi(ctx context.Context, tx *sql.Tx, id int64, update, aad string, v *string) error {
+func (s *Store) sealWifi(ctx context.Context, tx *dbTx, id int64, update, aad string, v *string) error {
 	if v == nil {
 		return nil
 	}
@@ -163,7 +163,7 @@ func (s *Store) sealWifi(ctx context.Context, tx *sql.Tx, id int64, update, aad 
 // CreateWifiProfile stores a profile and seals its secrets with the new id.
 func (s *Store) CreateWifiProfile(ctx context.Context, actor string, in WifiProfileInput) (WifiProfile, error) {
 	var id int64
-	err := s.provChange(ctx, actor, "create", "wifi_profile", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "create", "wifi_profile", func(tx *dbTx) (string, bool, error) {
 		if err := tx.QueryRowContext(ctx, `SELECT nextval('wifi_profiles_id_seq')`).Scan(&id); err != nil {
 			return "", false, err
 		}
@@ -187,7 +187,7 @@ func (s *Store) CreateWifiProfile(ctx context.Context, actor string, in WifiProf
 // UpdateWifiProfile replaces a profile's settings; a nil PSK keeps the stored
 // secret.
 func (s *Store) UpdateWifiProfile(ctx context.Context, actor string, id int64, in WifiProfileInput) (WifiProfile, error) {
-	err := s.provChange(ctx, actor, "update", "wifi_profile", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "wifi_profile", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		if err := checkWifiDot1X(ctx, tx, in); err != nil {
 			return rid, false, err
@@ -212,7 +212,7 @@ func (s *Store) UpdateWifiProfile(ctx context.Context, actor string, id int64, i
 
 // DeleteWifiProfile removes a profile no group or phone uses.
 func (s *Store) DeleteWifiProfile(ctx context.Context, actor string, id int64) error {
-	return s.provChange(ctx, actor, "delete", "wifi_profile", func(tx *sql.Tx) (string, bool, error) {
+	return s.provChange(ctx, actor, "delete", "wifi_profile", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var groups, phones int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM wifi_profiles WHERE id = $1 FOR UPDATE`, id).Scan(new(int)); err != nil {
@@ -334,7 +334,7 @@ func (s *Store) GetWifiPhone(ctx context.Context, phoneID int64) (WifiScope, err
 
 // checkWifiIDs refuses a list that repeats a profile, names one that does not
 // exist or is longer than prov.MaxWifiPerScope.
-func checkWifiIDs(ctx context.Context, tx *sql.Tx, ids []int64) error {
+func checkWifiIDs(ctx context.Context, tx *dbTx, ids []int64) error {
 	if len(ids) > prov.MaxWifiPerScope {
 		return fieldError("profileIds", fmt.Sprintf("at most %d profiles", prov.MaxWifiPerScope))
 	}
@@ -353,7 +353,7 @@ func checkWifiIDs(ctx context.Context, tx *sql.Tx, ids []int64) error {
 	return nil
 }
 
-func replaceWifiAssignments(ctx context.Context, tx *sql.Tx, group bool, owner int64, ids []int64) error {
+func replaceWifiAssignments(ctx context.Context, tx *dbTx, group bool, owner int64, ids []int64) error {
 	del, ins := `DELETE FROM wifi_assignments WHERE phone_id = $1`, `INSERT INTO wifi_assignments (profile_id, phone_id) VALUES ($1, $2)`
 	if group {
 		del, ins = `DELETE FROM wifi_assignments WHERE group_id = $1`, `INSERT INTO wifi_assignments (profile_id, group_id) VALUES ($1, $2)`
@@ -373,7 +373,7 @@ func replaceWifiAssignments(ctx context.Context, tx *sql.Tx, group bool, owner i
 // whole; an all-empty radio removes the settings. ErrNotFound for a group that
 // does not exist, a field error for a bad profile list.
 func (s *Store) PutWifiGroup(ctx context.Context, actor string, groupID int64, ids []int64, radio prov.WifiRadio) (WifiScope, error) {
-	err := s.provChange(ctx, actor, "update", "wifi_group", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "wifi_group", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(groupID, 10)
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, groupID).Scan(new(int)); err != nil {
 			return rid, false, err
@@ -404,7 +404,7 @@ func (s *Store) PutWifiGroup(ctx context.Context, actor string, groupID int64, i
 
 // PutWifiPhone replaces the profiles assigned to one phone.
 func (s *Store) PutWifiPhone(ctx context.Context, actor string, phoneID int64, ids []int64) (WifiScope, error) {
-	err := s.provChange(ctx, actor, "update", "wifi_phone", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "wifi_phone", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(phoneID, 10)
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = $1 FOR UPDATE`, phoneID).Scan(new(int)); err != nil {
 			return rid, false, err
@@ -506,7 +506,7 @@ type legacyWifiEAP struct {
 // legacy server certificate check "trust on first use" or "skip" becomes the
 // system certificates: the 802.1X model offers only those and an uploaded CA.
 func (s *Store) AdoptWifiEAP(ctx context.Context) (adopted int, skipped []string, err error) {
-	err = s.provChange(ctx, "system", "adopt", "wifi_profile", func(tx *sql.Tx) (string, bool, error) {
+	err = s.provChange(ctx, "system", "adopt", "wifi_profile", func(tx *dbTx) (string, bool, error) {
 		rows, err := tx.QueryContext(ctx, `SELECT id, name, identity, anonymous_identity, password_enc FROM wifi_profiles
 			WHERE dot1x_id IS NULL AND security IN ('wpa2-enterprise', 'wpa3-enterprise') ORDER BY id FOR UPDATE`)
 		if err != nil {
@@ -558,7 +558,7 @@ func (s *Store) AdoptWifiEAP(ctx context.Context) (adopted int, skipped []string
 	return adopted, skipped, err
 }
 
-func (s *Store) adoptInsert(ctx context.Context, tx *sql.Tx, id int64, l legacyWifiEAP, enc []byte) error {
+func (s *Store) adoptInsert(ctx context.Context, tx *dbTx, id int64, l legacyWifiEAP, enc []byte) error {
 	name := "Wi-Fi " + l.name
 	if len([]rune(name)) > 56 {
 		name = string([]rune(name)[:56])

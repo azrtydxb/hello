@@ -132,7 +132,7 @@ func (s *Store) convDraft(ctx context.Context, convID int64) (*ConvDraft, bool, 
 // raised (while still high), and the spam flag. The triage stays visible,
 // marked reverted.
 func (s *Store) RevertConversationAI(ctx context.Context, acc InboxAccess, convID int64) (Conversation, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		c, err := lockConversation(ctx, tx, acc, convID)
 		if err != nil {
 			return err
@@ -189,7 +189,7 @@ func (s *Store) RevertConversationAI(ctx context.Context, acc InboxAccess, convI
 // transaction, when the number's AI is on and no kill switch is set. The
 // worker does the rest; a model that fails or is slow never holds up the
 // text (spec M-30).
-func queueAITriage(ctx context.Context, tx *sql.Tx, convID, addressID, msgID int64) error {
+func queueAITriage(ctx context.Context, tx *dbTx, convID, addressID, msgID int64) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO ai_message_runs (message_id, conversation_id, kind)
 		SELECT $1::bigint, $2::bigint, 'triage' FROM msg_addresses a JOIN msg_channels ch ON ch.id = a.channel_id, messaging_settings s
@@ -198,7 +198,7 @@ func queueAITriage(ctx context.Context, tx *sql.Tx, convID, addressID, msgID int
 	return err
 }
 
-func queueAIRun(ctx context.Context, tx *sql.Tx, convID, msgID int64, kind string) error {
+func queueAIRun(ctx context.Context, tx *dbTx, convID, msgID int64, kind string) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO ai_message_runs (message_id, conversation_id, kind) VALUES ($1, $2, $3)
 		ON CONFLICT (message_id, kind) DO NOTHING`, msgID, convID, kind)
@@ -421,7 +421,7 @@ func draftAfter(d *msgai.Decision) bool {
 // current.
 func (as aiStore) FinishAIRun(ctx context.Context, job msgai.Job, res msgai.Result) error {
 	s := as.s
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		var (
 			state    string
 			redacted bool
@@ -539,7 +539,7 @@ func (as aiStore) FinishAIRun(ctx context.Context, job msgai.Job, res msgai.Resu
 // urgent text raises the priority to high, spam sets the flag. It never
 // assigns or moves the conversation; the router reads the suggested queue
 // for a number that routes through the AI.
-func applyTriage(ctx context.Context, tx *sql.Tx, convID, msgID int64, t msgai.Triage) error {
+func applyTriage(ctx context.Context, tx *dbTx, convID, msgID int64, t msgai.Triage) error {
 	var tagsJSON, priority, appliedJSON string
 	if err := tx.QueryRowContext(ctx, `SELECT to_json(tags)::text, priority, ai_applied::text FROM conversations WHERE id = $1`,
 		convID).Scan(&tagsJSON, &priority, &appliedJSON); err != nil {
@@ -596,7 +596,7 @@ func applyTriage(ctx context.Context, tx *sql.Tx, convID, msgID int64, t msgai.T
 // (spec M-30a): a person who replied, a customer who opted out, the reply
 // caps and the switches are read again, so a decision taken before the
 // model call never sends past them.
-func (s *Store) decideAutoReply(ctx context.Context, tx *sql.Tx, job msgai.Job, d msgai.Decision) (msgai.Decision, error) {
+func (s *Store) decideAutoReply(ctx context.Context, tx *dbTx, job msgai.Job, d msgai.Decision) (msgai.Decision, error) {
 	if d.Skip != "" || (!d.Send && !d.Handoff) {
 		return d, nil
 	}
@@ -620,7 +620,7 @@ func (s *Store) decideAutoReply(ctx context.Context, tx *sql.Tx, job msgai.Job, 
 
 // applyAutoReply sends an auto-reply, or hands the conversation to a person
 // with the holding line (once until a person replies).
-func (s *Store) applyAutoReply(ctx context.Context, tx *sql.Tx, c convRow, job msgai.Job, d msgai.Decision) error {
+func (s *Store) applyAutoReply(ctx context.Context, tx *dbTx, c convRow, job msgai.Job, d msgai.Decision) error {
 	if d.Send {
 		id, sent, err := s.autoText(ctx, tx, c, d.Text, "AI reply", messaging.SenderAI, job.RunID)
 		if err != nil {
@@ -740,7 +740,7 @@ func (s *Store) GetMsgFAQ(ctx context.Context, id int64) (MsgFAQ, error) {
 // CreateMsgFAQ adds a snippet to a number: at most msgai.MaxFAQ.
 func (s *Store) CreateMsgFAQ(ctx context.Context, actor string, in MsgFAQInput) (MsgFAQ, error) {
 	var id int64
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var one int
 		err := tx.QueryRowContext(ctx, `SELECT 1 FROM msg_addresses WHERE id = $1 FOR UPDATE`, in.AddressID).Scan(&one)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -771,7 +771,7 @@ func (s *Store) CreateMsgFAQ(ctx context.Context, actor string, in MsgFAQInput) 
 // UpdateMsgFAQ replaces a snippet's title, body and switch; its number
 // stays.
 func (s *Store) UpdateMsgFAQ(ctx context.Context, actor string, id int64, in MsgFAQInput) (MsgFAQ, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		r, err := tx.ExecContext(ctx, `UPDATE msg_faq SET title = $2, body = $3, enabled = $4, updated_at = now() WHERE id = $1`,
 			id, in.Title, in.Body, in.Enabled)
 		if err != nil {
@@ -790,7 +790,7 @@ func (s *Store) UpdateMsgFAQ(ctx context.Context, actor string, id int64, in Msg
 
 // DeleteMsgFAQ removes a snippet.
 func (s *Store) DeleteMsgFAQ(ctx context.Context, actor string, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		r, err := tx.ExecContext(ctx, `DELETE FROM msg_faq WHERE id = $1`, id)
 		if err != nil {
 			return err
@@ -841,7 +841,7 @@ func (s *Store) GetMsgAddressAI(ctx context.Context, addressID int64) (MsgAddres
 // PutMsgAddressAI replaces a number's AI settings. Turning auto-reply on or
 // off leaves its own audit row (spec M-21).
 func (s *Store) PutMsgAddressAI(ctx context.Context, actor string, m MsgAddressAI) (MsgAddressAI, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var was string
 		if err := tx.QueryRowContext(ctx, `SELECT ai_mode FROM msg_addresses WHERE id = $1 FOR UPDATE`, m.AddressID).Scan(&was); err != nil {
 			return err
@@ -960,7 +960,7 @@ func (s *Store) GetMessagingAI(ctx context.Context) (MessagingAI, error) {
 // PutMessagingAI replaces the inbox-wide AI settings and sets the channels'
 // switches. A channel it names that does not exist is a field error.
 func (s *Store) PutMessagingAI(ctx context.Context, actor string, in MessagingAIInput) (MessagingAI, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE messaging_settings SET ai_enabled = $1, ai_auto_enabled = $2, ai_business_name = $3, ai_intents = $4, ai_sensitive_topics = $5`,
 			in.Enabled, in.AutoEnabled, in.BusinessName, in.Intents, in.SensitiveTopics); err != nil {

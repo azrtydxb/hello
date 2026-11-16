@@ -31,7 +31,7 @@ func newRedactionBatch(what string) string {
 // provider, provider message id; args bind q's parameters) for deletion
 // under batch. A message queued before and not yet done joins this batch
 // and starts its tries again; one already done stays done.
-func queueRedactions(ctx context.Context, tx *sql.Tx, batch, q string, args ...any) error {
+func queueRedactions(ctx context.Context, tx *dbTx, batch, q string, args ...any) error {
 	//nolint:gosec // G202: q is a fixed query of this package with bound parameters.
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO msg_provider_redactions (channel_id, provider, provider_message_id, batch)
@@ -177,7 +177,7 @@ func (s *Store) ProviderReport(ctx context.Context, actor, batch string, provide
 		out = append(out, e)
 	}
 	if len(counts) > 0 {
-		err = s.tx(ctx, func(tx *sql.Tx) error {
+		err = s.tx(ctx, func(tx *dbTx) error {
 			for _, e := range out {
 				if e.Messages == 0 {
 					continue
@@ -223,7 +223,7 @@ var ErrNotRedactable = errors.New("store: this line cannot be redacted")
 func (s *Store) RedactConversationMessage(ctx context.Context, actor string, convID, msgID int64) (RedactReport, error) {
 	var rep RedactReport
 	rep.Providers = []EraseProvider{}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var (
 			kind, prov string
 			providerID sql.NullString
@@ -299,7 +299,7 @@ func (s *Store) RedactConversationMessage(ctx context.Context, actor string, con
 // Lock order: the message (FOR NO KEY UPDATE, which an AI run inserted for
 // it does not wait on), the runs, then the conversation: the order in which
 // FinishAIRun takes the run and then the conversation.
-func redactAIOutput(ctx context.Context, tx *sql.Tx, convID, msgID int64) error {
+func redactAIOutput(ctx context.Context, tx *dbTx, convID, msgID int64) error {
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE ai_message_runs SET result = NULL,
 			state = CASE WHEN state = 'running' THEN 'stale' ELSE state END,
@@ -321,7 +321,7 @@ func redactAIOutput(ctx context.Context, tx *sql.Tx, convID, msgID int64) error 
 // becomes an orphan (no message, no conversation, nothing left to fetch)
 // that the caller removes now or the media sweeper later, and any public
 // link to it stops working at once.
-func detachMessageMedia(ctx context.Context, tx *sql.Tx, msgID int64) ([]media.Garbage, error) {
+func detachMessageMedia(ctx context.Context, tx *dbTx, msgID int64) ([]media.Garbage, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id, object_key, TRUE FROM message_media WHERE message_id = $1 ORDER BY id FOR UPDATE`, msgID)
 	if err != nil {
 		return nil, err
@@ -596,7 +596,7 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 	if err := rows.Close(); err != nil {
 		return out, err
 	}
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		return insertAudit(ctx, tx, actor, fmt.Sprintf("export conversations=%d messages=%d media=%d ai_runs=%d notes=%t", len(out.Conversations),
 			count, nMedia, nRuns, notes), "msg_peer", "-")
 	})

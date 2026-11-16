@@ -77,7 +77,7 @@ func (s *Store) GetPhonebook(ctx context.Context, id int64) (phonebook.Book, err
 // with a name another named book has, it is a conflict.
 func (s *Store) CreatePhonebook(ctx context.Context, actor, name string) (phonebook.Book, error) {
 	var out phonebook.Book
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		// Serialise creations, so two cannot both pass the limit.
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(bookLockKey)); err != nil {
 			return err
@@ -114,7 +114,7 @@ func namedBookError(err error, name string) error {
 }
 
 // lockBook locks a non-personal book and returns its kind.
-func lockBook(ctx context.Context, tx *sql.Tx, id int64) (phonebook.Kind, error) {
+func lockBook(ctx context.Context, tx *dbTx, id int64) (phonebook.Kind, error) {
 	var k phonebook.Kind
 	err := tx.QueryRowContext(ctx, `SELECT kind FROM phonebooks WHERE id = $1 AND kind <> 'personal' FOR UPDATE`, id).Scan(&k)
 	return k, mapErr(err)
@@ -129,7 +129,7 @@ func errExtensionsBook() error {
 // cannot be changed.
 func (s *Store) RenamePhonebook(ctx context.Context, actor string, id int64, name string) (phonebook.Book, error) {
 	var out phonebook.Book
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		kind, err := lockBook(ctx, tx, id)
 		if err != nil {
 			return err
@@ -151,7 +151,7 @@ func (s *Store) RenamePhonebook(ctx context.Context, actor string, id int64, nam
 // DeletePhonebook deletes a named book with its entries and its place in
 // phone groups. The company and extensions books cannot be deleted.
 func (s *Store) DeletePhonebook(ctx context.Context, actor string, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		kind, err := lockBook(ctx, tx, id)
 		if err != nil {
 			return err
@@ -218,7 +218,7 @@ func (s *Store) ListPhonebookEntries(ctx context.Context, bookID, after int64, l
 	if err != nil {
 		return nil, 0, err
 	}
-	var rows *sql.Rows
+	var rows *dbRows
 	if b.Kind == phonebook.KindExtensions {
 		rows, err = s.q(ctx).QueryContext(ctx, `SELECT id, number, name, created_at, updated_at FROM extensions
 			WHERE NOT directory_hidden AND id > $1 ORDER BY id LIMIT $2`, after, limit+1)
@@ -270,7 +270,7 @@ func (s *Store) ExportPhonebook(ctx context.Context, bookID int64) (phonebook.Bo
 // owner's own routes.
 func (s *Store) bookEntries(ctx context.Context, bookID int64, kind phonebook.Kind) ([]phonebook.EntryInput, error) {
 	var (
-		rows *sql.Rows
+		rows *dbRows
 		err  error
 	)
 	if kind == phonebook.KindExtensions {
@@ -305,7 +305,7 @@ func (s *Store) bookEntries(ctx context.Context, bookID int64, kind phonebook.Ki
 
 // indexRoom refuses a write that would take the lookup index past
 // phonebook.MaxIndexEntries entries in total (spec P-17).
-func indexRoom(ctx context.Context, tx *sql.Tx, add int) error {
+func indexRoom(ctx context.Context, tx *dbTx, add int) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM phonebook_entries) + (SELECT count(*) FROM extensions)`).Scan(&n); err != nil {
 		return err
@@ -318,7 +318,7 @@ func indexRoom(ctx context.Context, tx *sql.Tx, add int) error {
 
 // writableBook locks a book for an entry change and refuses the computed
 // extensions book.
-func writableBook(ctx context.Context, tx *sql.Tx, id int64) error {
+func writableBook(ctx context.Context, tx *dbTx, id int64) error {
 	kind, err := lockBook(ctx, tx, id)
 	if err != nil {
 		return err
@@ -330,12 +330,12 @@ func writableBook(ctx context.Context, tx *sql.Tx, id int64) error {
 }
 
 // touchBook bumps the book's version in the transaction that changed it.
-func touchBook(ctx context.Context, tx *sql.Tx, id int64) error {
+func touchBook(ctx context.Context, tx *dbTx, id int64) error {
 	_, err := tx.ExecContext(ctx, `UPDATE phonebooks SET version = version + 1, updated_at = now() WHERE id = $1`, id)
 	return err
 }
 
-func insertEntry(ctx context.Context, tx *sql.Tx, bookID int64, in phonebook.EntryInput) (phonebook.Entry, error) {
+func insertEntry(ctx context.Context, tx *dbTx, bookID int64, in phonebook.EntryInput) (phonebook.Entry, error) {
 	numbers, err := marshalNumbers(in.Numbers)
 	if err != nil {
 		return phonebook.Entry{}, err
@@ -346,7 +346,7 @@ func insertEntry(ctx context.Context, tx *sql.Tx, bookID int64, in phonebook.Ent
 		bookID, in.FirstName, in.LastName, in.Company, string(numbers), in.Note))
 }
 
-func bookRoom(ctx context.Context, tx *sql.Tx, bookID int64, add int) error {
+func bookRoom(ctx context.Context, tx *dbTx, bookID int64, add int) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phonebook_entries WHERE book_id = $1`, bookID).Scan(&n); err != nil {
 		return err
@@ -360,7 +360,7 @@ func bookRoom(ctx context.Context, tx *sql.Tx, bookID int64, add int) error {
 // CreatePhonebookEntry adds a validated entry to a company or named book.
 func (s *Store) CreatePhonebookEntry(ctx context.Context, actor string, bookID int64, in phonebook.EntryInput) (phonebook.Entry, error) {
 	var out phonebook.Entry
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if err := writableBook(ctx, tx, bookID); err != nil {
 			return err
 		}
@@ -387,7 +387,7 @@ func (s *Store) UpdatePhonebookEntry(ctx context.Context, actor string, bookID, 
 	if err != nil {
 		return out, err
 	}
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		if err := writableBook(ctx, tx, bookID); err != nil {
 			return err
 		}
@@ -409,7 +409,7 @@ func (s *Store) UpdatePhonebookEntry(ctx context.Context, actor string, bookID, 
 
 // DeletePhonebookEntry removes an entry of a book.
 func (s *Store) DeletePhonebookEntry(ctx context.Context, actor string, bookID, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		if err := writableBook(ctx, tx, bookID); err != nil {
 			return err
 		}
@@ -432,7 +432,7 @@ func (s *Store) DeletePhonebookEntry(ctx context.Context, actor string, bookID, 
 // result must fit the book's and the index's limits. It returns how many
 // entries the book held before.
 func (s *Store) ImportPhonebook(ctx context.Context, actor string, bookID int64, in []phonebook.EntryInput, replace bool) (before int, err error) {
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		if err := writableBook(ctx, tx, bookID); err != nil {
 			return err
 		}
@@ -613,7 +613,7 @@ func loadGroupChannels(ctx context.Context, q querier, gs []phonebook.Group) err
 // 0.
 func (s *Store) SetPhoneGroupAccountSharing(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error) {
 	var out phonebook.Group
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET account_sharing = $2, updated_at = now() WHERE id = $1`, id, enabled)
 		if err != nil {
 			return err
@@ -643,7 +643,7 @@ func (s *Store) RegeneratePhoneGroupSharingSecret(ctx context.Context, actor str
 	if s.box == nil {
 		return out, prov.ErrSealed
 	}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		sealed, err := s.box.Seal(newAdminPassword(), prov.SharingSecretAAD(id))
 		if err != nil {
 			return err
@@ -669,7 +669,7 @@ func (s *Store) RegeneratePhoneGroupSharingSecret(ctx context.Context, actor str
 // configuration change like the catalog's.
 func (s *Store) SetPhoneGroupMulticast(ctx context.Context, actor string, id int64, in []phonebook.MulticastInput, opts *phonebook.PagingOptions) (phonebook.Group, error) {
 	var out phonebook.Group
-	err := s.configChange(ctx, actor, "set-multicast", "phone_group", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "set-multicast", "phone_group", nil, func(tx *dbTx) (int64, error) {
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
 			return id, err
@@ -707,7 +707,7 @@ func (s *Store) SetPhoneGroupMulticast(ctx context.Context, actor string, id int
 // the syslog sink, and at what level (phone-feature-parity S-27).
 func (s *Store) SetPhoneGroupSyslog(ctx context.Context, actor string, id int64, in phonebook.Syslog) (phonebook.Group, error) {
 	var out phonebook.Group
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET syslog_enabled = $2, syslog_level = $3, updated_at = now() WHERE id = $1`,
 			id, in.Enabled, in.Level)
 		if err != nil {
@@ -752,7 +752,7 @@ func (s *Store) SetPhoneGroupPTT(ctx context.Context, actor string, id int64, in
 	if in.EmergencyGroup < phonebook.MinGroupChannel || in.EmergencyGroup > phonebook.MaxGroupChannel {
 		in.EmergencyGroup = def.EmergencyGroup
 	}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if in.ChannelID != nil {
 			if err := checkPTTChannel(ctx, tx, "channelId", *in.ChannelID); err != nil {
 				return err
@@ -813,7 +813,7 @@ func phoneGroupNameError(err error, name string) error {
 // channel 1 defined (the Grandstream default channel).
 func (s *Store) CreatePhoneGroup(ctx context.Context, actor string, in GroupInput) (phonebook.Group, error) {
 	var out phonebook.Group
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO phone_groups (name, description, include_extensions, include_company)
@@ -844,7 +844,7 @@ func (s *Store) CreatePhoneGroup(ctx context.Context, actor string, in GroupInpu
 // named books stay.
 func (s *Store) UpdatePhoneGroup(ctx context.Context, actor string, id int64, in GroupInput) (phonebook.Group, error) {
 	var out phonebook.Group
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `
 			UPDATE phone_groups SET name = $2, description = $3, include_extensions = $4, include_company = $5, updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Description, in.IncludeExtensions, in.IncludeCompany)
@@ -864,7 +864,7 @@ func (s *Store) UpdatePhoneGroup(ctx context.Context, actor string, id int64, in
 
 // DeletePhoneGroup deletes a group; its phones fall back to no group.
 func (s *Store) DeletePhoneGroup(ctx context.Context, actor string, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM phone_groups WHERE id = $1`, id)
 		if err != nil {
 			return err
@@ -881,7 +881,7 @@ func (s *Store) DeletePhoneGroup(ctx context.Context, actor string, id int64) er
 // twice; a failure names the position.
 func (s *Store) SetPhoneGroupBooks(ctx context.Context, actor string, id int64, bookIDs []int64) (phonebook.Group, error) {
 	var out phonebook.Group
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
 			return err

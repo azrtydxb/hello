@@ -329,7 +329,7 @@ type ChatSendResult struct {
 func (s *Store) ChatSend(ctx context.Context, in ChatSendInput) (ChatSendResult, error) {
 	var res ChatSendResult
 	var ev *messaging.Event
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		res, ev = ChatSendResult{}, nil
 		return s.chatSend(ctx, tx, in, &res, &ev)
 	})
@@ -339,7 +339,7 @@ func (s *Store) ChatSend(ctx context.Context, in ChatSendInput) (ChatSendResult,
 	return res, err
 }
 
-func (s *Store) chatSend(ctx context.Context, tx *sql.Tx, in ChatSendInput, res *ChatSendResult, ev **messaging.Event) error {
+func (s *Store) chatSend(ctx context.Context, tx *dbTx, in ChatSendInput, res *ChatSendResult, ev **messaging.Event) error {
 	var name, email string
 	// Locking the visitor serialises one visitor's messages, so the single
 	// open conversation and the caps are exact.
@@ -654,7 +654,7 @@ func (s *Store) ChatLatestEventID(ctx context.Context, visitorID int64) (int64, 
 
 // chatEvent tells the visitor of conversation convID something happened.
 // It does nothing for a conversation that is not a chat.
-func chatEvent(ctx context.Context, tx *sql.Tx, convID, msgID int64, typ string) error {
+func chatEvent(ctx context.Context, tx *dbTx, convID, msgID int64, typ string) error {
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(chatEventLock)); err != nil {
 		return err
 	}
@@ -672,7 +672,7 @@ func chatEvent(ctx context.Context, tx *sql.Tx, convID, msgID int64, typ string)
 
 // openChatConversation returns the id of the visitor's open conversation, 0
 // for none.
-func openChatConversation(ctx context.Context, tx *sql.Tx, siteAddress, visitorID int64) (int64, error) {
+func openChatConversation(ctx context.Context, tx *dbTx, siteAddress, visitorID int64) (int64, error) {
 	var conv int64
 	err := tx.QueryRowContext(ctx, `
 		SELECT id FROM conversations WHERE address_id = $1 AND peer_key = $2 AND status NOT IN ('resolved', 'spam') FOR UPDATE`,
@@ -686,7 +686,7 @@ func openChatConversation(ctx context.Context, tx *sql.Tx, siteAddress, visitorI
 // ChatTyping tells the agents the visitor is typing. It is nothing when
 // there is no open conversation.
 func (s *Store) ChatTyping(ctx context.Context, site ChatSite, visitorID int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		conv, err := openChatConversation(ctx, tx, site.AddressID, visitorID)
 		if err != nil || conv == 0 {
 			return err
@@ -699,7 +699,7 @@ func (s *Store) ChatTyping(ctx context.Context, site ChatSite, visitorID int64) 
 // the agents see, and the visitor's other tabs are told.
 func (s *Store) ChatEnd(ctx context.Context, site ChatSite, visitorID int64) error {
 	var ev *messaging.Event
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		ev = nil
 		conv, err := openChatConversation(ctx, tx, site.AddressID, visitorID)
 		if err != nil || conv == 0 {
@@ -770,7 +770,7 @@ func (s *Store) chatInfo(ctx context.Context, convID int64) (*ChatInfo, error) {
 // insertAgentReply writes an agent's reply into a conversation and does what
 // a reply does: claims an unassigned conversation, reopens a resolved or
 // snoozed one and stamps the first response. status is the message's state.
-func insertAgentReply(ctx context.Context, tx *sql.Tx, c convRow, acc InboxAccess, body, clientMsgID, status string) (int64, error) {
+func insertAgentReply(ctx context.Context, tx *dbTx, c convRow, acc InboxAccess, body, clientMsgID, status string) (int64, error) {
 	var clientID any
 	if clientMsgID != "" {
 		clientID = clientMsgID
@@ -808,7 +808,7 @@ func insertAgentReply(ctx context.Context, tx *sql.Tx, c convRow, acc InboxAcces
 
 // chatAgentReply sends an agent's reply into a live chat: there is no
 // carrier, so the message is stored sent and the visitor's stream carries it.
-func (s *Store) chatAgentReply(ctx context.Context, tx *sql.Tx, c convRow, acc InboxAccess, in SendInput, on bool) (ConvMessage, error) {
+func (s *Store) chatAgentReply(ctx context.Context, tx *dbTx, c convRow, acc InboxAccess, in SendInput, on bool) (ConvMessage, error) {
 	if !on {
 		return ConvMessage{}, ErrChannelUnavailable
 	}
@@ -835,7 +835,7 @@ func (s *Store) chatAgentReply(ctx context.Context, tx *sql.Tx, c convRow, acc I
 // every three seconds per visitor). A conversation that is not a chat is
 // ErrNotChat.
 func (s *Store) ChatAgentTyping(ctx context.Context, acc InboxAccess, convID int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		c, err := lockConversation(ctx, tx, acc, convID)
 		if err != nil {
 			return err
@@ -865,7 +865,7 @@ func (s *Store) ChatAgentTyping(ctx context.Context, acc InboxAccess, convID int
 // only.
 func (s *Store) BlockChatVisitor(ctx context.Context, acc InboxAccess, convID int64, ttl time.Duration) (ChatBlock, error) {
 	var out ChatBlock
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		c, err := lockConversation(ctx, tx, acc, convID)
 		if err != nil {
 			return err
@@ -938,7 +938,7 @@ type ChatEmailReply struct {
 // widget once FinishChatEmailReply marks it sent. A retried client id returns
 // the earlier message with created false and sends nothing.
 func (s *Store) PrepareChatEmailReply(ctx context.Context, acc InboxAccess, in SendInput) (rep ChatEmailReply, created bool, err error) {
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		c, err := lockConversation(ctx, tx, acc, in.ConversationID)
 		if err != nil {
 			return err
@@ -999,7 +999,7 @@ func (s *Store) PrepareChatEmailReply(ctx context.Context, acc InboxAccess, in S
 // FinishChatEmailReply records whether the email went out: sent (and the
 // visitor's widget shows the reply) or failed.
 func (s *Store) FinishChatEmailReply(ctx context.Context, msgID int64, sent bool) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		var conv int64
 		status, code := messaging.DeliverySent, ""
 		if !sent {

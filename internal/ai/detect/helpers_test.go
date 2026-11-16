@@ -85,7 +85,7 @@ func testEnv(t testing.TB) (*Env, *fakeLive) {
 	t.Helper()
 	db := scratchDB(t)
 	live := &fakeLive{trunks: map[int64]livestate.TrunkStatus{}}
-	return &Env{DB: hellodb.New(db, slog.New(slog.DiscardHandler)), Store: store.New(db), Live: live, Cluster: fakeMembers{}, Now: func() time.Time { return t0 }}, live
+	return &Env{DB: hellodb.New(db, slog.New(slog.DiscardHandler)), Store: store.New(db, nil), Live: live, Cluster: fakeMembers{}, Now: func() time.Time { return t0 }}, live
 }
 
 // valkeyClient is a client on the CI Valkey's database 14 (flushed), or skips.

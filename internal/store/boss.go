@@ -8,7 +8,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 )
@@ -89,7 +88,7 @@ func (s *Store) PutBossLinks(ctx context.Context, actor string, in []BossLinkInp
 	if len(in) > MaxBossLinks {
 		return &InUseError{Msg: fmt.Sprintf("at most %d boss links", MaxBossLinks)}
 	}
-	return s.configChangeID(ctx, actor, "update", "boss_link", nil, func(tx *sql.Tx) (string, error) {
+	return s.configChangeID(ctx, actor, "update", "boss_link", nil, func(tx *dbTx) (string, error) {
 		kept := make([]int64, len(in))
 		for i, l := range in {
 			kept[i] = l.BossExtensionID

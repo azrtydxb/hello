@@ -16,6 +16,22 @@ which runs on hello-sip's pgx pool through `db.NewPool`, in the pool's own
 query execution mode. `internal/webhook` (`webhook.PG`) takes its advisory
 locks through momo's `advisory` package with the same keys as before.
 
+`internal/store` runs on momo at its seam (`internal/store/dbq.go`): its
+pool and its transactions are types with `database/sql`'s method set
+(`ExecContext`, `QueryContext`, `QueryRowContext`, `BeginTx`) whose every
+statement is a momo raw statement, on the store's `*momo.DB` or on momo's
+view of the open `*sql.Tx` (`db.AdoptTx`). Its SQL still binds `$n`, which
+momo accepts on PostgreSQL as positional arguments (one placeholder style per
+statement: a `$n` statement cannot also use `?` or `@name`); files move to
+`@name` one domain at a time. The handle and the transaction types are
+`momo.Querier`s, so converted code passes them straight to `momo.Exec`,
+`momo.Query[T]` and the builders. Transactions are still begun by
+`database/sql` and adopted, so methods that take a caller's `*sql.Tx` (the
+directory Provisioner's) keep it. Three things stay raw: BEGIN, `TryLock`'s
+pinned session-lock connection, and `SchemaVersion`'s read of
+`goose_db_version`. `TestStatementsBuild` builds every constant statement the
+store passes to the seam on the offline handle, from the package source.
+
 ## Writing a statement
 
 - Hand-written SQL stays hand-written. Bind arguments by name, with `@name`

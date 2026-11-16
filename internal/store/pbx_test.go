@@ -27,7 +27,7 @@ func scratchStore(t *testing.T) *Store {
 	if _, err := migrate.Up(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
-	return New(db)
+	return New(db, nil)
 }
 
 // scratchDB returns a throwaway, unmigrated database.

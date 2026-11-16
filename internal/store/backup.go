@@ -92,7 +92,7 @@ func (s *Store) PutBackupSettings(ctx context.Context, actor string, in backup.S
 			}
 		}
 	}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO backup_settings (id, enabled, cron, kind, s3_endpoint, s3_bucket, s3_region, s3_path_style,
 			                             s3_keys_sealed, keep_count, notify_email)
@@ -228,7 +228,7 @@ func (s *Store) LastSuccess(ctx context.Context) (time.Time, bool, error) {
 // AdoptArchive records an archive the destination holds but the table does
 // not; a row a dump caught still running is completed.
 func (s *Store) AdoptArchive(ctx context.Context, key string, size int64, at time.Time) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `
 			UPDATE backup_runs SET status = 'succeeded', archive_bytes = $2, finished_at = COALESCE(finished_at, $3)
 			WHERE object_key = $1 AND status = 'running'`, key, size, at)
@@ -246,10 +246,12 @@ func (s *Store) AdoptArchive(ctx context.Context, key string, size int64, at tim
 	})
 }
 
-// SchemaVersion is the highest applied migration.
+// SchemaVersion is the highest applied migration. goose owns
+// goose_db_version, so the read stays raw database/sql until momo's
+// migration engine takes over.
 func (s *Store) SchemaVersion(ctx context.Context) (int64, error) {
 	var v sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT max(version_id) FROM goose_db_version WHERE is_applied`).Scan(&v)
+	err := s.db.raw.QueryRowContext(ctx, `SELECT max(version_id) FROM goose_db_version WHERE is_applied`).Scan(&v)
 	return v.Int64, err
 }
 
@@ -257,7 +259,7 @@ func (s *Store) SchemaVersion(ctx context.Context) (int64, error) {
 // it, so every node rebuilds its snapshot from the restored data even when
 // the restored revision was lower than the one they hold.
 func (s *Store) BumpRevision(ctx context.Context, atLeast int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		var rev int64
 		if err := tx.QueryRowContext(ctx,
 			`UPDATE schema_info SET config_revision = GREATEST(config_revision, $1::bigint) + 1 RETURNING config_revision`,

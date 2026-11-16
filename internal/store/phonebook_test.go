@@ -142,11 +142,11 @@ func TestPhonebookMigration(t *testing.T) {
 		if _, err := p.UpTo(ctx, 10); err != nil {
 			t.Fatal(err)
 		}
-		before := objects(t, New(db))
+		before := objects(t, New(db, nil))
 		if _, err := p.UpTo(ctx, 11); err != nil {
 			t.Fatal(err)
 		}
-		after := objects(t, New(db))
+		after := objects(t, New(db, nil))
 		for _, want := range []string{"phonebooks", "phonebook_entries", "phone_groups", "phone_group_books",
 			"phones.group_id", "users.extension_id", "extensions.directory_hidden"} {
 			if !after[want] || before[want] {
@@ -156,13 +156,13 @@ func TestPhonebookMigration(t *testing.T) {
 		if _, err := p.DownTo(ctx, 10); err != nil {
 			t.Fatal(err)
 		}
-		for n := range objects(t, New(db)) {
+		for n := range objects(t, New(db, nil)) {
 			if !before[n] {
 				t.Errorf("down left %s", n)
 			}
 		}
 		for n := range before {
-			if !objects(t, New(db))[n] {
+			if !objects(t, New(db, nil))[n] {
 				t.Errorf("down dropped %s", n)
 			}
 		}

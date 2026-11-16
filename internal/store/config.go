@@ -122,7 +122,7 @@ func (s *Store) CreateExtension(ctx context.Context, actor, number, name, extern
 // and keeps the door targets; a user extension must have none.
 func (s *Store) CreateExtensionKind(ctx context.Context, actor, number, name, externalNumber, kind string, targets DoorTargets, check Check) (Extension, error) {
 	var e Extension
-	err := s.configChange(ctx, actor, "create", "extension", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "extension", check, func(tx *dbTx) (int64, error) {
 		if kind != ExtensionUser && kind != ExtensionDoor {
 			return 0, fieldError("kind", "must be user or door")
 		}
@@ -184,7 +184,7 @@ type ExtensionChange struct {
 // source extension) is an *InUseError naming the routes.
 func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c ExtensionChange, check Check) (Extension, error) {
 	var e Extension
-	err := s.configChange(ctx, actor, "update", "extension", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "extension", check, func(tx *dbTx) (int64, error) {
 		number, routes, err := extensionRoutes(ctx, tx, id)
 		if err != nil {
 			return id, err
@@ -238,7 +238,7 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 // extension a route refers to (an inbound destination or an outbound
 // source extension) is an *InUseError naming the routes.
 func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "extension", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "extension", check, func(tx *dbTx) (int64, error) {
 		number, routes, err := extensionRoutes(ctx, tx, id)
 		if err != nil {
 			return id, err
@@ -340,7 +340,7 @@ type NewDevice struct {
 func (s *Store) CreateDevice(ctx context.Context, actor string, in NewDevice) (Device, error) {
 	md5Hex, shaHex := auth.HA1(in.SIPUsername, in.Realm, in.Secret)
 	var d Device
-	err := s.configChange(ctx, actor, "create", "device", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "device", nil, func(tx *dbTx) (int64, error) {
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
 			INSERT INTO devices (extension_id, sip_username, realm, ha1_md5, ha1_sha256, enabled)
@@ -363,7 +363,7 @@ type DeviceMedia struct {
 // UpdateDevice changes the fields that are not nil.
 func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, m DeviceMedia) (Device, error) {
 	var d Device
-	err := s.configChange(ctx, actor, "update", "device", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "device", nil, func(tx *dbTx) (int64, error) {
 		if extensionID != nil {
 			// A client belongs to the extension its owner is linked to.
 			var kind string
@@ -389,7 +389,7 @@ func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enable
 // secret for realm.
 func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, realm, secret string) (Device, error) {
 	var d Device
-	err := s.configChange(ctx, actor, "rotate-secret", "device", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "rotate-secret", "device", nil, func(tx *dbTx) (int64, error) {
 		var username, mode string
 		if err := tx.QueryRowContext(ctx, `SELECT sip_username, auth_mode FROM devices WHERE id = $1 FOR UPDATE`, id).Scan(&username, &mode); err != nil {
 			return id, err
@@ -427,7 +427,7 @@ func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, 
 
 // DeleteDevice removes a device.
 func (s *Store) DeleteDevice(ctx context.Context, actor string, id int64) error {
-	return s.configChange(ctx, actor, "delete", "device", nil, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "device", nil, func(tx *dbTx) (int64, error) {
 		if err := boundPhone(ctx, tx, `d.id = $1`, id); err != nil {
 			return id, err
 		}

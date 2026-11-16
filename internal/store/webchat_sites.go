@@ -216,7 +216,7 @@ func checkChatTurnstile(in ChatSiteInput, hasSecret bool) error {
 	return nil
 }
 
-func (s *Store) sealTurnstile(ctx context.Context, tx *sql.Tx, siteID int64, secretKey *string) error {
+func (s *Store) sealTurnstile(ctx context.Context, tx *dbTx, siteID int64, secretKey *string) error {
 	if secretKey == nil {
 		return nil
 	}
@@ -254,7 +254,7 @@ func (s *Store) CreateChatSite(ctx context.Context, actor string, in ChatSiteInp
 		return ChatSite{}, err
 	}
 	var id int64
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		var channelID, addressID int64
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO msg_channels (kind, provider, name, enabled, hook_id)
@@ -293,7 +293,7 @@ func (s *Store) UpdateChatSite(ctx context.Context, actor string, id int64, in C
 	if err != nil {
 		return ChatSite{}, err
 	}
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		var channelID, addressID int64
 		var hasSecret bool
 		if err := tx.QueryRowContext(ctx, `SELECT channel_id, address_id, turnstile_secret_enc IS NOT NULL FROM chat_sites WHERE id = $1 FOR UPDATE`,
@@ -340,7 +340,7 @@ func (s *Store) UpdateChatSite(ctx context.Context, actor string, id int64, in C
 // DeleteChatSite removes a site that has no conversations; one with history
 // is refused (retention or an erase request removes it first).
 func (s *Store) DeleteChatSite(ctx context.Context, actor string, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		var channelID int64
 		if err := tx.QueryRowContext(ctx, `SELECT channel_id FROM chat_sites WHERE id = $1 FOR UPDATE`, id).Scan(&channelID); err != nil {
 			return err
@@ -403,7 +403,7 @@ func (s *Store) ListChatBlocks(ctx context.Context, siteID int64) ([]ChatBlock, 
 
 // DeleteChatBlock lifts a block.
 func (s *Store) DeleteChatBlock(ctx context.Context, actor string, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM chat_blocks WHERE id = $1`, id)
 		if err != nil {
 			return err

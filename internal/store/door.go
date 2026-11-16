@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -61,7 +62,7 @@ func parseDoorTargets(raw []byte) DoorTargets {
 // checkDoorTargets refuses targets that do not exist, a door station as a
 // target (a station dials people, not stations), the station itself (self is
 // its id, 0 on create), a duplicate, and more than MaxDoorTargets.
-func checkDoorTargets(ctx context.Context, tx *sql.Tx, self int64, t DoorTargets) error {
+func checkDoorTargets(ctx context.Context, tx *dbTx, self int64, t DoorTargets) error {
 	if len(t.Extensions)+len(t.RingGroups) > MaxDoorTargets {
 		return fieldError("doorTargets", fmt.Sprintf("at most %d targets", MaxDoorTargets))
 	}
@@ -75,7 +76,7 @@ func checkDoorTargets(ctx context.Context, tx *sql.Tx, self int64, t DoorTargets
 		}
 		var kind string
 		err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = $1`, id).Scan(&kind)
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return fieldError(path, "extension does not exist")
 		}
 		if err != nil {
@@ -92,7 +93,7 @@ func checkDoorTargets(ctx context.Context, tx *sql.Tx, self int64, t DoorTargets
 		}
 		var one int
 		err := tx.QueryRowContext(ctx, `SELECT 1 FROM ring_groups WHERE id = $1`, id).Scan(&one)
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return fieldError(path, "ring group does not exist")
 		}
 		if err != nil {
@@ -109,7 +110,7 @@ func checkDoorTargets(ctx context.Context, tx *sql.Tx, self int64, t DoorTargets
 // is hidden from the extensions phonebook unless the same change says
 // otherwise. Turning back into a user drops the targets. c is the caller's
 // copy of the change; the forced fields are written to it.
-func doorChange(ctx context.Context, tx *sql.Tx, id int64, c *ExtensionChange) (string, DoorTargets, error) {
+func doorChange(ctx context.Context, tx *dbTx, id int64, c *ExtensionChange) (string, DoorTargets, error) {
 	var cur string
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, `SELECT kind, door_targets FROM extensions WHERE id = $1 FOR UPDATE`, id).Scan(&cur, &raw); err != nil {
@@ -158,7 +159,7 @@ func doorChange(ctx context.Context, tx *sql.Tx, id int64, c *ExtensionChange) (
 
 // afterKindChange gives an extension that is a user again its voicemail box
 // back (a door station has none).
-func afterKindChange(ctx context.Context, tx *sql.Tx, e Extension) error {
+func afterKindChange(ctx context.Context, tx *dbTx, e Extension) error {
 	if e.Kind != ExtensionUser {
 		return nil
 	}
@@ -172,7 +173,7 @@ func afterKindChange(ctx context.Context, tx *sql.Tx, e Extension) error {
 
 // memberOf names the first group, queue or pickup group the extension is a
 // member of, or "".
-func memberOf(ctx context.Context, tx *sql.Tx, id int64) (string, error) {
+func memberOf(ctx context.Context, tx *dbTx, id int64) (string, error) {
 	for _, q := range []struct{ what, sql string }{
 		{"ring group", `SELECT g.name FROM ring_group_members m JOIN ring_groups g ON g.id = m.group_id WHERE m.extension_id = $1 LIMIT 1`},
 		{"paging group", `SELECT g.name FROM paging_group_members m JOIN paging_groups g ON g.id = m.group_id WHERE m.extension_id = $1 LIMIT 1`},
@@ -181,7 +182,7 @@ func memberOf(ctx context.Context, tx *sql.Tx, id int64) (string, error) {
 	} {
 		var name string
 		err := tx.QueryRowContext(ctx, q.sql, id).Scan(&name)
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
 		if err != nil {
@@ -194,11 +195,11 @@ func memberOf(ctx context.Context, tx *sql.Tx, id int64) (string, error) {
 
 // checkNoDoor refuses a door station among the extension ids a group, queue
 // or pickup group lists as members; path is the field to blame.
-func checkNoDoor(ctx context.Context, tx *sql.Tx, path string, ids []int64) error {
+func checkNoDoor(ctx context.Context, tx *dbTx, path string, ids []int64) error {
 	for _, id := range ids {
 		var number string
 		err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1 AND kind = 'door'`, id).Scan(&number)
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
 		if err != nil {

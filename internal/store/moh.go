@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -159,7 +158,7 @@ func checkMOHClass(ctx context.Context, q querier, path string, id *int64) error
 
 // writeMOHTracks replaces a class's playlist; an unknown announcement is a
 // field error naming its index.
-func writeMOHTracks(ctx context.Context, tx *sql.Tx, classID int64, ids []int64) error {
+func writeMOHTracks(ctx context.Context, tx *dbTx, classID int64, ids []int64) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM moh_class_tracks WHERE class_id = $1`, classID); err != nil {
 		return err
 	}
@@ -186,7 +185,7 @@ func (s *Store) CreateMOHClass(ctx context.Context, actor string, in MOHClassInp
 		return MOHClass{}, err
 	}
 	var out MOHClass
-	err := s.configChange(ctx, actor, "create", "moh_class", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "moh_class", nil, func(tx *dbTx) (int64, error) {
 		if in.IsDefault {
 			if _, err := tx.ExecContext(ctx, `UPDATE moh_classes SET is_default = FALSE WHERE is_default`); err != nil {
 				return 0, err
@@ -213,7 +212,7 @@ func (s *Store) UpdateMOHClass(ctx context.Context, actor string, id int64, in M
 		return MOHClass{}, err
 	}
 	var out MOHClass
-	err := s.configChange(ctx, actor, "update", "moh_class", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "moh_class", nil, func(tx *dbTx) (int64, error) {
 		if in.IsDefault {
 			if _, err := tx.ExecContext(ctx, `UPDATE moh_classes SET is_default = FALSE WHERE is_default AND id <> $1`, id); err != nil {
 				return id, err
@@ -239,7 +238,7 @@ func (s *Store) UpdateMOHClass(ctx context.Context, actor string, id int64, in M
 // DeleteMOHClass removes a class. Extensions, groups and routes that named
 // it fall back to the global default.
 func (s *Store) DeleteMOHClass(ctx context.Context, actor string, id int64) error {
-	return s.configChange(ctx, actor, "delete", "moh_class", nil, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "moh_class", nil, func(tx *dbTx) (int64, error) {
 		res, err := tx.ExecContext(ctx, `DELETE FROM moh_classes WHERE id = $1`, id)
 		if err != nil {
 			return id, err

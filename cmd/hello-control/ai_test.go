@@ -17,7 +17,7 @@ import (
 // than 404 without HELLO_PUBLIC_URL, or if they are not served with it.
 func TestComposeWithoutPublicURL(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
-	st := store.New(nil)
+	st := store.New(nil, nil)
 	vk := api.NewLazyValkey(false)
 	apiH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/v1/") {

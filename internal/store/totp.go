@@ -89,7 +89,7 @@ func (s *Store) BeginTOTPSetup(ctx context.Context, id int64, secretB32 string) 
 	if err != nil {
 		return fmt.Errorf("store: seal totp secret: %w", err)
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		var enabled sql.NullTime
 		if err := tx.QueryRowContext(ctx, `SELECT totp_enabled_at FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&enabled); err != nil {
 			return mapErr(err)
@@ -103,7 +103,7 @@ func (s *Store) BeginTOTPSetup(ctx context.Context, id int64, secretB32 string) 
 }
 
 // openTOTP reads and opens user id's secret under the row lock of tx.
-func (s *Store) openTOTP(ctx context.Context, tx *sql.Tx, id int64) (secretB32 string, enabled bool, last int64, err error) {
+func (s *Store) openTOTP(ctx context.Context, tx *dbTx, id int64) (secretB32 string, enabled bool, last int64, err error) {
 	var (
 		enc []byte
 		at  sql.NullTime
@@ -129,7 +129,7 @@ func (s *Store) openTOTP(ctx context.Context, tx *sql.Tx, id int64) (secretB32 s
 // returns the ten recovery codes, once. A wrong code is ErrMFAInvalid.
 func (s *Store) EnableTOTP(ctx context.Context, id int64, code string, now time.Time) ([]string, error) {
 	var plain []string
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		sec, enabled, last, err := s.openTOTP(ctx, tx, id)
 		if err != nil {
 			return err
@@ -156,7 +156,7 @@ func (s *Store) EnableTOTP(ctx context.Context, id int64, code string, now time.
 	return plain, nil
 }
 
-func replaceRecoveryCodes(ctx context.Context, tx *sql.Tx, id int64) ([]string, error) {
+func replaceRecoveryCodes(ctx context.Context, tx *dbTx, id int64) ([]string, error) {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM user_recovery_codes WHERE user_id = $1`, id); err != nil {
 		return nil, err
 	}
@@ -173,7 +173,7 @@ func replaceRecoveryCodes(ctx context.Context, tx *sql.Tx, id int64) ([]string, 
 // id inside tx, which must hold the user's row lock. A TOTP code advances
 // totp_last_step; a recovery code is deleted. It reports whether it passed
 // and which kind it was.
-func (s *Store) checkSecondFactor(ctx context.Context, tx *sql.Tx, id int64, code string, now time.Time) (ok, recovery bool, err error) {
+func (s *Store) checkSecondFactor(ctx context.Context, tx *dbTx, id int64, code string, now time.Time) (ok, recovery bool, err error) {
 	if auth.LooksLikeRecoveryCode(code) {
 		res, err := tx.ExecContext(ctx,
 			`DELETE FROM user_recovery_codes WHERE user_id = $1 AND code_hash = $2`, id, auth.HashRecoveryCode(code))
@@ -201,7 +201,7 @@ func (s *Store) checkSecondFactor(ctx context.Context, tx *sql.Tx, id int64, cod
 // RegenerateRecoveryCodes replaces the user's recovery codes after a valid
 // second factor and returns the new ones, once.
 func (s *Store) RegenerateRecoveryCodes(ctx context.Context, id int64, code string, now time.Time) ([]string, error) {
-	return s.withSecondFactor(ctx, id, code, now, "regenerate-2fa-recovery", func(tx *sql.Tx) ([]string, error) {
+	return s.withSecondFactor(ctx, id, code, now, "regenerate-2fa-recovery", func(tx *dbTx) ([]string, error) {
 		return replaceRecoveryCodes(ctx, tx, id)
 	})
 }
@@ -209,17 +209,17 @@ func (s *Store) RegenerateRecoveryCodes(ctx context.Context, id int64, code stri
 // DisableTOTP turns the user's own 2FA off after a valid second factor. The
 // caller has checked the policy and the password.
 func (s *Store) DisableTOTP(ctx context.Context, id int64, code string, now time.Time) error {
-	_, err := s.withSecondFactor(ctx, id, code, now, "disable-2fa", func(tx *sql.Tx) ([]string, error) {
+	_, err := s.withSecondFactor(ctx, id, code, now, "disable-2fa", func(tx *dbTx) ([]string, error) {
 		return nil, clearTOTP(ctx, tx, id)
 	})
 	return err
 }
 
 func (s *Store) withSecondFactor(ctx context.Context, id int64, code string, now time.Time, action string,
-	fn func(*sql.Tx) ([]string, error)) ([]string, error) {
+	fn func(*dbTx) ([]string, error)) ([]string, error) {
 	var out []string
 	var refused bool
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		ok, _, err := s.checkSecondFactor(ctx, tx, id, code, now)
 		if err != nil {
 			return err
@@ -242,7 +242,7 @@ func (s *Store) withSecondFactor(ctx context.Context, id int64, code string, now
 	return out, nil
 }
 
-func clearTOTP(ctx context.Context, tx *sql.Tx, id int64) error {
+func clearTOTP(ctx context.Context, tx *dbTx, id int64) error {
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE users SET totp_secret_enc = NULL, totp_enabled_at = NULL, totp_last_step = 0 WHERE id = $1`, id); err != nil {
 		return err
@@ -254,7 +254,7 @@ func clearTOTP(ctx context.Context, tx *sql.Tx, id int64) error {
 	return err
 }
 
-func recordMFAFailure(ctx context.Context, tx *sql.Tx, id int64) error {
+func recordMFAFailure(ctx context.Context, tx *dbTx, id int64) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO auth_mfa_failures (user_id) VALUES ($1)`, id)
 	return err
 }
@@ -288,7 +288,7 @@ func (s *Store) CompleteMFAChallenge(ctx context.Context, hash []byte, code stri
 		res     MFAResult
 		invalid bool
 	)
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var (
 			uid      int64
 			expires  time.Time
@@ -381,7 +381,7 @@ func (s *Store) PruneMFA(ctx context.Context) error {
 // reset of the only enabled admin who has 2FA is refused; the CLI passes
 // guard false as the break-glass form. It ends the user's sessions.
 func (s *Store) ResetTOTP(ctx context.Context, actor string, id int64, guard bool) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		if _, err := lockAdmins(ctx, tx); err != nil {
 			return err
 		}
@@ -449,7 +449,7 @@ func (s *Store) GetAuthSettings(ctx context.Context) (AuthSettings, error) {
 // refused (ErrTwoFactorRequired) unless setter has active 2FA, so a policy
 // change cannot lock every admin out.
 func (s *Store) SetRequire2FARoles(ctx context.Context, actor string, setter int64, roles []string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		for _, r := range roles {
 			if r == string(auth.RoleAdmin) {
 				if err := requireActive2FA(ctx, tx, setter); err != nil {
@@ -468,7 +468,7 @@ func (s *Store) SetRequire2FARoles(ctx context.Context, actor string, setter int
 }
 
 // requireActive2FA is ErrTwoFactorRequired unless user id has active 2FA.
-func requireActive2FA(ctx context.Context, tx *sql.Tx, id int64) error {
+func requireActive2FA(ctx context.Context, tx *dbTx, id int64) error {
 	var on bool
 	err := tx.QueryRowContext(ctx, `SELECT totp_enabled_at IS NOT NULL FROM users WHERE id = $1`, id).Scan(&on)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !on) {

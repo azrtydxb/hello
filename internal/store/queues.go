@@ -7,7 +7,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
@@ -251,7 +250,7 @@ func (in QueueInput) destinations() []ivrDest {
 }
 
 // checkQueue verifies the references of a queue before it is written.
-func checkQueue(ctx context.Context, tx *sql.Tx, id int64, in QueueInput) error {
+func checkQueue(ctx context.Context, tx *dbTx, id int64, in QueueInput) error {
 	if err := checkDialNumber(ctx, tx, "number", in.Number, numQueue); err != nil {
 		return err
 	}
@@ -304,7 +303,7 @@ func checkQueue(ctx context.Context, tx *sql.Tx, id int64, in QueueInput) error 
 
 // checkQueueLoops refuses queues whose failover destinations lead back to
 // the queue through other queues: a call would be passed round for ever.
-func checkQueueLoops(ctx context.Context, tx *sql.Tx, id int64, in QueueInput) error {
+func checkQueueLoops(ctx context.Context, tx *dbTx, id int64, in QueueInput) error {
 	rows, err := tx.QueryContext(ctx, `SELECT name, timeout_kind, timeout_target, full_kind, full_target,
 		no_agents_kind, no_agents_target FROM queues WHERE id <> $1`, id)
 	if err != nil {
@@ -334,7 +333,7 @@ func checkQueueLoops(ctx context.Context, tx *sql.Tx, id int64, in QueueInput) e
 	return nil
 }
 
-func writeQueueMembers(ctx context.Context, tx *sql.Tx, id int64, members []QueueMember) error {
+func writeQueueMembers(ctx context.Context, tx *dbTx, id int64, members []QueueMember) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM queue_members WHERE queue_id = $1`, id); err != nil {
 		return err
 	}
@@ -407,7 +406,7 @@ func (in QueueInput) args() []any {
 // CreateQueue inserts a queue with its members.
 func (s *Store) CreateQueue(ctx context.Context, actor string, in QueueInput, check Check) (Queue, error) {
 	var out Queue
-	err := s.configChange(ctx, actor, "create", "queue", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "queue", check, func(tx *dbTx) (int64, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM queues`).Scan(&n); err != nil {
 			return 0, err
@@ -440,7 +439,7 @@ func (s *Store) CreateQueue(ctx context.Context, actor string, in QueueInput, ch
 }
 
 // queueReferences names what points at the queue name.
-func queueReferences(ctx context.Context, tx *sql.Tx, id int64, name string) ([]string, error) {
+func queueReferences(ctx context.Context, tx *dbTx, id int64, name string) ([]string, error) {
 	var refs []string
 	for _, q := range []struct {
 		query, label string
@@ -479,7 +478,7 @@ func queueReferences(ctx context.Context, tx *sql.Tx, id int64, name string) ([]
 // refused: the references name it.
 func (s *Store) UpdateQueue(ctx context.Context, actor string, id int64, in QueueInput, check Check) (Queue, error) {
 	var out Queue
-	err := s.configChange(ctx, actor, "update", "queue", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "queue", check, func(tx *dbTx) (int64, error) {
 		var cur string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = $1 FOR UPDATE`, id).Scan(&cur); err != nil {
 			return id, err
@@ -520,7 +519,7 @@ func (s *Store) UpdateQueue(ctx context.Context, actor string, id int64, in Queu
 // DeleteQueue removes a queue and, by cascade, its members. A queue that an
 // inbound route, ring group, IVR menu or another queue names is refused.
 func (s *Store) DeleteQueue(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "queue", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "queue", check, func(tx *dbTx) (int64, error) {
 		var name string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
 			return id, err
@@ -548,7 +547,7 @@ func (s *Store) DeleteQueue(ctx context.Context, actor string, id int64, check C
 // numbers that route to it and the open conversations placed in it. A queue
 // with either cannot be deleted (spec messaging-channels edge cases); turning
 // its texting off sends the waiting conversations back to the pool instead.
-func queueTextReferences(ctx context.Context, tx *sql.Tx, id int64) ([]string, error) {
+func queueTextReferences(ctx context.Context, tx *dbTx, id int64) ([]string, error) {
 	var refs []string
 	rows, err := tx.QueryContext(ctx, `SELECT coalesce(NULLIF(label, ''), address) FROM msg_addresses
 		WHERE (route_kind IN ('queue', 'ai_triage') AND route_target = $1) OR (after_hours_action = 'route' AND after_hours_route_kind = 'queue' AND after_hours_route_target = $1)

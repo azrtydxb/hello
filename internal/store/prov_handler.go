@@ -101,7 +101,7 @@ func (s *Store) ClaimBoot(ctx context.Context, mac string, ip netip.Addr) (prov.
 		rec     prov.PhoneRecord
 		handoff *prov.ProvInfo
 	)
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var err error
 		rec, _, err = scanRecord(tx.QueryRowContext(ctx, recordSelect+` WHERE p.mac = $1 FOR UPDATE OF p`, mac))
 		if err != nil {
@@ -516,25 +516,24 @@ func (s *Store) FirmwareByName(ctx context.Context, v prov.Vendor, filename stri
 	return f.Firmware, err
 }
 
+const insertFetchSQL = `
+			INSERT INTO prov_fetches (at, phone_id, mac_claimed, ip, user_agent, path_redacted, kind, result, status, bytes, ua_mismatch)
+			VALUES ($1, NULLIF($2::bigint, 0), $3, $4::inet, $5, $6, $7, $8, $9, $10, $11)`
+
 // InsertFetches implements prov.Store.
 func (s *Store) InsertFetches(ctx context.Context, rows []prov.FetchRecord) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
-		stmt, err := tx.PrepareContext(ctx, `
-			INSERT INTO prov_fetches (at, phone_id, mac_claimed, ip, user_agent, path_redacted, kind, result, status, bytes, ua_mismatch)
-			VALUES ($1, NULLIF($2::bigint, 0), $3, $4::inet, $5, $6, $7, $8, $9, $10, $11)`)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = stmt.Close() }()
+	return s.tx(ctx, func(tx *dbTx) error {
+		// One statement text for every row: the driver's per-connection
+		// statement cache prepares it once, as the explicit prepare did.
 		for _, r := range rows {
 			var ip any
 			if r.IP.IsValid() {
 				ip = r.IP.Unmap().String()
 			}
-			if _, err := stmt.ExecContext(ctx, r.At, r.PhoneID, r.MACClaimed, ip, r.UserAgent, r.PathRedacted,
+			if _, err := tx.ExecContext(ctx, insertFetchSQL, r.At, r.PhoneID, r.MACClaimed, ip, r.UserAgent, r.PathRedacted,
 				r.Kind, r.Result, r.Status, r.Bytes, r.UAMismatch); err != nil {
 				return err
 			}
@@ -607,7 +606,7 @@ func (q redirectQueue) jobDone(ctx context.Context, j redirect.Job, st *redirect
 			return err
 		}
 	}
-	return q.s.tx(ctx, func(tx *sql.Tx) error {
+	return q.s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, update, append([]any{j.Vendor, j.MAC, j.Seq}, args...)...)
 		if err != nil {
 			return err
