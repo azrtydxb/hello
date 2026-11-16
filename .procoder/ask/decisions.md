@@ -5937,3 +5937,41 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
 - **Detector test fixtures** run on the same momo handle (`momo.Exec`,
   `momo.Scalars`) with their native `$n` placeholders, which momo accepts
   on PostgreSQL.
+
+## momo Phase 2: internal/webhook (2026-11-16, momo/webhook)
+
+- **Same SQL, named binds.** Every `webhook.PG` statement keeps its text;
+  `$n` became `@name` and `momo.Named`. Computed columns got aliases
+  (`events_json`, `extensions_json`, `pending`, `dead`, `payload`) so the
+  per-query scan structs match by name; aliases do not change what a
+  statement reads. The `text[]`/`bigint[]` literals (`pgArray`, `idArray`)
+  and their casts stay. `ListDeliveries` still builds its WHERE from fixed
+  fragments, now with `@endpoint_id`, `@status`, `@before` and `@limit`.
+  The handle is built inline in hello-control (`hellodb.New(db, log)`).
+- **Locks on momo's advisory package, keys unchanged.** The claim lock is
+  `advisory.XactLock(tx, 0x68656c6c6f776864)` and the create lock
+  `advisory.XactLockString(tx, "hello:webhooks:create")`, which send
+  `SELECT pg_advisory_xact_lock($1)` and
+  `SELECT pg_advisory_xact_lock(hashtext($1))`: the same function, key and
+  transaction scope as the raw statements, so old and new replicas exclude
+  each other during a rolling update. `TestPGLockKeys` pins both statements
+  and keys. `FOR UPDATE SKIP LOCKED` in the lease and `FOR UPDATE` in
+  UpdateEndpoint are unchanged.
+- **Transactions.** `PG.tx` is `momo.DB.Tx` (commit on nil, rollback on
+  error) with the old `sql.ErrNoRows` to `ErrNotFound` mapping. `Enqueue`
+  runs in the event ingest `*sql.Tx` through `db.AdoptTx`, which never
+  commits it; the TxHook contract is unchanged.
+- **Errors unchanged for callers.** A generic `one()` returns
+  `sql.ErrNoRows` for zero rows (G7), so ErrNotFound and Redeliver's
+  ErrInFlight check behave as before; other errors carry momo's prefix with
+  the driver error and `context.Canceled` still reachable.
+- **Hermetic test on a stub driver, not the offline handle.** Almost every
+  method opens a transaction, which `momo.NewOffline` refuses at BEGIN, so
+  `TestPGStatementsBuild` runs each method on a small recording momo driver
+  that answers one row (booleans true, integers 1), driving Claim through
+  its lease and Finish through disabling the endpoint, and zero rows for
+  the not-found paths. A misspelled `@name` fails as `ErrValidation` on the
+  pull request tier. Column names are not checked there (the stub names no
+  columns); the existing mem/pg rig (`forEachStore`), which runs the same
+  service and dispatcher assertions on Mem and on PostgreSQL, is the
+  contract test and proves them in the integration tier.
