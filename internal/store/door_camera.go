@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/secret"
 )
 
@@ -69,11 +71,11 @@ func checkCameraURL(raw string) error {
 // Configured false.
 func (s *Store) GetDoorCamera(ctx context.Context, id int64) (DoorCamera, error) {
 	var kind string
-	if err := s.db.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = $1`, id).Scan(&kind); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = @id`, momo.Named("id", id)).Scan(&kind); err != nil {
 		return DoorCamera{}, mapErr(err)
 	}
 	var c DoorCamera
-	err := s.db.QueryRowContext(ctx, `SELECT kind, url, username, password_enc IS NOT NULL FROM door_cameras WHERE extension_id = $1`, id).
+	err := s.db.QueryRowContext(ctx, `SELECT kind, url, username, password_enc IS NOT NULL FROM door_cameras WHERE extension_id = @extension_id`, momo.Named("extension_id", id)).
 		Scan(&c.Kind, &c.URL, &c.Username, &c.PasswordSet)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DoorCamera{}, nil
@@ -89,7 +91,7 @@ func (s *Store) GetDoorCamera(ctx context.Context, id int64) (DoorCamera, error)
 func (s *Store) SetDoorCamera(ctx context.Context, actor string, id int64, in DoorCameraInput) (DoorCamera, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var kind string
-		if err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = $1 FOR UPDATE`, id).Scan(&kind); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&kind); err != nil {
 			return err
 		}
 		if kind != ExtensionDoor {
@@ -123,10 +125,11 @@ func (s *Store) SetDoorCamera(ctx context.Context, actor string, id int64, in Do
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO door_cameras (extension_id, kind, url, username, password_enc)
-				VALUES ($1, $2, $3, $4, $5)
-				ON CONFLICT (extension_id) DO UPDATE SET kind = $2, url = $3, username = $4,
-					password_enc = CASE WHEN $6 THEN door_cameras.password_enc ELSE $5 END, updated_at = now()`,
-			id, in.Kind, in.URL, in.Username, sealed, keep); err != nil {
+				VALUES (@extension_id, @kind, @url, @username, @password_enc)
+				ON CONFLICT (extension_id) DO UPDATE SET kind = @kind, url = @url, username = @username,
+					password_enc = CASE WHEN @keep THEN door_cameras.password_enc ELSE @password_enc::bytea END, updated_at = now()`,
+			momo.Named("extension_id", id), momo.Named("kind", in.Kind), momo.Named("url", in.URL), momo.Named("username", in.Username),
+			momo.Named("password_enc", sealed), momo.Named("keep", keep)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update", "door_camera", fmt.Sprint(id))
@@ -140,7 +143,7 @@ func (s *Store) SetDoorCamera(ctx context.Context, actor string, id int64, in Do
 // DeleteDoorCamera removes door station id's camera.
 func (s *Store) DeleteDoorCamera(ctx context.Context, actor string, id int64) error {
 	return s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM door_cameras WHERE extension_id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM door_cameras WHERE extension_id = @extension_id`, momo.Named("extension_id", id))
 		if err != nil {
 			return err
 		}
@@ -156,7 +159,7 @@ func (s *Store) DeleteDoorCamera(ctx context.Context, actor string, id int64) er
 func (s *Store) DoorCameraForView(ctx context.Context, id int64) (DoorCameraAccess, bool, error) {
 	var a DoorCameraAccess
 	var enc []byte
-	err := s.db.QueryRowContext(ctx, `SELECT kind, url, username, password_enc FROM door_cameras WHERE extension_id = $1`, id).
+	err := s.db.QueryRowContext(ctx, `SELECT kind, url, username, password_enc FROM door_cameras WHERE extension_id = @extension_id`, momo.Named("extension_id", id)).
 		Scan(&a.Kind, &a.URL, &a.Username, &enc)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DoorCameraAccess{}, false, nil

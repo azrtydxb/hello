@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/secret"
 )
 
@@ -110,7 +112,7 @@ func (s *Store) ListDoorWebhooks(ctx context.Context) ([]DoorWebhook, error) {
 
 // GetDoorWebhook returns one webhook.
 func (s *Store) GetDoorWebhook(ctx context.Context, id int64) (DoorWebhook, error) {
-	w, err := scanDoorWebhook(s.db.QueryRowContext(ctx, `SELECT `+doorWebhookCols+doorWebhookFrom+` WHERE w.id = $1`, id))
+	w, err := scanDoorWebhook(s.db.QueryRowContext(ctx, `SELECT `+doorWebhookCols+doorWebhookFrom+` WHERE w.id = @id`, momo.Named("id", id)))
 	return w, mapErr(err)
 }
 
@@ -129,7 +131,7 @@ func checkDoorWebhook(ctx context.Context, tx *dbTx, in DoorWebhookInput) error 
 		}
 		if in.RingGroupID != nil {
 			var isDoor bool
-			err := tx.QueryRowContext(ctx, `SELECT is_door FROM ring_groups WHERE id = $1`, *in.RingGroupID).Scan(&isDoor)
+			err := tx.QueryRowContext(ctx, `SELECT is_door FROM ring_groups WHERE id = @id`, momo.Named("id", *in.RingGroupID)).Scan(&isDoor)
 			if errors.Is(err, sql.ErrNoRows) {
 				return fieldError("ringGroupId", "ring group does not exist")
 			}
@@ -148,7 +150,7 @@ func checkDoorWebhook(ctx context.Context, tx *dbTx, in DoorWebhookInput) error 
 			return fieldError("pagingGroupId", "the chime page action needs a paging group")
 		}
 		var one int
-		err := tx.QueryRowContext(ctx, `SELECT 1 FROM paging_groups WHERE id = $1`, *in.PagingGroupID).Scan(&one)
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM paging_groups WHERE id = @id`, momo.Named("id", *in.PagingGroupID)).Scan(&one)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fieldError("pagingGroupId", "paging group does not exist")
 		}
@@ -160,7 +162,7 @@ func checkDoorWebhook(ctx context.Context, tx *dbTx, in DoorWebhookInput) error 
 	}
 	if in.AnnouncementID != nil {
 		var one int
-		err := tx.QueryRowContext(ctx, `SELECT 1 FROM announcements WHERE id = $1`, *in.AnnouncementID).Scan(&one)
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM announcements WHERE id = @id`, momo.Named("id", *in.AnnouncementID)).Scan(&one)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fieldError("announcementId", "announcement does not exist")
 		}
@@ -218,15 +220,18 @@ func (s *Store) CreateDoorWebhook(ctx context.Context, actor string, in DoorWebh
 		// The row needs its id to seal under; a placeholder is replaced in
 		// the same transaction.
 		if err := tx.QueryRowContext(ctx, `INSERT INTO door_webhooks (name, secret_enc, action, ring_group_id, paging_group_id,
-				announcement_id, rate_limit, enabled) VALUES ($1, '\x00', $2, $3, $4, $5, $6, $7) RETURNING id`,
-			in.Name, in.Action, in.RingGroupID, in.PagingGroupID, in.AnnouncementID, in.RateLimit, in.Enabled).Scan(&id); err != nil {
+				announcement_id, rate_limit, enabled) VALUES (@name, '\x00', @action, @ring_group_id, @paging_group_id, @announcement_id,
+				@rate_limit, @enabled) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("action", in.Action), momo.Named("ring_group_id", in.RingGroupID),
+			momo.Named("paging_group_id", in.PagingGroupID), momo.Named("announcement_id", in.AnnouncementID),
+			momo.Named("rate_limit", in.RateLimit), momo.Named("enabled", in.Enabled)).Scan(&id); err != nil {
 			return err
 		}
 		sealed, err := s.sealDoorSecret(id, plain)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE door_webhooks SET secret_enc = $2 WHERE id = $1`, id, sealed); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE door_webhooks SET secret_enc = @secret_enc WHERE id = @id`, momo.Named("id", id), momo.Named("secret_enc", sealed)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "door_webhook", fmt.Sprint(id))
@@ -242,15 +247,18 @@ func (s *Store) CreateDoorWebhook(ctx context.Context, actor string, in DoorWebh
 func (s *Store) UpdateDoorWebhook(ctx context.Context, actor string, id int64, in DoorWebhookInput) (DoorWebhook, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM door_webhooks WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM door_webhooks WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&one); err != nil {
 			return err
 		}
 		if err := checkDoorWebhook(ctx, tx, in); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE door_webhooks SET name = $2, action = $3, ring_group_id = $4, paging_group_id = $5,
-				announcement_id = $6, rate_limit = $7, enabled = $8, updated_at = now() WHERE id = $1`,
-			id, in.Name, in.Action, in.RingGroupID, in.PagingGroupID, in.AnnouncementID, in.RateLimit, in.Enabled); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE door_webhooks SET name = @name, action = @action, ring_group_id = @ring_group_id,
+				paging_group_id = @paging_group_id, announcement_id = @announcement_id, rate_limit = @rate_limit, enabled = @enabled,
+				updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("name", in.Name), momo.Named("action", in.Action), momo.Named("ring_group_id", in.RingGroupID),
+			momo.Named("paging_group_id", in.PagingGroupID), momo.Named("announcement_id", in.AnnouncementID),
+			momo.Named("rate_limit", in.RateLimit), momo.Named("enabled", in.Enabled)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update", "door_webhook", fmt.Sprint(id))
@@ -273,7 +281,7 @@ func (s *Store) RotateDoorWebhookSecret(ctx context.Context, actor string, id in
 		return "", err
 	}
 	err = s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE door_webhooks SET secret_enc = $2, updated_at = now() WHERE id = $1`, id, sealed)
+		res, err := tx.ExecContext(ctx, `UPDATE door_webhooks SET secret_enc = @secret_enc, updated_at = now() WHERE id = @id`, momo.Named("id", id), momo.Named("secret_enc", sealed))
 		if err != nil {
 			return err
 		}
@@ -291,7 +299,7 @@ func (s *Store) RotateDoorWebhookSecret(ctx context.Context, actor string, id in
 // DeleteDoorWebhook removes a webhook.
 func (s *Store) DeleteDoorWebhook(ctx context.Context, actor string, id int64) error {
 	return s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM door_webhooks WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM door_webhooks WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return err
 		}
@@ -314,7 +322,7 @@ func (s *Store) DoorWebhookForTrigger(ctx context.Context, id int64) (DoorTrigge
 		LEFT JOIN ring_groups g ON g.id = w.ring_group_id
 		LEFT JOIN paging_groups p ON p.id = w.paging_group_id
 		LEFT JOIN announcements a ON a.id = w.announcement_id
-		WHERE w.id = $1`, id).
+		WHERE w.id = @id`, momo.Named("id", id)).
 		Scan(&h.ID, &h.Name, &h.Action, &h.Enabled, &h.RateLimit, &enc, &h.RingGroup, &h.PagingCode, &h.Announcement)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DoorTriggerHook{}, false, nil
@@ -336,6 +344,6 @@ func (s *Store) DoorWebhookForTrigger(ctx context.Context, id int64) (DoorTrigge
 // NoteDoorWebhookTriggered stamps the last trigger time; it is not a
 // configuration change.
 func (s *Store) NoteDoorWebhookTriggered(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE door_webhooks SET last_triggered_at = now() WHERE id = $1`, id)
+	_, err := s.db.ExecContext(ctx, `UPDATE door_webhooks SET last_triggered_at = now() WHERE id = @id`, momo.Named("id", id))
 	return err
 }

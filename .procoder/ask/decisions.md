@@ -6319,3 +6319,31 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
 - **Book lock key unchanged.** `CreatePhonebook` still sends
   `SELECT pg_advisory_xact_lock(@key)` with `int64(bookLockKey)`, rendered
   as one bigint bind as before.
+
+## momo Phase 3, domain 5: internal/store security and door on @name (2026-11-16, momo/store-door)
+
+- **Scope.** `scep.go`, `wifi.go`, `door.go`, `door_open.go`,
+  `door_camera.go` and `door_webhook.go` in `internal/store` bind by name:
+  every `$n` became `@name` with `momo.Named`, through the seam with the
+  Scan code, `FOR UPDATE`, `mapErr` and the no-row checks as they were. No
+  schema change, no migration.
+- **Secrets unchanged.** The sealed values (the SCEP CA key, the challenges,
+  the 802.1X and Wi-Fi secrets, the door-open code, the camera password, the
+  webhook secret) are sealed, bound and opened as before, with the same
+  additional data; only the bind is by name. Nothing logs an argument value
+  (a build error names the statement and the bind, not its value).
+- **door_open is the configuration of the DTMF `*50` path.** Its statements keep
+  their meaning and parameter types (bigint id, bytea code, boolean). The
+  SIP node reads the codes through `internal/snapshot`, which is unchanged.
+- **Casts.** ListSCEPCertificates casts both uses of `@phone_id` to bigint,
+  as the old `$1::bigint` typed its single bind. SetDoorCamera's upsert
+  casts the `ELSE @password_enc::bytea` use in its CASE; the other reused
+  binds there (`@kind`, `@url`, `@username`, `@password_enc` in VALUES) and
+  wifiInfo's two `@phone_id` uses are typed by their columns.
+- **Run-time statements bind by name too.** UpdateDot1XProfile appends
+  `@password_enc` with its fragment only; memberOf's four statements bind
+  `@extension_id`; sealWifi's statement (`wifiSetPSK`) binds `@id` and
+  `@enc`; replaceWifiAssignments' pair binds `@owner` and `@profile_id`.
+  These, the `wifiIDs` reads and ListSCEPCertificates are assembled or
+  passed at run time, so the DB tier checks them, not
+  `TestStatementsBuild`.
