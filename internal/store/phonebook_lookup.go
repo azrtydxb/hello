@@ -11,6 +11,8 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/phonebook"
 )
 
@@ -29,7 +31,7 @@ func (s *Store) LookupPhonebook(ctx context.Context, d phonebook.Dialing, number
 	res := phonebook.LookupResult{Number: number, Callee: callee, Result: phonebook.LookupUnresolvable, Searched: []string{}}
 	isExt := func(digits string) bool {
 		var ok bool
-		return s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM extensions WHERE number = $1)`, digits).Scan(&ok) == nil && ok
+		return s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM extensions WHERE number = @number)`, momo.Named("number", digits)).Scan(&ok) == nil && ok
 	}
 	if callee != "" && !isExt(callee) {
 		return res, fieldError("callee", "no such extension")
@@ -76,8 +78,8 @@ func (s *Store) LookupPhonebook(ctx context.Context, d phonebook.Dialing, number
 		rows, err := s.db.QueryContext(ctx, `
 			SELECT DISTINCT e.id, e.first_name, e.last_name, e.company
 			FROM phonebook_entries e, jsonb_array_elements(e.numbers) n
-			WHERE e.book_id = $1 AND length(ltrim(n->>'key', '+')) >= 9 AND right(ltrim(n->>'key', '+'), 9) = $2
-			ORDER BY e.id LIMIT 2`, src.id, suffix)
+			WHERE e.book_id = @book_id AND length(ltrim(n->>'key', '+')) >= 9 AND right(ltrim(n->>'key', '+'), 9) = @suffix
+			ORDER BY e.id LIMIT 2`, momo.Named("book_id", src.id), momo.Named("suffix", suffix))
 		if err != nil {
 			return res, err
 		}
@@ -129,7 +131,7 @@ func (s *Store) lookupSources(ctx context.Context, callee string) ([]lookupSourc
 	var out []lookupSource
 	add := func(kind phonebook.Kind) error {
 		var src lookupSource
-		err := s.db.QueryRowContext(ctx, `SELECT id, kind, name FROM phonebooks WHERE kind = $1`, string(kind)).Scan(&src.id, &src.kind, &src.name)
+		err := s.db.QueryRowContext(ctx, `SELECT id, kind, name FROM phonebooks WHERE kind = @kind`, momo.Named("kind", string(kind))).Scan(&src.id, &src.kind, &src.name)
 		if err != nil {
 			return mapErr(err)
 		}
@@ -147,8 +149,8 @@ func (s *Store) lookupSources(ctx context.Context, callee string) ([]lookupSourc
 			JOIN phones p ON p.device_id = d.id OR p.id IN (SELECT phone_id FROM phone_lines WHERE device_id = d.id)
 			JOIN phone_group_books gb ON gb.group_id = p.group_id
 			JOIN phonebooks b ON b.id = gb.book_id AND b.kind = 'named'
-			WHERE e.number = $1
-			ORDER BY p.group_id, gb.position`, callee)
+			WHERE e.number = @callee
+			ORDER BY p.group_id, gb.position`, momo.Named("callee", callee))
 		if err != nil {
 			return nil, err
 		}
@@ -180,13 +182,13 @@ func (s *Store) lookupSources(ctx context.Context, callee string) ([]lookupSourc
 // several, the lowest id.
 func (s *Store) exactMatch(ctx context.Context, src lookupSource, key string) (in phonebook.EntryInput, id int64, found bool, err error) {
 	if src.kind == phonebook.KindExtensions {
-		err = s.db.QueryRowContext(ctx, `SELECT id, name FROM extensions WHERE number = $1 AND NOT directory_hidden`, key).Scan(&id, &in.LastName)
+		err = s.db.QueryRowContext(ctx, `SELECT id, name FROM extensions WHERE number = @key AND NOT directory_hidden`, momo.Named("key", key)).Scan(&id, &in.LastName)
 	} else {
 		err = s.db.QueryRowContext(ctx, `
 			SELECT e.id, e.first_name, e.last_name, e.company
 			FROM phonebook_entries e, jsonb_array_elements(e.numbers) n
-			WHERE e.book_id = $1 AND n->>'key' = $2
-			ORDER BY e.id LIMIT 1`, src.id, key).Scan(&id, &in.FirstName, &in.LastName, &in.Company)
+			WHERE e.book_id = @book_id AND n->>'key' = @key
+			ORDER BY e.id LIMIT 1`, momo.Named("book_id", src.id), momo.Named("key", key)).Scan(&id, &in.FirstName, &in.LastName, &in.Company)
 	}
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
