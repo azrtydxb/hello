@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // MaxParkLots and MaxParkSlots bound a configuration (a slot is a number a
@@ -75,7 +77,7 @@ func (s *Store) ListParkLots(ctx context.Context) ([]ParkLot, error) {
 
 // GetParkLot returns one lot.
 func (s *Store) GetParkLot(ctx context.Context, id int64) (ParkLot, error) {
-	l, err := scanParkLot(s.q(ctx).QueryRowContext(ctx, `SELECT `+parkLotCols+` FROM park_lots WHERE id = $1`, id))
+	l, err := scanParkLot(s.q(ctx).QueryRowContext(ctx, `SELECT `+parkLotCols+` FROM park_lots WHERE id = @id`, momo.Named("id", id)))
 	return l, mapErr(err)
 }
 
@@ -95,8 +97,9 @@ func (s *Store) CreateParkLot(ctx context.Context, actor string, in ParkLotInput
 			var err error
 			l, err = scanParkLot(tx.QueryRowContext(ctx, `INSERT INTO park_lots
 				(name, slot_start, slot_end, return_secs, voicemail_secs, enabled)
-				VALUES ($1, $2, $3, $4, $5, $6) RETURNING `+parkLotCols,
-				in.Name, in.SlotStart, in.SlotEnd, in.ReturnSecs, in.VoicemailSecs, in.Enabled))
+				VALUES (@name, @slot_start, @slot_end, @return_secs, @voicemail_secs, @enabled) RETURNING `+parkLotCols,
+				momo.Named("name", in.Name), momo.Named("slot_start", in.SlotStart), momo.Named("slot_end", in.SlotEnd),
+				momo.Named("return_secs", in.ReturnSecs), momo.Named("voicemail_secs", in.VoicemailSecs), momo.Named("enabled", in.Enabled)))
 			return err
 		})
 		return l.ID, err
@@ -111,10 +114,11 @@ func (s *Store) UpdateParkLot(ctx context.Context, actor string, id int64, in Pa
 	err := s.configChange(ctx, actor, "update", "park_lot", check, func(tx *dbTx) (int64, error) {
 		err := dialGuard(ctx, tx, "slotStart", func() error {
 			var err error
-			l, err = scanParkLot(tx.QueryRowContext(ctx, `UPDATE park_lots SET name = $2, slot_start = $3, slot_end = $4,
-				return_secs = $5, voicemail_secs = $6, enabled = $7, updated_at = now()
-				WHERE id = $1 RETURNING `+parkLotCols,
-				id, in.Name, in.SlotStart, in.SlotEnd, in.ReturnSecs, in.VoicemailSecs, in.Enabled))
+			l, err = scanParkLot(tx.QueryRowContext(ctx, `UPDATE park_lots SET name = @name, slot_start = @slot_start, slot_end = @slot_end,
+				return_secs = @return_secs, voicemail_secs = @voicemail_secs, enabled = @enabled, updated_at = now()
+				WHERE id = @id RETURNING `+parkLotCols,
+				momo.Named("id", id), momo.Named("name", in.Name), momo.Named("slot_start", in.SlotStart), momo.Named("slot_end", in.SlotEnd),
+				momo.Named("return_secs", in.ReturnSecs), momo.Named("voicemail_secs", in.VoicemailSecs), momo.Named("enabled", in.Enabled)))
 			return err
 		})
 		return id, err
@@ -125,7 +129,7 @@ func (s *Store) UpdateParkLot(ctx context.Context, actor string, id int64, in Pa
 // DeleteParkLot removes a lot.
 func (s *Store) DeleteParkLot(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "park_lot", check, func(tx *dbTx) (int64, error) {
-		res, err := tx.ExecContext(ctx, `DELETE FROM park_lots WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM park_lots WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -141,7 +145,7 @@ func checkNotSlot(ctx context.Context, tx *dbTx, field, number string) error {
 		return nil // not a plain number: no slot is called that
 	}
 	var name string
-	err = tx.QueryRowContext(ctx, `SELECT name FROM park_lots WHERE $1 BETWEEN slot_start AND slot_end LIMIT 1`, n).Scan(&name)
+	err = tx.QueryRowContext(ctx, `SELECT name FROM park_lots WHERE @slot BETWEEN slot_start AND slot_end LIMIT 1`, momo.Named("slot", n)).Scan(&name)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil

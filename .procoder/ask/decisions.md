@@ -6319,3 +6319,38 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
 - **Book lock key unchanged.** `CreatePhonebook` still sends
   `SELECT pg_advisory_xact_lock(@key)` with `int64(bookLockKey)`, rendered
   as one bigint bind as before.
+
+## momo Phase 3, domain 7: internal/store call features on @name (2026-11-16, momo/store-callfeatures)
+
+- **Scope.** `ivr.go`, `queues.go`, `queue_callbacks.go`, `followme.go`,
+  `pickup.go`, `park.go`, `paging.go`, `ringmap.go`, `ringtag.go`,
+  `conference.go` and `multicast.go` in `internal/store` bind by name:
+  every `$n` became `@name` with `momo.Named`, through the seam, with the
+  Scan code, locks, error handling and SQL text otherwise unchanged. No
+  schema change, no migration, `go.mod` and `internal/db` unchanged.
+  `prov_multicast.go` belongs to the provisioning domain and is not part of
+  this change.
+- **hello-sip's queue callback claims unchanged.** `queue_callbacks.go`
+  keeps `SELECT 1 FROM queues WHERE id = @id FOR UPDATE` (Request) and the
+  Claim's `FOR UPDATE SKIP LOCKED LIMIT 1` sub-select. Its statements on
+  the call path (settle's two UPDATEs, Request, Head, Claim, Renew, Fail,
+  Connect, Due, Dialling, Purge) keep their parameter types: every bind is
+  typed by its column or by `make_interval(secs => ...)` as before.
+  `callbackDue` binds `@queue_id`. Fail's `@max_attempts` is used twice,
+  each against `attempts` (INTEGER), so needs no cast.
+- **One cast added.** `catalogChannels` (multicast.go) uses `@kind` twice:
+  `@kind::text = '' OR kind = @kind::text`, the type the old `$1` got from
+  `$1 = ''`. Every other reused bind compares with columns of one type on
+  each use (`@name` in queueReferences and ivrReferences, `@target` in
+  queueTextReferences and refuseIfIVRPoints, `@kind`/`@kind2` there, `@id`
+  in channelUsers); ringmap's `@group_id::bigint` was cast already.
+- **Run-time statements.** `listQueues`, `listIVRMenus`, `listPagingGroups`
+  and `listPickupGroups` take a WHERE fragment with its `momo.Named`
+  (`WHERE ... id = @id` with `momo.Named("id", id)`). The queue INSERT and
+  UPDATE build their placeholder and SET lists from `queueWriteCols`, each
+  column binding as `@<column>`, and `QueueInput.args` returns one
+  `momo.Named` per column. The IVR destination check, the follow-me target
+  check, the paging list deletes, ring tag usage reads and
+  `channelUsers` pick a statement at run time; each candidate binds the
+  same name (`@target`, `@group_id`, `@name`, `@id`).
+  `setConferencePIN`'s `UPDATE ... SET <col>` binds `@sealed` and `@id`.

@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/secret"
 )
 
@@ -106,13 +108,13 @@ func (s *Store) ListConferences(ctx context.Context) ([]Conference, error) {
 
 // GetConference returns one room.
 func (s *Store) GetConference(ctx context.Context, id int64) (Conference, error) {
-	c, err := scanConference(s.q(ctx).QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE id = $1`, id))
+	c, err := scanConference(s.q(ctx).QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE id = @id`, momo.Named("id", id)))
 	return c, mapErr(err)
 }
 
 // ConferenceByNumber returns the room dialled as number.
 func (s *Store) ConferenceByNumber(ctx context.Context, number string) (Conference, error) {
-	c, err := scanConference(s.q(ctx).QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE number = $1`, number))
+	c, err := scanConference(s.q(ctx).QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE number = @number`, momo.Named("number", number)))
 	return c, mapErr(err)
 }
 
@@ -139,7 +141,7 @@ func (s *Store) setConferencePIN(ctx context.Context, tx *dbTx, id int64, which 
 			return fmt.Errorf("store: conference %d %s PIN does not round-trip under HELLO_SECRET_KEY", id, which)
 		}
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE conference_rooms SET `+col+` = $2 WHERE id = $1`, id, sealed)
+	_, err := tx.ExecContext(ctx, `UPDATE conference_rooms SET `+col+` = @sealed WHERE id = @id`, momo.Named("id", id), momo.Named("sealed", sealed))
 	return err
 }
 
@@ -147,7 +149,7 @@ func (s *Store) setConferencePIN(ctx context.Context, tx *dbTx, id int64, which 
 // reject equal PINs; "" means unset.
 func (s *Store) conferencePINs(ctx context.Context, tx *dbTx, id int64) (user, leader string, err error) {
 	var u, l []byte
-	if err := tx.QueryRowContext(ctx, `SELECT user_pin_enc, leader_pin_enc FROM conference_rooms WHERE id = $1`, id).Scan(&u, &l); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT user_pin_enc, leader_pin_enc FROM conference_rooms WHERE id = @id`, momo.Named("id", id)).Scan(&u, &l); err != nil {
 		return "", "", err
 	}
 	if s.box == nil {
@@ -197,9 +199,12 @@ func (s *Store) CreateConference(ctx context.Context, actor string, in Conferenc
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO conference_rooms (name, number, max_participants, wait_for_leader,
 				mute_on_entry, entry_exit, entry_announcement, exit_announcement, record, enabled, video)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
-			in.Name, in.Number, in.MaxParticipants, in.WaitForLeader, in.MuteOnEntry, in.EntryExit,
-			in.EntryAnnouncement, in.ExitAnnouncement, in.Record, in.Enabled, in.Video).Scan(&id); err != nil {
+			VALUES (@name, @number, @max_participants, @wait_for_leader, @mute_on_entry, @entry_exit, @entry_announcement,
+				@exit_announcement, @record, @enabled, @video) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("number", in.Number), momo.Named("max_participants", in.MaxParticipants),
+			momo.Named("wait_for_leader", in.WaitForLeader), momo.Named("mute_on_entry", in.MuteOnEntry), momo.Named("entry_exit", in.EntryExit),
+			momo.Named("entry_announcement", in.EntryAnnouncement), momo.Named("exit_announcement", in.ExitAnnouncement),
+			momo.Named("record", in.Record), momo.Named("enabled", in.Enabled), momo.Named("video", in.Video)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := s.setConferencePIN(ctx, tx, id, "user", userPIN); err != nil {
@@ -212,7 +217,7 @@ func (s *Store) CreateConference(ctx context.Context, actor string, in Conferenc
 			return id, err
 		}
 		var err error
-		c, err = scanConference(tx.QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE id = $1`, id))
+		c, err = scanConference(tx.QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE id = @id`, momo.Named("id", id)))
 		return id, err
 	})
 	return c, err
@@ -225,14 +230,14 @@ func (s *Store) UpdateConference(ctx context.Context, actor string, id int64, in
 	var c Conference
 	err := s.configChange(ctx, actor, "update", "conference_room", check, func(tx *dbTx) (int64, error) {
 		var old string
-		if err := tx.QueryRowContext(ctx, `SELECT number FROM conference_rooms WHERE id = $1 FOR UPDATE`, id).Scan(&old); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT number FROM conference_rooms WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&old); err != nil {
 			return id, mapErr(err)
 		}
 		if old != in.Number {
 			if err := checkDialNumber(ctx, tx, "number", in.Number, numConference); err != nil {
 				return id, err
 			}
-			routes, err := routeNames(ctx, tx, `SELECT name FROM inbound_routes WHERE destination_kind = 'conference' AND destination = $1`, old)
+			routes, err := routeNames(ctx, tx, `SELECT name FROM inbound_routes WHERE destination_kind = 'conference' AND destination = @number`, momo.Named("number", old))
 			if err != nil {
 				return id, err
 			}
@@ -240,11 +245,13 @@ func (s *Store) UpdateConference(ctx context.Context, actor string, id int64, in
 				return id, inUse("conference room "+strconv.Quote(old), routes)
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE conference_rooms SET name = $2, number = $3, max_participants = $4,
-				wait_for_leader = $5, mute_on_entry = $6, entry_exit = $7, entry_announcement = $8, exit_announcement = $9,
-				record = $10, enabled = $11, video = $12, updated_at = now() WHERE id = $1`,
-			id, in.Name, in.Number, in.MaxParticipants, in.WaitForLeader, in.MuteOnEntry, in.EntryExit,
-			in.EntryAnnouncement, in.ExitAnnouncement, in.Record, in.Enabled, in.Video); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE conference_rooms SET name = @name, number = @number, max_participants = @max_participants,
+				wait_for_leader = @wait_for_leader, mute_on_entry = @mute_on_entry, entry_exit = @entry_exit, entry_announcement = @entry_announcement,
+				exit_announcement = @exit_announcement, record = @record, enabled = @enabled, video = @video, updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("name", in.Name), momo.Named("number", in.Number), momo.Named("max_participants", in.MaxParticipants),
+			momo.Named("wait_for_leader", in.WaitForLeader), momo.Named("mute_on_entry", in.MuteOnEntry), momo.Named("entry_exit", in.EntryExit),
+			momo.Named("entry_announcement", in.EntryAnnouncement), momo.Named("exit_announcement", in.ExitAnnouncement),
+			momo.Named("record", in.Record), momo.Named("enabled", in.Enabled), momo.Named("video", in.Video)); err != nil {
 			return id, err
 		}
 		if err := s.setConferencePIN(ctx, tx, id, "user", userPIN); err != nil {
@@ -257,7 +264,7 @@ func (s *Store) UpdateConference(ctx context.Context, actor string, id int64, in
 			return id, err
 		}
 		var err error
-		c, err = scanConference(tx.QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE id = $1`, id))
+		c, err = scanConference(tx.QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE id = @id`, momo.Named("id", id)))
 		return id, err
 	})
 	return c, err
@@ -268,17 +275,17 @@ func (s *Store) UpdateConference(ctx context.Context, actor string, id int64, in
 func (s *Store) DeleteConference(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "conference_room", check, func(tx *dbTx) (int64, error) {
 		var number, name string
-		if err := tx.QueryRowContext(ctx, `SELECT number, name FROM conference_rooms WHERE id = $1 FOR UPDATE`, id).Scan(&number, &name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT number, name FROM conference_rooms WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&number, &name); err != nil {
 			return id, mapErr(err)
 		}
-		routes, err := routeNames(ctx, tx, `SELECT name FROM inbound_routes WHERE destination_kind = 'conference' AND destination = $1`, number)
+		routes, err := routeNames(ctx, tx, `SELECT name FROM inbound_routes WHERE destination_kind = 'conference' AND destination = @number`, momo.Named("number", number))
 		if err != nil {
 			return id, err
 		}
 		if len(routes) > 0 {
 			return id, inUse("conference room "+strconv.Quote(name), routes)
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM conference_rooms WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM conference_rooms WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
