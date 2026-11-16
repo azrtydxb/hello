@@ -12,8 +12,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/routing"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/azrtydxb/momo"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -202,20 +201,9 @@ type EventSink interface {
 	Emit(events.Event)
 }
 
-// rowQuerier is the optional part of a pgx pool the Writer uses to read the
-// id of the row it inserted (only for the call.completed events).
-type rowQuerier interface {
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
-
-// Execer is the subset of a pgx pool or connection the writer needs.
-type Execer interface {
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
-}
-
 // Writer is the bounded queue plus its background writer.
 type Writer struct {
-	db      Execer
+	db      momo.Querier
 	log     *slog.Logger
 	dropped prometheus.Counter
 	queue   chan Record
@@ -238,12 +226,13 @@ func NewDroppedCounter(reg prometheus.Registerer) prometheus.Counter {
 	return c
 }
 
-// NewWriter returns a writer with a QueueSize queue; call Run to drain it.
-func NewWriter(db Execer, dropped prometheus.Counter, log *slog.Logger) *Writer {
+// NewWriter returns a writer with a QueueSize queue that writes through db
+// (internal/db); call Run to drain it.
+func NewWriter(db momo.Querier, dropped prometheus.Counter, log *slog.Logger) *Writer {
 	return newWriter(db, dropped, log, QueueSize)
 }
 
-func newWriter(db Execer, dropped prometheus.Counter, log *slog.Logger, size int) *Writer {
+func newWriter(db momo.Querier, dropped prometheus.Counter, log *slog.Logger, size int) *Writer {
 	return &Writer{
 		db: db, log: log, dropped: dropped, queue: make(chan Record, size),
 		InitialBackoff: 100 * time.Millisecond, MaxBackoff: 30 * time.Second,
@@ -263,24 +252,57 @@ func (w *Writer) Enqueue(r Record) bool {
 	}
 }
 
+// insert writes a record and its page, follow-me and queue legs in one
+// statement. The legs arrive as JSON arrays and are expanded with
+// jsonb_array_elements ... WITH ORDINALITY, which momo has no builder for,
+// so the statement stays hand-written; its binds are named (insertArgs), so
+// a new column is one @name and one argument, with nothing renumbered. A
+// retried record that was already stored is a no-op (ON CONFLICT DO
+// NOTHING), and so are its legs. The rendered SQL is frozen in
+// testdata/queries/postgres.sql (Queries, TestQueriesGolden).
 const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source, destination,
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
     rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by, srtp, srtp_keyex, ice, video)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $40)
+VALUES (@correlation_id, @sip_call_id, @source, @destination,
+    @start_time, @ring_time, @answer_time, @end_time, @duration_ms, @billable_ms,
+    @sip_node, @media_mode, @final_status, @termination_side, @failure_reason,
+    @direction, @original_destination, @rewritten_destination, @route_name, @trunk_name, @trace,
+    @rtp_packets, @rtp_lost, @rtp_jitter_ms, @kind, @ring_tag, @ring_rule, @caller_codec, @callee_codec, @origin, @origin_client, @peer_call_id, @answered_by, @srtp, @srtp_keyex, @ice, @video)
 ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
 p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
-FROM c, jsonb_array_elements($37::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1),
+FROM c, jsonb_array_elements(@page_legs::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1),
 f AS (INSERT INTO cdr_legs (cdr_id, position, role, extension, trunk, result, target_kind)
 SELECT c.id, l.ord, 'follow_me', l.leg->>'extension', l.leg->>'trunk', l.leg->>'result', l.leg->>'kind'
-FROM c, jsonb_array_elements($39::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
+FROM c, jsonb_array_elements(@follow_me_legs::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
 INSERT INTO cdr_queue_legs (cdr_id, position, event, queue, extension, wait_ms, result, at)
 SELECT c.id, l.ord, l.leg->>'event', l.leg->>'queue', l.leg->>'extension', (l.leg->>'waitMs')::bigint,
        l.leg->>'result', (l.leg->>'at')::timestamptz
-FROM c, jsonb_array_elements($38::jsonb) WITH ORDINALITY AS l(leg, ord)`
+FROM c, jsonb_array_elements(@queue_legs::jsonb) WITH ORDINALITY AS l(leg, ord)`
+
+// selectID reads the id of a stored record, for its call.completed events.
+const selectID = `SELECT id FROM cdrs WHERE correlation_id = @correlation_id`
+
+// Queries lists the SQL the writer issues, rendered without a database
+// (momo.QueryRegistry), so TestQueriesGolden can freeze it. It is this
+// package's own registry rather than momo's process-wide one, so the golden
+// file holds the CDR statements only, whatever else the test binary links.
+var Queries = momo.NewQueryRegistry()
+
+func init() {
+	Queries.Register("cdr.insert", func(q momo.Querier) momo.Compilable {
+		args, err := insertArgs(Record{})
+		if err != nil {
+			panic(err) // a zero Record always marshals
+		}
+		return momo.RawQuery(q, insert, args...)
+	})
+	Queries.Register("cdr.select_id", func(q momo.Querier) momo.Compilable {
+		return momo.RawQuery(q, selectID, momo.Named("correlation_id", ""))
+	})
+}
 
 // Run writes queued records until ctx is cancelled, retrying each with
 // exponential backoff. After cancellation it tries to flush what is left for
@@ -341,6 +363,20 @@ func (w *Writer) flush(timeout time.Duration) {
 func (w *Writer) write(ctx context.Context, r Record) error {
 	wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	args, err := insertArgs(r)
+	if err != nil {
+		return err
+	}
+	if _, err := momo.Exec(wctx, w.db, insert, args...); err != nil {
+		return err
+	}
+	w.publish(wctx, r)
+	return nil
+}
+
+// insertArgs binds r to the @names of insert. Zero values store as the
+// column defaults; the legs are JSON arrays, empty for none.
+func insertArgs(r Record) ([]any, error) {
 	media := r.MediaMode
 	if media == "" {
 		media = "direct"
@@ -367,7 +403,7 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	}
 	tj, err := json.Marshal(trace)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	legs := r.PageLegs
 	if legs == nil {
@@ -375,7 +411,7 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	}
 	lj, err := json.Marshal(legs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	qlegs := r.QueueLegs
 	if qlegs == nil {
@@ -383,27 +419,58 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	}
 	qj, err := json.Marshal(qlegs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fj, err := json.Marshal(append([]FollowMeLeg{}, r.FollowMeLegs...))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	origin := r.Origin
 	if origin == "" {
 		origin = OriginPhone
 	}
-	_, err = w.db.Exec(wctx, insert, r.CorrelationID, r.SIPCallID, r.Source, r.Destination,
-		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
-		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
-		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
-		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule,
-		nullString(r.CallerCodec), nullString(r.CalleeCodec), origin, r.OriginClient, r.PeerCallID, r.AnsweredBy, srtp, keyex, r.ICE, string(lj), string(qj), string(fj), r.Video)
-	if err != nil {
-		return err
-	}
-	w.publish(wctx, r)
-	return nil
+	return []any{
+		momo.Named("correlation_id", r.CorrelationID),
+		momo.Named("sip_call_id", r.SIPCallID),
+		momo.Named("source", r.Source),
+		momo.Named("destination", r.Destination),
+		momo.Named("start_time", r.StartTime),
+		momo.Named("ring_time", nullTime(r.RingTime)),
+		momo.Named("answer_time", nullTime(r.AnswerTime)),
+		momo.Named("end_time", r.EndTime),
+		momo.Named("duration_ms", r.DurationMs),
+		momo.Named("billable_ms", r.BillableMs),
+		momo.Named("sip_node", r.SIPNode),
+		momo.Named("media_mode", media),
+		momo.Named("final_status", r.FinalStatus),
+		momo.Named("termination_side", r.TerminationSide),
+		momo.Named("failure_reason", r.FailureReason),
+		momo.Named("direction", direction),
+		momo.Named("original_destination", r.OriginalDestination),
+		momo.Named("rewritten_destination", r.RewrittenDestination),
+		momo.Named("route_name", r.Route),
+		momo.Named("trunk_name", r.Trunk),
+		momo.Named("trace", string(tj)),
+		momo.Named("rtp_packets", r.RTPPackets),
+		momo.Named("rtp_lost", r.RTPLost),
+		momo.Named("rtp_jitter_ms", r.RTPJitterMs),
+		momo.Named("kind", kind),
+		momo.Named("ring_tag", r.RingTag),
+		momo.Named("ring_rule", r.RingRule),
+		momo.Named("caller_codec", nullString(r.CallerCodec)),
+		momo.Named("callee_codec", nullString(r.CalleeCodec)),
+		momo.Named("origin", origin),
+		momo.Named("origin_client", r.OriginClient),
+		momo.Named("peer_call_id", r.PeerCallID),
+		momo.Named("answered_by", r.AnsweredBy),
+		momo.Named("srtp", srtp),
+		momo.Named("srtp_keyex", keyex),
+		momo.Named("ice", r.ICE),
+		momo.Named("video", r.Video),
+		momo.Named("page_legs", string(lj)),
+		momo.Named("follow_me_legs", string(fj)),
+		momo.Named("queue_legs", string(qj)),
+	}, nil
 }
 
 // publish emits the record's call.completed events with the stored row's
@@ -414,10 +481,13 @@ func (w *Writer) publish(ctx context.Context, r Record) {
 		return
 	}
 	var id int64
-	if q, ok := w.db.(rowQuerier); ok {
-		if err := q.QueryRow(ctx, `SELECT id FROM cdrs WHERE correlation_id = $1`, r.CorrelationID).Scan(&id); err != nil {
-			w.log.Debug("cdr id lookup for events failed", "correlation_id", r.CorrelationID, "error", err)
-		}
+	switch ids, err := momo.Scalars[int64](ctx, w.db, selectID, momo.Named("correlation_id", r.CorrelationID)); {
+	case err != nil:
+		w.log.Debug("cdr id lookup for events failed", "correlation_id", r.CorrelationID, "error", err)
+	case len(ids) == 0:
+		w.log.Debug("cdr id lookup for events failed", "correlation_id", r.CorrelationID, "error", "no row")
+	default:
+		id = ids[0]
 	}
 	for _, e := range r.Events {
 		e.Data.CDRID = id

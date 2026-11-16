@@ -13,14 +13,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/azrtydxb/hello/internal/migrate"
-	"github.com/azrtydxb/hello/internal/routing"
+	"github.com/azrtydxb/momo"
+	"github.com/azrtydxb/momo/dialect"
+	"github.com/azrtydxb/momo/momotest"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+
+	hellodb "github.com/azrtydxb/hello/internal/db"
+	"github.com/azrtydxb/hello/internal/events"
+	"github.com/azrtydxb/hello/internal/migrate"
+	"github.com/azrtydxb/hello/internal/routing"
 )
 
 var discard = slog.New(slog.DiscardHandler)
@@ -31,15 +36,24 @@ func count(c prometheus.Counter) float64 {
 	return m.GetCounter().GetValue()
 }
 
+// flakyDB is a momo driver whose Exec fails the first fail calls and then
+// records the first bound argument of each statement, the record's
+// correlation id ($1 of the insert, TestInsertBindsEveryColumn). Query fails,
+// so the call.completed lookup reports cdrId 0, as a handle without rows
+// did before.
 type flakyDB struct {
 	mu     sync.Mutex
 	fail   int // fail this many calls first
 	calls  int
 	rows   []string
+	sqls   []string
+	args   []any
 	unlock chan struct{}
 }
 
-func (f *flakyDB) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+func (f *flakyDB) Dialect() *dialect.Dialect { return dialect.For(dialect.Postgres) }
+
+func (f *flakyDB) Exec(_ context.Context, sql string, args []any) (int64, error) {
 	if f.unlock != nil {
 		<-f.unlock
 	}
@@ -47,10 +61,19 @@ func (f *flakyDB) Exec(_ context.Context, _ string, args ...any) (pgconn.Command
 	defer f.mu.Unlock()
 	f.calls++
 	if f.calls <= f.fail {
-		return pgconn.CommandTag{}, errors.New("database down")
+		return 0, errors.New("database down")
 	}
 	f.rows = append(f.rows, args[0].(string))
-	return pgconn.NewCommandTag("INSERT 0 1"), nil
+	f.sqls, f.args = append(f.sqls, sql), args
+	return 1, nil
+}
+
+func (f *flakyDB) Query(context.Context, string, []any) (momo.Rows, error) {
+	return nil, errors.New("no rows here")
+}
+
+func (f *flakyDB) Begin(context.Context, momo.TxOptions) (momo.DriverTx, error) {
+	return nil, errors.New("no transactions here")
 }
 
 func (f *flakyDB) written() []string {
@@ -58,6 +81,9 @@ func (f *flakyDB) written() []string {
 	defer f.mu.Unlock()
 	return append([]string(nil), f.rows...)
 }
+
+// handle returns the momo handle the Writer gets in production, on f.
+func (f *flakyDB) handle() *momo.DB { return momo.New(f) }
 
 func newCounter() prometheus.Counter {
 	return prometheus.NewCounter(prometheus.CounterOpts{Name: "hello_cdr_dropped_total"})
@@ -67,7 +93,7 @@ func newCounter() prometheus.Counter {
 // few times, or written twice.
 func TestWriterRetries(t *testing.T) {
 	db := &flakyDB{fail: 3}
-	w := NewWriter(db, newCounter(), discard)
+	w := NewWriter(db.handle(), newCounter(), discard)
 	w.InitialBackoff = time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -89,7 +115,7 @@ func TestWriterRetries(t *testing.T) {
 // when the queue is full.
 func TestWriterDropsWhenFull(t *testing.T) {
 	dropped := newCounter()
-	w := newWriter(&flakyDB{}, dropped, discard, 2)
+	w := newWriter((&flakyDB{}).handle(), dropped, discard, 2)
 	if !w.Enqueue(Record{CorrelationID: "1"}) || !w.Enqueue(Record{CorrelationID: "2"}) {
 		t.Fatal("enqueue into a non-full queue failed")
 	}
@@ -100,7 +126,7 @@ func TestWriterDropsWhenFull(t *testing.T) {
 	if time.Since(start) > 50*time.Millisecond || count(dropped) != 1 {
 		t.Fatalf("drop took %s, counted %v", time.Since(start), count(dropped))
 	}
-	if NewWriter(&flakyDB{}, dropped, discard).queue == nil || cap(NewWriter(&flakyDB{}, dropped, discard).queue) != QueueSize {
+	if w := NewWriter((&flakyDB{}).handle(), dropped, discard); w.queue == nil || cap(w.queue) != QueueSize {
 		t.Fatal("default queue size")
 	}
 }
@@ -109,7 +135,7 @@ func TestWriterDropsWhenFull(t *testing.T) {
 // the context is cancelled.
 func TestWriterFlushOnShutdown(t *testing.T) {
 	db := &flakyDB{unlock: make(chan struct{})}
-	w := NewWriter(db, newCounter(), discard)
+	w := NewWriter(db.handle(), newCounter(), discard)
 	for i := range 3 {
 		w.Enqueue(Record{CorrelationID: fmt.Sprint(i)})
 	}
@@ -155,16 +181,26 @@ func TestWriterPostgres(t *testing.T) {
 	}
 	defer pool.Close()
 
-	w := NewWriter(pool, newCounter(), discard)
+	w := NewWriter(hellodb.NewPool(pool, discard), newCounter(), discard)
+	sink := &eventSink{}
+	w.Events = sink
 	start := time.Now().Add(-10 * time.Second).UTC().Truncate(time.Millisecond)
 	r := Record{CorrelationID: "corr-1", SIPCallID: "call-1", Source: "100", Destination: "200",
 		StartTime: start, AnswerTime: start.Add(2 * time.Second), EndTime: start.Add(10 * time.Second),
 		DurationMs: 10000, BillableMs: 8000, SIPNode: "sip-1", FinalStatus: 200, TerminationSide: SideCaller}
+	r.Events = []events.Event{{Type: "call.completed"}}
 	if err := w.write(ctx, r); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.write(ctx, r); err != nil { // retry after an ambiguous failure
 		t.Fatal(err)
+	}
+	var storedID int64
+	if err := pool.QueryRow(ctx, "SELECT id FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&storedID); err != nil {
+		t.Fatal(err)
+	}
+	if got := sink.cdrIDs(); len(got) != 2 || got[0] != storedID || got[1] != storedID {
+		t.Fatalf("call.completed cdrIds = %v, want the stored row's id %d twice (once per write)", got, storedID)
 	}
 	var (
 		n            int
@@ -231,168 +267,216 @@ func TestWriterPostgres(t *testing.T) {
 	}
 }
 
-type argsDB struct{ args []any }
-
-// TestAnsweredByCDR fails if the assistant's extension is not the insert's
-// answered_by argument (the column after peer_call_id, migration 00065).
-func TestAnsweredByCDR(t *testing.T) {
-	db := &argsDB{}
-	w := NewWriter(db, newCounter(), discard)
-	now := time.Now()
-	if err := w.write(context.Background(), Record{CorrelationID: "b", StartTime: now, EndTime: now, AnsweredBy: "300"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := db.args[32]; got != "300" {
-		t.Fatalf("last insert argument = %#v, want the assistant's extension", got)
-	}
+// eventSink collects the events the writer publishes.
+type eventSink struct {
+	mu  sync.Mutex
+	got []events.Event
 }
 
-func (a *argsDB) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
-	a.args = args
-	return pgconn.NewCommandTag("INSERT 0 1"), nil
+func (s *eventSink) Emit(e events.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.got = append(s.got, e)
 }
 
-// TestCallQualityCDR fails if the three quality columns are not at their
-// positions in the insert arguments (the SRTP column rides last), carry anything but the record's values, or are non-NULL
-// for a record without quality (directly-media or unanswered call).
-func TestCallQualityCDR(t *testing.T) {
-	db := &argsDB{}
-	w := NewWriter(db, newCounter(), discard)
-	now := time.Now()
-	base := Record{CorrelationID: "q", StartTime: now, EndTime: now}
+func (s *eventSink) cdrIDs() []int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []int64
+	for _, e := range s.got {
+		out = append(out, e.Data.CDRID)
+	}
+	return out
+}
 
-	if err := w.write(context.Background(), base); err != nil {
+// bound returns the insert's arguments of r by @name.
+func bound(t *testing.T, r Record) map[string]any {
+	t.Helper()
+	args, err := insertArgs(r)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 40 {
-		t.Fatalf("insert takes %d arguments, want 40", len(db.args))
+	m := map[string]any{}
+	for _, a := range args {
+		na, ok := a.(momo.NamedArg)
+		if !ok {
+			t.Fatalf("insert argument %#v is not named", a)
+		}
+		if _, dup := m[na.Name]; dup {
+			t.Fatalf("@%s bound twice", na.Name)
+		}
+		m[na.Name] = na.Value
 	}
-	if db.args[33] != SRTPNone || db.args[34] != KeyExNone || db.args[35] != false {
-		t.Fatalf("srtp, key exchange, ice = %v, %v, %v, want the defaults %q, %q, false", db.args[33], db.args[34], db.args[35], SRTPNone, KeyExNone)
+	return m
+}
+
+// TestInsertBindsEveryColumn fails if a cdrs column of the insert is not
+// bound by the @name of that column, in the same position, or if the insert
+// does not take exactly the arguments insertArgs gives: a new column is then
+// one column, one @name and one argument, with nothing renumbered.
+func TestInsertBindsEveryColumn(t *testing.T) {
+	head := insert[strings.Index(insert, "INSERT INTO cdrs (")+len("INSERT INTO cdrs ("):]
+	cols := strings.Split(head[:strings.Index(head, ")")], ",")
+	vals := head[strings.Index(head, "VALUES (")+len("VALUES ("):]
+	binds := strings.Split(vals[:strings.Index(vals, ")")], ",")
+	if len(cols) != len(binds) {
+		t.Fatalf("%d columns, %d values", len(cols), len(binds))
 	}
-	for i, a := range db.args[21:24] {
-		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
-			t.Fatalf("argument %d = %#v, want a nil pointer", 22+i, a)
+	for i := range cols {
+		c, b := strings.TrimSpace(cols[i]), strings.TrimSpace(binds[i])
+		if b != "@"+c {
+			t.Fatalf("column %d %s is bound by %s, want @%s", i+1, c, b, c)
 		}
 	}
+	m := bound(t, Record{})
+	for _, legs := range []string{"page_legs", "follow_me_legs", "queue_legs"} {
+		if !strings.Contains(insert, "@"+legs+"::jsonb") {
+			t.Fatalf("the insert does not read @%s as jsonb", legs)
+		}
+	}
+	if want := len(cols) + 3; len(m) != want {
+		t.Fatalf("insertArgs binds %d names, want %d (the columns and the three leg arrays)", len(m), want)
+	}
+	// The statement builds: every @name has its argument and every argument
+	// is used.
+	c, err := momo.RawQuery(momo.NewOffline(dialect.Postgres), insert, mustArgs(t, Record{})...).SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Args) != 40 {
+		t.Fatalf("the insert renders %d binds, want 40", len(c.Args))
+	}
+}
 
+func mustArgs(t *testing.T, r Record) []any {
+	t.Helper()
+	args, err := insertArgs(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return args
+}
+
+// TestQueriesGolden fails if the SQL the writer sends changed. After an
+// intended change, run with MOMO_UPDATE_GOLDEN=1 and review the diff of
+// testdata/queries/postgres.sql.
+func TestQueriesGolden(t *testing.T) {
+	momotest.QueryGolden(t, Queries, "testdata/queries")
+}
+
+// TestWriterSendsInsert fails if the writer does not run the insert, with
+// the record's correlation id first and 40 binds, through its momo handle.
+func TestWriterSendsInsert(t *testing.T) {
+	db := &flakyDB{}
+	w := NewWriter(db.handle(), newCounter(), discard)
+	now := time.Now()
+	if err := w.write(context.Background(), Record{CorrelationID: "x", StartTime: now, EndTime: now}); err != nil {
+		t.Fatal(err)
+	}
+	if len(db.sqls) != 1 || !strings.Contains(db.sqls[0], "INSERT INTO cdrs") || len(db.args) != 40 || db.args[0] != "x" {
+		t.Fatalf("sent %d statements, %d args (first %v)", len(db.sqls), len(db.args), db.args[0])
+	}
+}
+
+// TestAnsweredByCDR fails if the assistant's extension is not bound to
+// answered_by (migration 00065).
+func TestAnsweredByCDR(t *testing.T) {
+	now := time.Now()
+	if got := bound(t, Record{CorrelationID: "b", StartTime: now, EndTime: now, AnsweredBy: "300"})["answered_by"]; got != "300" {
+		t.Fatalf("answered_by = %#v, want the assistant's extension", got)
+	}
+}
+
+// TestCallQualityCDR fails if the three quality columns carry anything but
+// the record's values, or are non-NULL for a record without quality
+// (directly-media or unanswered call), or the SRTP, key exchange, ICE, kind
+// and ring tag columns lose their defaults.
+func TestCallQualityCDR(t *testing.T) {
+	now := time.Now()
+	base := Record{CorrelationID: "q", StartTime: now, EndTime: now}
+	m := bound(t, base)
+	if m["srtp"] != SRTPNone || m["srtp_keyex"] != KeyExNone || m["ice"] != false {
+		t.Fatalf("srtp, key exchange, ice = %v, %v, %v, want the defaults %q, %q, false", m["srtp"], m["srtp_keyex"], m["ice"], SRTPNone, KeyExNone)
+	}
+	if m["rtp_packets"] != (*int64)(nil) || m["rtp_lost"] != (*int64)(nil) || m["rtp_jitter_ms"] != (*float64)(nil) {
+		t.Fatalf("quality = %#v %#v %#v, want nil pointers", m["rtp_packets"], m["rtp_lost"], m["rtp_jitter_ms"])
+	}
+	if m["kind"] != "call" {
+		t.Fatalf("kind = %v, want the default call", m["kind"])
+	}
+	if m["ring_tag"] != "" || m["ring_rule"] != "" {
+		t.Fatalf("ring tag = %v (%v), want empty for a call that rang no device", m["ring_tag"], m["ring_rule"])
+	}
 	p, l, j := int64(1000), int64(12), 37.5
 	base.RTPPackets, base.RTPLost, base.RTPJitterMs = &p, &l, &j
-	if err := w.write(context.Background(), base); err != nil {
-		t.Fatal(err)
-	}
-	if db.args[24] != "call" {
-		t.Fatalf("kind = %v, want the default call", db.args[24])
-	}
-	if db.args[25] != "" || db.args[26] != "" {
-		t.Fatalf("ring tag = %v (%v), want empty for a call that rang no device", db.args[25], db.args[26])
-	}
 	base.RingTag, base.RingRule = "vip", "rule:1 boss"
-	if err := w.write(context.Background(), base); err != nil {
-		t.Fatal(err)
+	m = bound(t, base)
+	if m["ring_tag"] != "vip" || m["ring_rule"] != "rule:1 boss" {
+		t.Fatalf("ring tag = %v (%v), want vip (rule:1 boss)", m["ring_tag"], m["ring_rule"])
 	}
-	if db.args[25] != "vip" || db.args[26] != "rule:1 boss" {
-		t.Fatalf("ring tag = %v (%v), want vip (rule:1 boss)", db.args[25], db.args[26])
-	}
-	gp, gl, gj := db.args[21].(*int64), db.args[22].(*int64), db.args[23].(*float64)
+	gp, gl, gj := m["rtp_packets"].(*int64), m["rtp_lost"].(*int64), m["rtp_jitter_ms"].(*float64)
 	if *gp != 1000 || *gl != 12 || *gj != 37.5 {
 		t.Fatalf("quality = %d, %d, %v", *gp, *gl, *gj)
 	}
 }
 
-// TestFollowMeLegsCDR fails if the follow-me legs are not the last insert
-// argument, as a JSON array (empty for a call with none), or if the statement
-// does not write them to cdr_legs with the role follow_me.
+// TestFollowMeLegsCDR fails if the follow-me legs are not bound as a JSON
+// array (empty for a call with none), or if the statement does not write
+// them to cdr_legs with the role follow_me.
 func TestFollowMeLegsCDR(t *testing.T) {
-	db := &argsDB{}
-	w := NewWriter(db, newCounter(), discard)
 	now := time.Now()
 	r := Record{CorrelationID: "fm", StartTime: now, EndTime: now}
-	if err := w.write(context.Background(), r); err != nil {
-		t.Fatal(err)
-	}
-	if got := db.args[38]; got != "[]" {
+	if got := bound(t, r)["follow_me_legs"]; got != "[]" {
 		t.Fatalf("follow-me legs = %v, want [] for a call with none", got)
 	}
 	r.FollowMeLegs = []FollowMeLeg{
 		{Kind: "own", Extension: "101", Result: "no_answer"},
 		{Kind: "external", Trunk: "carrier", Result: "answered"},
 	}
-	if err := w.write(context.Background(), r); err != nil {
-		t.Fatal(err)
-	}
+	arg := bound(t, r)["follow_me_legs"]
 	var got []FollowMeLeg
-	if err := json.Unmarshal([]byte(db.args[38].(string)), &got); err != nil || len(got) != 2 || got[1] != r.FollowMeLegs[1] {
-		t.Fatalf("follow-me legs argument = %v (%v), want %+v", db.args[38], err, r.FollowMeLegs)
+	if err := json.Unmarshal([]byte(arg.(string)), &got); err != nil || len(got) != 2 || got[1] != r.FollowMeLegs[1] {
+		t.Fatalf("follow-me legs argument = %v (%v), want %+v", arg, err, r.FollowMeLegs)
 	}
 	if !strings.Contains(insert, "INTO cdr_legs") || !strings.Contains(insert, "'follow_me'") {
 		t.Fatal("the insert does not write cdr_legs with the role follow_me")
 	}
 }
 
-// TestPeerCallIDStored fails if the callee leg's Call-ID is not the insert
-// argument after the origin client: an RTCP-XR report from the callee's phone
-// finds the CDR by it.
+// TestPeerCallIDStored fails if the callee leg's Call-ID is not bound to
+// peer_call_id: an RTCP-XR report from the callee's phone finds the CDR by
+// it.
 func TestPeerCallIDStored(t *testing.T) {
-	db := &argsDB{}
-	w := NewWriter(db, newCounter(), discard)
 	now := time.Now()
-	if err := w.write(context.Background(), Record{CorrelationID: "p", StartTime: now, EndTime: now, PeerCallID: "leg-b@hello"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := db.args[31]; got != "leg-b@hello" {
+	if got := bound(t, Record{CorrelationID: "p", StartTime: now, EndTime: now, PeerCallID: "leg-b@hello"})["peer_call_id"]; got != "leg-b@hello" {
 		t.Fatalf("peer call id argument = %#v", got)
 	}
-	if !strings.Contains(insert, "peer_call_id") || !strings.Contains(insert, "$32") {
-		t.Fatal("insert does not write peer_call_id")
-	}
 }
 
-// TestCDROrigin fails if a click-to-call's origin and client are not the
-// insert arguments after the codecs, or a record without an origin is not
-// stored as a call dialled at a phone.
+// TestCDROrigin fails if a click-to-call's origin and client are not bound,
+// or a record without an origin is not stored as a call dialled at a phone.
 func TestCDROrigin(t *testing.T) {
-	db := &argsDB{}
-	w := NewWriter(db, newCounter(), discard)
 	now := time.Now()
 	r := Record{CorrelationID: "o", StartTime: now, EndTime: now}
-	if err := w.write(context.Background(), r); err != nil {
-		t.Fatal(err)
-	}
-	if db.args[29] != OriginPhone || db.args[30] != "" {
-		t.Fatalf("default origin = %v %v, want phone and no client", db.args[29], db.args[30])
+	if m := bound(t, r); m["origin"] != OriginPhone || m["origin_client"] != "" {
+		t.Fatalf("default origin = %v %v, want phone and no client", m["origin"], m["origin_client"])
 	}
 	r.Origin, r.OriginClient = OriginAPI, "token:7"
-	if err := w.write(context.Background(), r); err != nil {
-		t.Fatal(err)
-	}
-	if db.args[29] != OriginAPI || db.args[30] != "token:7" {
-		t.Fatalf("origin = %v %v, want api and token:7", db.args[29], db.args[30])
+	if m := bound(t, r); m["origin"] != OriginAPI || m["origin_client"] != "token:7" {
+		t.Fatalf("origin = %v %v, want api and token:7", m["origin"], m["origin_client"])
 	}
 }
 
-// TestCDRCodecColumns fails if the codec columns are not the two arguments
-// after the ring tag and rule (before the origin), are not NULL for a leg
+// TestCDRCodecColumns fails if the codec columns are not NULL for a leg
 // without a codec, or carry anything but the record's strings.
 func TestCDRCodecColumns(t *testing.T) {
-	db := &argsDB{}
-	w := NewWriter(db, newCounter(), discard)
 	now := time.Now()
 	r := Record{CorrelationID: "c", StartTime: now, EndTime: now}
-	if err := w.write(context.Background(), r); err != nil {
-		t.Fatal(err)
-	}
-	if len(db.args) != 40 || db.args[27] != nil || db.args[28] != nil {
-		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 40", db.args[27], db.args[28], len(db.args))
+	if m := bound(t, r); m["caller_codec"] != nil || m["callee_codec"] != nil {
+		t.Fatalf("codecs = %#v, %#v, want nil, nil", m["caller_codec"], m["callee_codec"])
 	}
 	r.CallerCodec, r.CalleeCodec = "opus/48000", "PCMU/8000"
-	if err := w.write(context.Background(), r); err != nil {
-		t.Fatal(err)
-	}
-	if db.args[27] != "opus/48000" || db.args[28] != "PCMU/8000" {
-		t.Fatalf("codecs = %#v, %#v", db.args[27], db.args[28])
-	}
-	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by, srtp, srtp_keyex, ice, video)") || !strings.Contains(insert, "$35, $36, $40)") {
-		t.Fatal("the insert does not name the codec, origin, peer call id, answered_by, srtp, key exchange, ice and video columns with $28 to $36 and $40")
+	if m := bound(t, r); m["caller_codec"] != "opus/48000" || m["callee_codec"] != "PCMU/8000" {
+		t.Fatalf("codecs = %#v, %#v", m["caller_codec"], m["callee_codec"])
 	}
 }
