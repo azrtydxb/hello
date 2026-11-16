@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/prov"
 )
@@ -38,7 +40,7 @@ func scanBook(r interface{ Scan(...any) error }) (phonebook.Book, error) {
 // 0 on the last page. Personal books are not listed.
 func (s *Store) ListPhonebooks(ctx context.Context, after int64, limit int) ([]phonebook.Book, int64, error) {
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+bookCols+` FROM phonebooks b
-		WHERE b.kind <> 'personal' AND b.id > $1 ORDER BY b.id LIMIT $2`, after, limit+1)
+		WHERE b.kind <> 'personal' AND b.id > @after ORDER BY b.id LIMIT @limit`, momo.Named("after", after), momo.Named("limit", limit+1))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -69,7 +71,7 @@ func page[T any](rows []T, limit int, id func(T) int64) ([]T, int64) {
 
 // GetPhonebook returns one book; a personal book is ErrNotFound.
 func (s *Store) GetPhonebook(ctx context.Context, id int64) (phonebook.Book, error) {
-	b, err := scanBook(s.q(ctx).QueryRowContext(ctx, `SELECT `+bookCols+` FROM phonebooks b WHERE b.id = $1 AND b.kind <> 'personal'`, id))
+	b, err := scanBook(s.q(ctx).QueryRowContext(ctx, `SELECT `+bookCols+` FROM phonebooks b WHERE b.id = @id AND b.kind <> 'personal'`, momo.Named("id", id)))
 	return b, mapErr(err)
 }
 
@@ -79,7 +81,7 @@ func (s *Store) CreatePhonebook(ctx context.Context, actor, name string) (phoneb
 	var out phonebook.Book
 	err := s.tx(ctx, func(tx *dbTx) error {
 		// Serialise creations, so two cannot both pass the limit.
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(bookLockKey)); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(bookLockKey))); err != nil {
 			return err
 		}
 		var n int
@@ -90,11 +92,11 @@ func (s *Store) CreatePhonebook(ctx context.Context, actor, name string) (phoneb
 			return conflict("at most %d named books", phonebook.MaxNamedBooks)
 		}
 		var id int64
-		if err := tx.QueryRowContext(ctx, `INSERT INTO phonebooks (kind, name) VALUES ('named', $1) RETURNING id`, name).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO phonebooks (kind, name) VALUES ('named', @name) RETURNING id`, momo.Named("name", name)).Scan(&id); err != nil {
 			return namedBookError(err, name)
 		}
 		var err error
-		if out, err = scanBook(tx.QueryRowContext(ctx, `SELECT `+bookCols+` FROM phonebooks b WHERE b.id = $1`, id)); err != nil {
+		if out, err = scanBook(tx.QueryRowContext(ctx, `SELECT `+bookCols+` FROM phonebooks b WHERE b.id = @id`, momo.Named("id", id))); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "phonebook", strconv.FormatInt(id, 10))
@@ -116,7 +118,7 @@ func namedBookError(err error, name string) error {
 // lockBook locks a non-personal book and returns its kind.
 func lockBook(ctx context.Context, tx *dbTx, id int64) (phonebook.Kind, error) {
 	var k phonebook.Kind
-	err := tx.QueryRowContext(ctx, `SELECT kind FROM phonebooks WHERE id = $1 AND kind <> 'personal' FOR UPDATE`, id).Scan(&k)
+	err := tx.QueryRowContext(ctx, `SELECT kind FROM phonebooks WHERE id = @id AND kind <> 'personal' FOR UPDATE`, momo.Named("id", id)).Scan(&k)
 	return k, mapErr(err)
 }
 
@@ -137,10 +139,10 @@ func (s *Store) RenamePhonebook(ctx context.Context, actor string, id int64, nam
 		if kind == phonebook.KindExtensions {
 			return errExtensionsBook()
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE phonebooks SET name = $2, version = version + 1, updated_at = now() WHERE id = $1`, id, name); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE phonebooks SET name = @name, version = version + 1, updated_at = now() WHERE id = @id`, momo.Named("id", id), momo.Named("name", name)); err != nil {
 			return namedBookError(err, name)
 		}
-		if out, err = scanBook(tx.QueryRowContext(ctx, `SELECT `+bookCols+` FROM phonebooks b WHERE b.id = $1`, id)); err != nil {
+		if out, err = scanBook(tx.QueryRowContext(ctx, `SELECT `+bookCols+` FROM phonebooks b WHERE b.id = @id`, momo.Named("id", id))); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update", "phonebook", strconv.FormatInt(id, 10))
@@ -159,7 +161,7 @@ func (s *Store) DeletePhonebook(ctx context.Context, actor string, id int64) err
 		if kind != phonebook.KindNamed {
 			return conflict("the %s book exists once and cannot be deleted", kind)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM phonebooks WHERE id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM phonebooks WHERE id = @id`, momo.Named("id", id)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "delete", "phonebook", strconv.FormatInt(id, 10))
@@ -221,10 +223,10 @@ func (s *Store) ListPhonebookEntries(ctx context.Context, bookID, after int64, l
 	var rows *dbRows
 	if b.Kind == phonebook.KindExtensions {
 		rows, err = s.q(ctx).QueryContext(ctx, `SELECT id, number, name, created_at, updated_at FROM extensions
-			WHERE NOT directory_hidden AND id > $1 ORDER BY id LIMIT $2`, after, limit+1)
+			WHERE NOT directory_hidden AND id > @after ORDER BY id LIMIT @limit`, momo.Named("after", after), momo.Named("limit", limit+1))
 	} else {
 		rows, err = s.q(ctx).QueryContext(ctx, `SELECT `+entryCols+` FROM phonebook_entries
-			WHERE book_id = $1 AND id > $2 ORDER BY id LIMIT $3`, bookID, after, limit+1)
+			WHERE book_id = @book_id AND id > @after ORDER BY id LIMIT @limit`, momo.Named("book_id", bookID), momo.Named("after", after), momo.Named("limit", limit+1))
 	}
 	if err != nil {
 		return nil, 0, err
@@ -278,7 +280,7 @@ func (s *Store) bookEntries(ctx context.Context, bookID int64, kind phonebook.Ki
 			WHERE NOT directory_hidden ORDER BY lower(name), number`)
 	} else {
 		rows, err = s.q(ctx).QueryContext(ctx, `SELECT `+entryCols+` FROM phonebook_entries
-			WHERE book_id = $1 ORDER BY lower(last_name), lower(first_name), id`, bookID)
+			WHERE book_id = @book_id ORDER BY lower(last_name), lower(first_name), id`, momo.Named("book_id", bookID))
 	}
 	if err != nil {
 		return nil, err
@@ -331,7 +333,7 @@ func writableBook(ctx context.Context, tx *dbTx, id int64) error {
 
 // touchBook bumps the book's version in the transaction that changed it.
 func touchBook(ctx context.Context, tx *dbTx, id int64) error {
-	_, err := tx.ExecContext(ctx, `UPDATE phonebooks SET version = version + 1, updated_at = now() WHERE id = $1`, id)
+	_, err := tx.ExecContext(ctx, `UPDATE phonebooks SET version = version + 1, updated_at = now() WHERE id = @id`, momo.Named("id", id))
 	return err
 }
 
@@ -342,13 +344,13 @@ func insertEntry(ctx context.Context, tx *dbTx, bookID int64, in phonebook.Entry
 	}
 	return scanEntry(tx.QueryRowContext(ctx, `
 		INSERT INTO phonebook_entries (book_id, first_name, last_name, company, numbers, note)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING `+entryCols,
-		bookID, in.FirstName, in.LastName, in.Company, string(numbers), in.Note))
+		VALUES (@book_id, @first_name, @last_name, @company, @numbers, @note) RETURNING `+entryCols,
+		momo.Named("book_id", bookID), momo.Named("first_name", in.FirstName), momo.Named("last_name", in.LastName), momo.Named("company", in.Company), momo.Named("numbers", string(numbers)), momo.Named("note", in.Note)))
 }
 
 func bookRoom(ctx context.Context, tx *dbTx, bookID int64, add int) error {
 	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phonebook_entries WHERE book_id = $1`, bookID).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phonebook_entries WHERE book_id = @book_id`, momo.Named("book_id", bookID)).Scan(&n); err != nil {
 		return err
 	}
 	if n+add > phonebook.MaxEntriesPerBook {
@@ -393,9 +395,9 @@ func (s *Store) UpdatePhonebookEntry(ctx context.Context, actor string, bookID, 
 		}
 		var err error
 		out, err = scanEntry(tx.QueryRowContext(ctx, `
-			UPDATE phonebook_entries SET first_name = $3, last_name = $4, company = $5, numbers = $6, note = $7, updated_at = now()
-			WHERE id = $1 AND book_id = $2 RETURNING `+entryCols,
-			id, bookID, in.FirstName, in.LastName, in.Company, string(numbers), in.Note))
+			UPDATE phonebook_entries SET first_name = @first_name, last_name = @last_name, company = @company, numbers = @numbers, note = @note, updated_at = now()
+			WHERE id = @id AND book_id = @book_id RETURNING `+entryCols,
+			momo.Named("id", id), momo.Named("book_id", bookID), momo.Named("first_name", in.FirstName), momo.Named("last_name", in.LastName), momo.Named("company", in.Company), momo.Named("numbers", string(numbers)), momo.Named("note", in.Note)))
 		if err != nil {
 			return err
 		}
@@ -413,7 +415,7 @@ func (s *Store) DeletePhonebookEntry(ctx context.Context, actor string, bookID, 
 		if err := writableBook(ctx, tx, bookID); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM phonebook_entries WHERE id = $1 AND book_id = $2`, id, bookID)
+		res, err := tx.ExecContext(ctx, `DELETE FROM phonebook_entries WHERE id = @id AND book_id = @book_id`, momo.Named("id", id), momo.Named("book_id", bookID))
 		if err != nil {
 			return err
 		}
@@ -436,11 +438,11 @@ func (s *Store) ImportPhonebook(ctx context.Context, actor string, bookID int64,
 		if err := writableBook(ctx, tx, bookID); err != nil {
 			return err
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phonebook_entries WHERE book_id = $1`, bookID).Scan(&before); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phonebook_entries WHERE book_id = @book_id`, momo.Named("book_id", bookID)).Scan(&before); err != nil {
 			return err
 		}
 		if replace {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM phonebook_entries WHERE book_id = $1`, bookID); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM phonebook_entries WHERE book_id = @book_id`, momo.Named("book_id", bookID)); err != nil {
 				return err
 			}
 		}
@@ -507,7 +509,7 @@ func scanPhoneGroup(r interface{ Scan(...any) error }) (phonebook.Group, error) 
 // ListPhoneGroups returns up to limit groups with an id above after, by id,
 // and the id to continue after (0 on the last page).
 func (s *Store) ListPhoneGroups(ctx context.Context, after int64, limit int) ([]phonebook.Group, int64, error) {
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+phoneGroupCols+` FROM phone_groups g WHERE g.id > $1 ORDER BY g.id LIMIT $2`, after, limit+1)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+phoneGroupCols+` FROM phone_groups g WHERE g.id > @after ORDER BY g.id LIMIT @limit`, momo.Named("after", after), momo.Named("limit", limit+1))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -536,7 +538,7 @@ func (s *Store) GetPhoneGroup(ctx context.Context, id int64) (phonebook.Group, e
 }
 
 func getPhoneGroup(ctx context.Context, q querier, id int64) (phonebook.Group, error) {
-	g, err := scanPhoneGroup(q.QueryRowContext(ctx, `SELECT `+phoneGroupCols+` FROM phone_groups g WHERE g.id = $1`, id))
+	g, err := scanPhoneGroup(q.QueryRowContext(ctx, `SELECT `+phoneGroupCols+` FROM phone_groups g WHERE g.id = @id`, momo.Named("id", id)))
 	if err != nil {
 		return g, mapErr(err)
 	}
@@ -572,7 +574,7 @@ func loadGroupChannels(ctx context.Context, q querier, gs []phonebook.Group) err
 	}
 	rows, err := q.QueryContext(ctx, `SELECT l.group_id, c.id, c.label, c.address, c.port, c.codec, l.role, c.priority, c.enabled
 		FROM phone_group_multicast l JOIN multicast_channels c ON c.id = l.channel_id
-		WHERE l.group_id = ANY($1) ORDER BY l.group_id, l.position`, ids)
+		WHERE l.group_id = ANY(@ids) ORDER BY l.group_id, l.position`, momo.Named("ids", ids))
 	if err != nil {
 		return err
 	}
@@ -590,7 +592,7 @@ func loadGroupChannels(ctx context.Context, q querier, gs []phonebook.Group) err
 		return err
 	}
 	prows, err := q.QueryContext(ctx, `SELECT group_id, channel, label, transmit, subscribe
-		FROM ptt_channels WHERE group_id = ANY($1) ORDER BY group_id, channel`, ids)
+		FROM ptt_channels WHERE group_id = ANY(@ids) ORDER BY group_id, channel`, momo.Named("ids", ids))
 	if err != nil {
 		return err
 	}
@@ -614,7 +616,7 @@ func loadGroupChannels(ctx context.Context, q querier, gs []phonebook.Group) err
 func (s *Store) SetPhoneGroupAccountSharing(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error) {
 	var out phonebook.Group
 	err := s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET account_sharing = $2, updated_at = now() WHERE id = $1`, id, enabled)
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET account_sharing = @account_sharing, updated_at = now() WHERE id = @id`, momo.Named("id", id), momo.Named("account_sharing", enabled))
 		if err != nil {
 			return err
 		}
@@ -648,7 +650,7 @@ func (s *Store) RegeneratePhoneGroupSharingSecret(ctx context.Context, actor str
 		if err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET account_sharing_secret_enc = $2, updated_at = now() WHERE id = $1`, id, sealed)
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET account_sharing_secret_enc = @secret, updated_at = now() WHERE id = @id`, momo.Named("id", id), momo.Named("secret", sealed))
 		if err != nil {
 			return err
 		}
@@ -671,10 +673,10 @@ func (s *Store) SetPhoneGroupMulticast(ctx context.Context, actor string, id int
 	var out phonebook.Group
 	err := s.configChange(ctx, actor, "set-multicast", "phone_group", nil, func(tx *dbTx) (int64, error) {
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&one); err != nil {
 			return id, err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM phone_group_multicast WHERE group_id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM phone_group_multicast WHERE group_id = @id`, momo.Named("id", id)); err != nil {
 			return id, err
 		}
 		for i, c := range in {
@@ -682,17 +684,17 @@ func (s *Store) SetPhoneGroupMulticast(ctx context.Context, actor string, id int
 				return id, err
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO phone_group_multicast (group_id, channel_id, position, role)
-				VALUES ($1, $2, $3, $4)`, id, c.ChannelID, i, c.Role); err != nil {
+				VALUES (@group_id, @channel_id, @position, @role)`, momo.Named("group_id", id), momo.Named("channel_id", c.ChannelID), momo.Named("position", i), momo.Named("role", c.Role)); err != nil {
 				return id, err
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE phone_groups SET updated_at = now() WHERE id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE phone_groups SET updated_at = now() WHERE id = @id`, momo.Named("id", id)); err != nil {
 			return id, err
 		}
 		if opts != nil {
-			if _, err := tx.ExecContext(ctx, `UPDATE phone_groups SET paging_allow_in_dnd = $2, paging_barge = $3,
-				paging_priority_active = $4, paging_timeout = $5, intercom_barge = $6 WHERE id = $1`,
-				id, opts.AllowInDND, opts.Barge, opts.PriorityActive, opts.Timeout, opts.IntercomBarge); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE phone_groups SET paging_allow_in_dnd = @allow_in_dnd, paging_barge = @barge,
+				paging_priority_active = @priority_active, paging_timeout = @timeout, intercom_barge = @intercom_barge WHERE id = @id`,
+				momo.Named("id", id), momo.Named("allow_in_dnd", opts.AllowInDND), momo.Named("barge", opts.Barge), momo.Named("priority_active", opts.PriorityActive), momo.Named("timeout", opts.Timeout), momo.Named("intercom_barge", opts.IntercomBarge)); err != nil {
 				return id, err
 			}
 		}
@@ -708,8 +710,8 @@ func (s *Store) SetPhoneGroupMulticast(ctx context.Context, actor string, id int
 func (s *Store) SetPhoneGroupSyslog(ctx context.Context, actor string, id int64, in phonebook.Syslog) (phonebook.Group, error) {
 	var out phonebook.Group
 	err := s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET syslog_enabled = $2, syslog_level = $3, updated_at = now() WHERE id = $1`,
-			id, in.Enabled, in.Level)
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET syslog_enabled = @enabled, syslog_level = @level, updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("enabled", in.Enabled), momo.Named("level", in.Level))
 		if err != nil {
 			return err
 		}
@@ -758,19 +760,19 @@ func (s *Store) SetPhoneGroupPTT(ctx context.Context, actor string, id int64, in
 				return err
 			}
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET ptt_enabled = $2, ptt_channel_id = $3,
-			ptt_default_channel = $4, ptt_accept_busy = $5, ptt_priority_channel = $6, ptt_emergency_channel = $7,
-			group_paging_enabled = $8, group_paging_default = $9, group_paging_priority = $10,
-			group_paging_emergency = $11, updated_at = now() WHERE id = $1`,
-			id, in.Enabled, in.ChannelID, in.DefaultChannel, in.AcceptBusy, in.PriorityChannel, in.EmergencyChannel,
-			in.GroupPaging, in.DefaultGroup, in.PriorityGroup, in.EmergencyGroup)
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET ptt_enabled = @enabled, ptt_channel_id = @channel_id,
+			ptt_default_channel = @default_channel, ptt_accept_busy = @accept_busy, ptt_priority_channel = @priority_channel, ptt_emergency_channel = @emergency_channel,
+			group_paging_enabled = @group_paging, group_paging_default = @default_group, group_paging_priority = @priority_group,
+			group_paging_emergency = @emergency_group, updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("enabled", in.Enabled), momo.Named("channel_id", in.ChannelID), momo.Named("default_channel", in.DefaultChannel), momo.Named("accept_busy", in.AcceptBusy), momo.Named("priority_channel", in.PriorityChannel), momo.Named("emergency_channel", in.EmergencyChannel),
+			momo.Named("group_paging", in.GroupPaging), momo.Named("default_group", in.DefaultGroup), momo.Named("priority_group", in.PriorityGroup), momo.Named("emergency_group", in.EmergencyGroup))
 		if err != nil {
 			return err
 		}
 		if err := requireRow(res); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM ptt_channels WHERE group_id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM ptt_channels WHERE group_id = @id`, momo.Named("id", id)); err != nil {
 			return err
 		}
 		chans := in.Channels
@@ -790,7 +792,7 @@ func (s *Store) SetPhoneGroupPTT(ctx context.Context, actor string, id int64, in
 		}
 		for _, c := range chans {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO ptt_channels (group_id, channel, label, transmit, subscribe)
-				VALUES ($1, $2, $3, $4, $5)`, id, c.Channel, c.Label, c.Transmit, c.Subscribe); err != nil {
+				VALUES (@group_id, @channel, @label, @transmit, @subscribe)`, momo.Named("group_id", id), momo.Named("channel", c.Channel), momo.Named("label", c.Label), momo.Named("transmit", c.Transmit), momo.Named("subscribe", c.Subscribe)); err != nil {
 				return err
 			}
 		}
@@ -817,15 +819,15 @@ func (s *Store) CreatePhoneGroup(ctx context.Context, actor string, in GroupInpu
 		var id int64
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO phone_groups (name, description, include_extensions, include_company)
-			VALUES ($1, $2, $3, $4) RETURNING id`,
-			in.Name, in.Description, in.IncludeExtensions, in.IncludeCompany).Scan(&id); err != nil {
+			VALUES (@name, @description, @include_extensions, @include_company) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("description", in.Description), momo.Named("include_extensions", in.IncludeExtensions), momo.Named("include_company", in.IncludeCompany)).Scan(&id); err != nil {
 			return phoneGroupNameError(err, in.Name)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE phone_groups SET ptt_enabled = TRUE, ptt_default_channel = 1 WHERE id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE phone_groups SET ptt_enabled = TRUE, ptt_default_channel = 1 WHERE id = @id`, momo.Named("id", id)); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO ptt_channels (group_id, channel, label, transmit, subscribe)
-			VALUES ($1, 1, 'Channel 1', TRUE, TRUE)`, id); err != nil {
+			VALUES (@id, 1, 'Channel 1', TRUE, TRUE)`, momo.Named("id", id)); err != nil {
 			return err
 		}
 		if err := s.ensureSharingSecret(ctx, tx, id); err != nil {
@@ -846,8 +848,8 @@ func (s *Store) UpdatePhoneGroup(ctx context.Context, actor string, id int64, in
 	var out phonebook.Group
 	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `
-			UPDATE phone_groups SET name = $2, description = $3, include_extensions = $4, include_company = $5, updated_at = now()
-			WHERE id = $1`, id, in.Name, in.Description, in.IncludeExtensions, in.IncludeCompany)
+			UPDATE phone_groups SET name = @name, description = @description, include_extensions = @include_extensions, include_company = @include_company, updated_at = now()
+			WHERE id = @id`, momo.Named("id", id), momo.Named("name", in.Name), momo.Named("description", in.Description), momo.Named("include_extensions", in.IncludeExtensions), momo.Named("include_company", in.IncludeCompany))
 		if err != nil {
 			return phoneGroupNameError(err, in.Name)
 		}
@@ -865,7 +867,7 @@ func (s *Store) UpdatePhoneGroup(ctx context.Context, actor string, id int64, in
 // DeletePhoneGroup deletes a group; its phones fall back to no group.
 func (s *Store) DeletePhoneGroup(ctx context.Context, actor string, id int64) error {
 	return s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM phone_groups WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM phone_groups WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return err
 		}
@@ -883,7 +885,7 @@ func (s *Store) SetPhoneGroupBooks(ctx context.Context, actor string, id int64, 
 	var out phonebook.Group
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&one); err != nil {
 			return err
 		}
 		if len(bookIDs) > phonebook.MaxBooksPerGroup {
@@ -894,7 +896,7 @@ func (s *Store) SetPhoneGroupBooks(ctx context.Context, actor string, id int64, 
 				return fieldError(fmt.Sprintf("bookIds[%d]", i), "a book can be assigned once")
 			}
 			var kind phonebook.Kind
-			switch err := tx.QueryRowContext(ctx, `SELECT kind FROM phonebooks WHERE id = $1`, b).Scan(&kind); {
+			switch err := tx.QueryRowContext(ctx, `SELECT kind FROM phonebooks WHERE id = @id`, momo.Named("id", b)).Scan(&kind); {
 			case errors.Is(err, sql.ErrNoRows):
 				return fieldError(fmt.Sprintf("bookIds[%d]", i), "no such book")
 			case err != nil:
@@ -903,15 +905,15 @@ func (s *Store) SetPhoneGroupBooks(ctx context.Context, actor string, id int64, 
 				return fieldError(fmt.Sprintf("bookIds[%d]", i), "only named books are assigned; the extensions and company books have switches on the group")
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM phone_group_books WHERE group_id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM phone_group_books WHERE group_id = @id`, momo.Named("id", id)); err != nil {
 			return err
 		}
 		for i, b := range bookIDs {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO phone_group_books (group_id, book_id, position) VALUES ($1, $2, $3)`, id, b, i); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO phone_group_books (group_id, book_id, position) VALUES (@group_id, @book_id, @position)`, momo.Named("group_id", id), momo.Named("book_id", b), momo.Named("position", i)); err != nil {
 				return err
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE phone_groups SET updated_at = now() WHERE id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE phone_groups SET updated_at = now() WHERE id = @id`, momo.Named("id", id)); err != nil {
 			return err
 		}
 		var err error

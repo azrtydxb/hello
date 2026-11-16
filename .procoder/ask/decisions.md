@@ -6293,6 +6293,95 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   internal/store file to @name"), which also lists every package on momo
   now.
 
+## momo Phase 3, domain 4: internal/store phonebook and contacts on @name (2026-11-16, momo/store-phonebook)
+
+- **Scope.** `phonebook.go`, `phonebook_lookup.go`, `personal_contacts.go`
+  and `locations.go` in `internal/store` bind by name: every `$n` became
+  `@name` with `momo.Named`, through the seam, with the Scan code, locks
+  (`FOR UPDATE`, `FOR SHARE`), error handling and SQL text otherwise
+  unchanged. No schema change, no migration, `go.mod` and `internal/db`
+  unchanged.
+- **Caller-name lookup keeps its plans.** `phonebook_lookup.go`'s six
+  statements use each bind once, so momo renders the same SQL with the same
+  `$1`, `$2` in the same order and PostgreSQL infers the same parameter
+  types; no cast was needed or added.
+- **No casts added in this domain.** The two reused binds compare with
+  columns of one type on every use: `requireDialTarget`'s `@number`
+  (`extensions.number` and `ring_groups.name`, both TEXT) and
+  `listAssignments`' `@location_id` fragment, appended to three SELECTs
+  whose `location_id` columns are all BIGINT.
+- **Run-time statements.** `listAssignments` passes its
+  `momo.Named("location_id", ...)` only together with its WHERE fragment,
+  `WHERE location_id = @location_id`. `writeLocation` builds its Named slice once and
+  spreads it into the INSERT and, with `momo.Named("id", id)` appended, the
+  UPDATE. `SetLocationAssignment`'s `UPDATE <table>` binds `@location_id`
+  and `@id`.
+- **Book lock key unchanged.** `CreatePhonebook` still sends
+  `SELECT pg_advisory_xact_lock(@key)` with `int64(bookLockKey)`, rendered
+  as one bigint bind as before.
+
+## momo Phase 3, domain 5: internal/store security and door on @name (2026-11-16, momo/store-door)
+
+- **Scope.** `scep.go`, `wifi.go`, `door.go`, `door_open.go`,
+  `door_camera.go` and `door_webhook.go` in `internal/store` bind by name:
+  every `$n` became `@name` with `momo.Named`, through the seam with the
+  Scan code, `FOR UPDATE`, `mapErr` and the no-row checks as they were. No
+  schema change, no migration.
+- **Secrets unchanged.** The sealed values (the SCEP CA key, the challenges,
+  the 802.1X and Wi-Fi secrets, the door-open code, the camera password, the
+  webhook secret) are sealed, bound and opened as before, with the same
+  additional data; only the bind is by name. Nothing logs an argument value
+  (a build error names the statement and the bind, not its value).
+- **door_open is the configuration of the DTMF `*50` path.** Its statements keep
+  their meaning and parameter types (bigint id, bytea code, boolean). The
+  SIP node reads the codes through `internal/snapshot`, which is unchanged.
+- **Casts.** ListSCEPCertificates casts both uses of `@phone_id` to bigint,
+  as the old `$1::bigint` typed its single bind. SetDoorCamera's upsert
+  casts the `ELSE @password_enc::bytea` use in its CASE; the other reused
+  binds there (`@kind`, `@url`, `@username`, `@password_enc` in VALUES) and
+  wifiInfo's two `@phone_id` uses are typed by their columns.
+- **Run-time statements bind by name too.** UpdateDot1XProfile appends
+  `@password_enc` with its fragment only; memberOf's four statements bind
+  `@extension_id`; sealWifi's statement (`wifiSetPSK`) binds `@id` and
+  `@enc`; replaceWifiAssignments' pair binds `@owner` and `@profile_id`.
+  These, the `wifiIDs` reads and ListSCEPCertificates are assembled or
+  passed at run time, so the DB tier checks them, not
+  `TestStatementsBuild`.
+
+## momo Phase 3, domain 3: internal/store faxes, mail and backup on @name (2026-11-16, momo/store-fax-mail)
+
+- **Scope.** `faxes.go`, `mail.go` and `backup.go` in `internal/store` bind
+  by name: every `$n` became `@name` with `momo.Named`, through the seam,
+  with the SQL text, `FOR UPDATE` / `SKIP LOCKED`, Scan targets and error
+  handling unchanged. No schema change, no migration, `go.mod` and
+  `internal/db` unchanged.
+- **Reused binds carry the old type.** fax Finish casts `@object_key::text`
+  in `NULLIF(...)` and `@object_key::text <> ''`, and `@mail_to::text <> ''`
+  (its `mail_to = @mail_to` use takes the column's type). AdoptArchive's
+  `INSERT ... SELECT` casts every select-list use to its column's type,
+  `@at::timestamptz` (twice), `@archive_bytes::bigint` and
+  `@object_key::text`, and `@object_key::text` in its `NOT EXISTS`, since a
+  select-list bind cannot type itself once it is a bind of its own. The
+  `@name` uses in DeleteFaxDestination's IVR read compare with TEXT columns,
+  and the upserts' (PutSMTPSettings, PutBackupSettings) repeated uses are
+  each a column's value; the sealed bytes and the clear flag were already
+  cast (`::bytea`, `::boolean`).
+- **ListFaxes' assembled WHERE.** Each filter condition carries its own
+  `@name` (`@direction`, `@status`, `@before`, `@owners`) and its Named goes
+  in only with it; the limit is `@limit`. The statement PostgreSQL receives
+  is the one it received before (`TestListFaxesSends` pins it, values in
+  order). The `fmt.Sprintf` of placeholder numbers, and its gosec
+  suppression, are gone.
+- **DeleteFaxDestination's in-use reads** are now the constants
+  `faxDestRoutes` and `faxDestMenus`, with the same text, so
+  `TestFaxStatementsOffline` builds them (the sweep cannot see a statement
+  taken from a struct field) along with every ListFaxes filter combination.
+- **BumpRevision's NOTIFY** goes through `notifyConfig`, which sends the
+  same `SELECT pg_notify($1, $2::text)` with `hello_config` and the revision
+  as the code did inline.
+- **SchemaVersion stays raw** (`s.db.raw`): goose owns `goose_db_version`
+  until the migration engine moves (Phase 5).
+
 ## momo Phase 3, domain 2: internal/store users and authentication on @name (2026-11-16, momo/store-users)
 
 - **Scope.** `users.go`, `totp.go`, `oauth.go`, `ldap.go`, `onboarding.go` and `sidekey.go` in `internal/store` (130 calls) bind by name, following the recipe in `docs/database.md`. Call sites, Scan code, error mapping (`mapErr`, `oauthErr`, the `sql.ErrNoRows` checks), `FOR UPDATE` locks and the SQL text are otherwise unchanged. No schema change, no migration; `go.mod` and `internal/db` unchanged.

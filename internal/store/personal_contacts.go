@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/phonebook"
 )
 
@@ -29,7 +31,7 @@ const personalBookName = "Personal"
 // concurrent unlink waits, that userID is linked to an extension.
 func requireLink(ctx context.Context, tx *dbTx, userID int64) error {
 	var ext sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT extension_id FROM users WHERE id = $1 FOR SHARE`, userID).Scan(&ext)
+	err := tx.QueryRowContext(ctx, `SELECT extension_id FROM users WHERE id = @user_id FOR SHARE`, momo.Named("user_id", userID)).Scan(&ext)
 	if err != nil {
 		return mapErr(err)
 	}
@@ -43,13 +45,13 @@ func requireLink(ctx context.Context, tx *dbTx, userID int64) error {
 // create is set; 0 when there is none and create is not set.
 func personalBook(ctx context.Context, tx *dbTx, userID int64, create bool) (int64, error) {
 	if create {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO phonebooks (kind, name, owner_user_id) VALUES ('personal', $2, $1)
-			ON CONFLICT (owner_user_id) WHERE kind = 'personal' DO NOTHING`, userID, personalBookName); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO phonebooks (kind, name, owner_user_id) VALUES ('personal', @name, @user_id)
+			ON CONFLICT (owner_user_id) WHERE kind = 'personal' DO NOTHING`, momo.Named("user_id", userID), momo.Named("name", personalBookName)); err != nil {
 			return 0, err
 		}
 	}
 	var id int64
-	err := tx.QueryRowContext(ctx, `SELECT id FROM phonebooks WHERE kind = 'personal' AND owner_user_id = $1 FOR UPDATE`, userID).Scan(&id)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM phonebooks WHERE kind = 'personal' AND owner_user_id = @user_id FOR UPDATE`, momo.Named("user_id", userID)).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
@@ -61,7 +63,7 @@ func personalBook(ctx context.Context, tx *dbTx, userID int64, create bool) (int
 // phonebook.MaxIndexEntries (spec P-17).
 func personalRoom(ctx context.Context, tx *dbTx, bookID int64, add int) error {
 	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phonebook_entries WHERE book_id = $1`, bookID).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phonebook_entries WHERE book_id = @book_id`, momo.Named("book_id", bookID)).Scan(&n); err != nil {
 		return err
 	}
 	if n+add > phonebook.MaxPersonalEntries {
@@ -79,8 +81,8 @@ func (s *Store) ListContacts(ctx context.Context, userID, after int64, limit int
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT `+entryCols+` FROM phonebook_entries
-			WHERE book_id = (SELECT id FROM phonebooks WHERE kind = 'personal' AND owner_user_id = $1) AND id > $2
-			ORDER BY id LIMIT $3`, userID, after, limit+1)
+			WHERE book_id = (SELECT id FROM phonebooks WHERE kind = 'personal' AND owner_user_id = @user_id) AND id > @after
+			ORDER BY id LIMIT @limit`, momo.Named("user_id", userID), momo.Named("after", after), momo.Named("limit", limit+1))
 		if err != nil {
 			return err
 		}
@@ -113,7 +115,7 @@ func (s *Store) ExportContacts(ctx context.Context, userID int64) ([]phonebook.E
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT `+entryCols+` FROM phonebook_entries
-			WHERE book_id = $1 ORDER BY lower(last_name), lower(first_name), id`, id)
+			WHERE book_id = @book_id ORDER BY lower(last_name), lower(first_name), id`, momo.Named("book_id", id))
 		if err != nil {
 			return err
 		}
@@ -176,9 +178,9 @@ func (s *Store) UpdateContact(ctx context.Context, actor string, userID, id int6
 			return ErrNotFound
 		}
 		out, err = scanEntry(tx.QueryRowContext(ctx, `
-			UPDATE phonebook_entries SET first_name = $3, last_name = $4, company = $5, numbers = $6, note = $7, updated_at = now()
-			WHERE id = $1 AND book_id = $2 RETURNING `+entryCols,
-			id, book, in.FirstName, in.LastName, in.Company, string(numbers), in.Note))
+			UPDATE phonebook_entries SET first_name = @first_name, last_name = @last_name, company = @company, numbers = @numbers, note = @note, updated_at = now()
+			WHERE id = @id AND book_id = @book_id RETURNING `+entryCols,
+			momo.Named("id", id), momo.Named("book_id", book), momo.Named("first_name", in.FirstName), momo.Named("last_name", in.LastName), momo.Named("company", in.Company), momo.Named("numbers", string(numbers)), momo.Named("note", in.Note)))
 		if err != nil {
 			return mapErr(err)
 		}
@@ -203,7 +205,7 @@ func (s *Store) DeleteContact(ctx context.Context, actor string, userID, id int6
 		if book == 0 {
 			return ErrNotFound
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM phonebook_entries WHERE id = $1 AND book_id = $2`, id, book)
+		res, err := tx.ExecContext(ctx, `DELETE FROM phonebook_entries WHERE id = @id AND book_id = @book_id`, momo.Named("id", id), momo.Named("book_id", book))
 		if err != nil {
 			return err
 		}
@@ -230,11 +232,11 @@ func (s *Store) ImportContacts(ctx context.Context, actor string, userID int64, 
 		if err != nil {
 			return err
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phonebook_entries WHERE book_id = $1`, book).Scan(&before); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phonebook_entries WHERE book_id = @book_id`, momo.Named("book_id", book)).Scan(&before); err != nil {
 			return err
 		}
 		if replace {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM phonebook_entries WHERE book_id = $1`, book); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM phonebook_entries WHERE book_id = @book_id`, momo.Named("book_id", book)); err != nil {
 				return err
 			}
 		}
