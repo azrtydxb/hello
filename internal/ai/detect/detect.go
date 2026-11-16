@@ -7,11 +7,12 @@ package detect
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/azrtydxb/momo"
 
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/ai/proposal"
@@ -69,7 +70,9 @@ type Members interface {
 
 // Env is what the detectors read.
 type Env struct {
-	DB    *sql.DB
+	// DB is the momo handle (internal/db) the detectors' hand-written SQL
+	// runs on.
+	DB    *momo.DB
 	Store *store.Store
 	Live  Live
 	VK    valkey.Client
@@ -249,8 +252,6 @@ func mapValues(m map[string]error) []error {
 	}
 	return out
 }
-
-func isNoRows(err error) bool { return errors.Is(err, sql.ErrNoRows) }
 
 // identity is who a finding's proposal reads as: the oldest admin (spec S-18
 // leaves it to the detectors; a viewer-scoped replay is read-only whoever it

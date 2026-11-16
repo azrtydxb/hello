@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/azrtydxb/momo"
+	"github.com/azrtydxb/momo/driver/pgxdriver"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/valkey-io/valkey-go"
 )
@@ -60,7 +62,9 @@ func NewServiceMetrics(reg prometheus.Registerer) *ServiceMetrics {
 
 // TxHook runs inside the ingest transaction for every newly stored event;
 // later phases add webhook deliveries here. A failing hook rolls the batch
-// back and it is retried.
+// back and it is retried. tx is the database/sql transaction behind the
+// ingest's momo transaction: a hook runs raw statements on it, or momo ones
+// through internal/db.AdoptTx, and never commits or rolls it back.
 type TxHook func(ctx context.Context, tx *sql.Tx, e Entry) error
 
 // Locker takes a cluster-wide advisory lock (store.Store.TryLock).
@@ -70,8 +74,10 @@ type Locker interface {
 
 // Service is hello-control's side of the event pipeline.
 type Service struct {
-	// DB is the PostgreSQL database holding integration_events.
-	DB *sql.DB
+	// DB is the PostgreSQL database holding integration_events: a momo
+	// handle over a database/sql pool (internal/db.New), because the hooks
+	// are handed the ingest transaction as a *sql.Tx.
+	DB *momo.DB
 	// Valkey returns the connected client, or nil while connecting.
 	Valkey func() valkey.Client
 	// Locker serialises the retention job across replicas; nil skips it.
@@ -320,16 +326,14 @@ func (s *Service) autoclaim(ctx context.Context, c valkey.Client) []rawEntry {
 	return out
 }
 
+// errNotSQLTx is a DB whose transactions have no *sql.Tx to hand the hooks.
+var errNotSQLTx = errors.New("events: the ingest transaction is not a database/sql one; build Service.DB with internal/db.New")
+
 // store writes a batch in one transaction, runs the hooks and acknowledges.
 func (s *Service) store(ctx context.Context, c valkey.Client, batch []rawEntry) error {
 	if len(batch) == 0 {
 		return nil
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
 	var (
 		results = map[string]int{}
 		lagging []Entry
@@ -353,36 +357,47 @@ func (s *Service) store(ctx context.Context, c valkey.Client, batch []rawEntry) 
 			exts = append(exts, e.Data.Extension)
 		}
 	}
-	owners, err := usersOf(ctx, tx, exts)
-	if err != nil {
-		return err
-	}
-	for _, e := range pending {
-		e.Data.UserID = owners[e.Data.Extension]
-	}
-	for i := range batch {
-		if !valid[i] {
-			results["invalid"]++
-			continue
+	// Committed when the function returns nil, rolled back otherwise.
+	err := s.DB.Tx(ctx, momo.TxOptions{}, func(tx *momo.Tx) error {
+		var hookTx *sql.Tx
+		if len(s.Hooks) > 0 {
+			var ok bool
+			if hookTx, ok = pgxdriver.UnwrapSQLTx(tx); !ok {
+				return errNotSQLTx
+			}
 		}
-		e := decoded[i]
-		fresh, err := insert(ctx, tx, e)
+		owners, err := usersOf(ctx, tx, exts)
 		if err != nil {
 			return err
 		}
-		if !fresh {
-			results["duplicate"]++
-			continue
+		for _, e := range pending {
+			e.Data.UserID = owners[e.Data.Extension]
 		}
-		for _, h := range s.Hooks {
-			if err := h(ctx, tx, e); err != nil {
+		for i := range batch {
+			if !valid[i] {
+				results["invalid"]++
+				continue
+			}
+			e := decoded[i]
+			fresh, err := insert(ctx, tx, e)
+			if err != nil {
 				return err
 			}
+			if !fresh {
+				results["duplicate"]++
+				continue
+			}
+			for _, h := range s.Hooks {
+				if err := h(ctx, hookTx, e); err != nil {
+					return err
+				}
+			}
+			results["stored"]++
+			lagging = append(lagging, e)
 		}
-		results["stored"]++
-		lagging = append(lagging, e)
-	}
-	if err := tx.Commit(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	if m := s.Metrics; m != nil {
@@ -429,14 +444,15 @@ func (s *Service) purge(ctx context.Context) {
 	}
 	// An event stays while a webhook delivery that still needs it (waiting,
 	// retrying, or a dead letter that can be redelivered) refers to it.
-	res, err := s.DB.ExecContext(ctx, `
-		DELETE FROM integration_events e WHERE e.created_at < now() - make_interval(days => $1)
-		AND NOT EXISTS (SELECT 1 FROM webhook_deliveries d WHERE d.event_id = e.id AND d.status IN ('pending', 'retrying', 'dead'))`, days)
+	n, err := momo.Exec(ctx, s.DB, `
+		DELETE FROM integration_events e WHERE e.created_at < now() - make_interval(days => @days)
+		AND NOT EXISTS (SELECT 1 FROM webhook_deliveries d WHERE d.event_id = e.id AND d.status IN ('pending', 'retrying', 'dead'))`,
+		momo.Named("days", days))
 	if err != nil {
 		s.Log.Warn("events: retention purge failed", "error", err)
 		return
 	}
-	if n, _ := res.RowsAffected(); n > 0 {
+	if n > 0 {
 		s.Log.Info("events: purged old events", "count", n)
 	}
 }

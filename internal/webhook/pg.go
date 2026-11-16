@@ -9,48 +9,97 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+	"github.com/azrtydxb/momo/advisory"
+
 	"github.com/azrtydxb/hello/internal/auth"
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/events"
 )
 
-// PG is the PostgreSQL store.
-type PG struct{ DB *sql.DB }
+// PG is the PostgreSQL store, on momo (internal/db).
+//
+// The statements are the hand-written SQL they were on database/sql, with
+// @name binds instead of $n. Errors reach callers as before: ErrNotFound for
+// a missing row, ErrInFlight for a redelivery of a leased delivery, and the
+// driver's error (a *pgconn.PgError is still reachable with errors.As) for
+// anything else. The advisory locks keep their keys, so replicas of an older
+// and a newer version still exclude each other during a rolling update.
+type PG struct{ DB *momo.DB }
 
 // claimLock serialises claims across control replicas for the few
 // milliseconds a claim takes, so the per-endpoint concurrency is exact.
 const claimLock = 0x68656c6c6f776864 // "hellowhd"
 
-const endpointCols = `e.id, e.name, e.url, to_json(e.events)::text, to_json(e.extensions)::text, e.enabled, e.allow_private,
-	e.include_peer, e.include_message_body,
+// createLock is the text key of the lock that serialises endpoint creates,
+// hashed by the server with hashtext (advisory.XactLockString).
+const createLock = "hello:webhooks:create"
+
+// one returns the single row of rows, or sql.ErrNoRows when there is none,
+// the error QueryRow(...).Scan gave, so mapErr maps it as before.
+func one[T any](rows []T, err error) (T, error) {
+	var zero T
+	if err != nil {
+		return zero, err
+	}
+	if len(rows) == 0 {
+		return zero, sql.ErrNoRows
+	}
+	return rows[0], nil
+}
+
+const endpointCols = `e.id, e.name, e.url, to_json(e.events)::text AS events_json, to_json(e.extensions)::text AS extensions_json,
+	e.enabled, e.allow_private, e.include_peer, e.include_message_body,
 	e.disabled_reason, e.consecutive_failures, e.previous_secret_expires, e.last_success_at, e.last_failure_at, e.last_status,
 	e.created_by, e.created_at, e.updated_at, e.secret_enc, e.previous_secret_enc,
-	(SELECT count(*) FROM webhook_deliveries d WHERE d.endpoint_id = e.id AND d.status IN ('pending', 'retrying')),
-	(SELECT count(*) FROM webhook_deliveries d WHERE d.endpoint_id = e.id AND d.status = 'dead')`
+	(SELECT count(*) FROM webhook_deliveries d WHERE d.endpoint_id = e.id AND d.status IN ('pending', 'retrying')) AS pending,
+	(SELECT count(*) FROM webhook_deliveries d WHERE d.endpoint_id = e.id AND d.status = 'dead') AS dead`
 
-type rowScanner interface{ Scan(dest ...any) error }
+// endpointScan is an endpointCols row.
+type endpointScan struct {
+	ID                    int64      `momo:"column:id"`
+	Name                  string     `momo:"column:name"`
+	URL                   string     `momo:"column:url"`
+	EventsJSON            string     `momo:"column:events_json"`
+	ExtensionsJSON        string     `momo:"column:extensions_json"`
+	Enabled               bool       `momo:"column:enabled"`
+	AllowPrivate          bool       `momo:"column:allow_private"`
+	IncludePeer           bool       `momo:"column:include_peer"`
+	IncludeMessageBody    bool       `momo:"column:include_message_body"`
+	DisabledReason        string     `momo:"column:disabled_reason"`
+	ConsecutiveFailures   int        `momo:"column:consecutive_failures"`
+	PreviousSecretExpires *time.Time `momo:"column:previous_secret_expires"`
+	LastSuccessAt         *time.Time `momo:"column:last_success_at"`
+	LastFailureAt         *time.Time `momo:"column:last_failure_at"`
+	LastStatus            *int       `momo:"column:last_status"`
+	CreatedBy             string     `momo:"column:created_by"`
+	CreatedAt             time.Time  `momo:"column:created_at"`
+	UpdatedAt             time.Time  `momo:"column:updated_at"`
+	SecretEnc             []byte     `momo:"column:secret_enc"`
+	PreviousSecretEnc     []byte     `momo:"column:previous_secret_enc"`
+	Pending               int64      `momo:"column:pending"`
+	Dead                  int64      `momo:"column:dead"`
+}
 
-func scanEndpoint(r rowScanner) (Endpoint, error) {
-	var (
-		e                        Endpoint
-		evs, exts                string
-		prevExp, lastOK, lastBad sql.NullTime
-		lastStatus               sql.NullInt64
-	)
-	if err := r.Scan(&e.ID, &e.Name, &e.URL, &evs, &exts, &e.Enabled, &e.AllowPrivate, &e.IncludePeer, &e.IncludeMessageBody, &e.DisabledReason, &e.ConsecutiveFailures,
-		&prevExp, &lastOK, &lastBad, &lastStatus, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.SecretEnc, &e.PreviousSecretEnc,
-		&e.Pending, &e.Dead); err != nil {
+func (s endpointScan) endpoint() Endpoint {
+	e := Endpoint{ID: s.ID, Name: s.Name, URL: s.URL, Enabled: s.Enabled, AllowPrivate: s.AllowPrivate, IncludePeer: s.IncludePeer,
+		IncludeMessageBody: s.IncludeMessageBody, DisabledReason: s.DisabledReason, ConsecutiveFailures: s.ConsecutiveFailures,
+		PreviousSecretExpires: s.PreviousSecretExpires, LastSuccessAt: s.LastSuccessAt, LastFailureAt: s.LastFailureAt,
+		LastStatus: s.LastStatus, CreatedBy: s.CreatedBy, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
+		SecretEnc: s.SecretEnc, PreviousSecretEnc: s.PreviousSecretEnc, Pending: s.Pending, Dead: s.Dead}
+	_ = json.Unmarshal([]byte(s.EventsJSON), &e.Events)
+	_ = json.Unmarshal([]byte(s.ExtensionsJSON), &e.Extensions)
+	e.Events, e.Extensions = nonNil(e.Events), nonNil(e.Extensions)
+	return e
+}
+
+// getEndpoint reads one endpoint on q; a missing one is sql.ErrNoRows.
+func getEndpoint(ctx context.Context, q momo.Querier, id int64) (Endpoint, error) {
+	s, err := one(momo.Query[endpointScan](ctx, q, `SELECT `+endpointCols+` FROM webhook_endpoints e WHERE e.id = @id`, momo.Named("id", id)))
+	if err != nil {
 		return Endpoint{}, err
 	}
-	_ = json.Unmarshal([]byte(evs), &e.Events)
-	_ = json.Unmarshal([]byte(exts), &e.Extensions)
-	e.Events, e.Extensions = nonNil(e.Events), nonNil(e.Extensions)
-	e.PreviousSecretExpires = timePtr(prevExp)
-	e.LastSuccessAt, e.LastFailureAt = timePtr(lastOK), timePtr(lastBad)
-	if lastStatus.Valid {
-		v := int(lastStatus.Int64)
-		e.LastStatus = &v
-	}
-	return e, nil
+	return s.endpoint(), nil
 }
 
 func nonNil(s []string) []string {
@@ -58,14 +107,6 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
-}
-
-func timePtr(t sql.NullTime) *time.Time {
-	if !t.Valid {
-		return nil
-	}
-	v := t.Time
-	return &v
 }
 
 func mapErr(err error) error {
@@ -100,7 +141,7 @@ func idArray(ids []int64) string {
 	return "{" + strings.Join(parts, ",") + "}"
 }
 
-func audit(ctx context.Context, tx *sql.Tx, actor, action, resource, id string) error {
+func audit(ctx context.Context, q momo.Querier, actor, action, resource, id string) error {
 	var via any
 	if a, ok := auth.ActorFrom(ctx); ok {
 		switch {
@@ -110,45 +151,38 @@ func audit(ctx context.Context, tx *sql.Tx, actor, action, resource, id string) 
 			via = a.Via
 		}
 	}
-	_, err := tx.ExecContext(ctx,
-		`INSERT INTO audit_events (actor, action, resource, resource_id, via) VALUES ($1, $2, $3, $4, $5)`,
-		actor, action, resource, id, via)
+	_, err := momo.Exec(ctx, q,
+		`INSERT INTO audit_events (actor, action, resource, resource_id, via) VALUES (@actor, @action, @resource, @resource_id, @via)`,
+		momo.Named("actor", actor), momo.Named("action", action), momo.Named("resource", resource), momo.Named("resource_id", id),
+		momo.Named("via", via))
 	return err
 }
 
 // auditInclude records each change of an endpoint's inbox options with its
 // own audit row: sending customers' numbers or texts to a receiver is a
 // privacy decision (spec messaging-channels M-23).
-func auditInclude(ctx context.Context, tx *sql.Tx, actor string, id int64, wasPeer, peer, wasBody, body bool) error {
+func auditInclude(ctx context.Context, q momo.Querier, actor string, id int64, wasPeer, peer, wasBody, body bool) error {
 	rid := strconv.FormatInt(id, 10)
 	if peer != wasPeer {
-		if err := audit(ctx, tx, actor, "include_peer "+strconv.FormatBool(peer), "webhook_endpoint", rid); err != nil {
+		if err := audit(ctx, q, actor, "include_peer "+strconv.FormatBool(peer), "webhook_endpoint", rid); err != nil {
 			return err
 		}
 	}
 	if body != wasBody {
-		return audit(ctx, tx, actor, "include_message_body "+strconv.FormatBool(body), "webhook_endpoint", rid)
+		return audit(ctx, q, actor, "include_message_body "+strconv.FormatBool(body), "webhook_endpoint", rid)
 	}
 	return nil
 }
 
-func (p *PG) tx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := p.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return mapErr(err)
-	}
-	return tx.Commit()
+// tx runs fn in a transaction: committed when fn returns nil, rolled back
+// otherwise, with a missing row reported as ErrNotFound.
+func (p *PG) tx(ctx context.Context, fn func(*momo.Tx) error) error {
+	return mapErr(p.DB.Tx(ctx, momo.TxOptions{}, fn))
 }
 
 // NextEndpointID implements Store.
 func (p *PG) NextEndpointID(ctx context.Context) (int64, error) {
-	var id int64
-	err := p.DB.QueryRowContext(ctx, `SELECT nextval(pg_get_serial_sequence('webhook_endpoints', 'id'))`).Scan(&id)
-	return id, err
+	return one(momo.Scalars[int64](ctx, p.DB, `SELECT nextval(pg_get_serial_sequence('webhook_endpoints', 'id'))`))
 }
 
 // CreateEndpoint implements Store.
@@ -157,26 +191,31 @@ func (p *PG) CreateEndpoint(ctx context.Context, actor string, e Endpoint) (Endp
 		out     Endpoint
 		created bool
 	)
-	err := p.tx(ctx, func(tx *sql.Tx) error {
+	err := p.tx(ctx, func(tx *momo.Tx) error {
 		// One create at a time, so two identical Zapier subscriptions
 		// cannot both pass the existence check.
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('hello:webhooks:create'))`); err != nil {
+		if err := advisory.XactLockString(ctx, tx, createLock); err != nil {
 			return err
 		}
-		row := tx.QueryRowContext(ctx, `SELECT `+endpointCols+` FROM webhook_endpoints e WHERE e.url = $1 AND e.events = $2::text[] ORDER BY e.id LIMIT 1`,
-			e.URL, pgArray(e.Events))
-		if got, err := scanEndpoint(row); err == nil {
-			out = got
+		got, err := momo.Query[endpointScan](ctx, tx,
+			`SELECT `+endpointCols+` FROM webhook_endpoints e WHERE e.url = @url AND e.events = @events::text[] ORDER BY e.id LIMIT 1`,
+			momo.Named("url", e.URL), momo.Named("events", pgArray(e.Events)))
+		if err != nil {
+			return err
+		}
+		if len(got) > 0 {
+			out = got[0].endpoint()
 			return nil
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			return err
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := momo.Exec(ctx, tx, `
 			INSERT INTO webhook_endpoints (id, name, url, secret_enc, events, extensions, enabled, allow_private, created_by,
 				include_peer, include_message_body)
-			VALUES ($1, $2, $3, $4, $5::text[], $6::text[], $7, $8, $9, $10, $11)`,
-			e.ID, e.Name, e.URL, e.SecretEnc, pgArray(e.Events), pgArray(e.Extensions), e.Enabled, e.AllowPrivate, actor,
-			e.IncludePeer, e.IncludeMessageBody); err != nil {
+			VALUES (@id, @name, @url, @secret_enc, @events::text[], @extensions::text[], @enabled, @allow_private, @created_by,
+				@include_peer, @include_message_body)`,
+			momo.Named("id", e.ID), momo.Named("name", e.Name), momo.Named("url", e.URL), momo.Named("secret_enc", e.SecretEnc),
+			momo.Named("events", pgArray(e.Events)), momo.Named("extensions", pgArray(e.Extensions)), momo.Named("enabled", e.Enabled),
+			momo.Named("allow_private", e.AllowPrivate), momo.Named("created_by", actor),
+			momo.Named("include_peer", e.IncludePeer), momo.Named("include_message_body", e.IncludeMessageBody)); err != nil {
 			return err
 		}
 		if err := audit(ctx, tx, actor, "create", "webhook_endpoint", strconv.FormatInt(e.ID, 10)); err != nil {
@@ -185,8 +224,8 @@ func (p *PG) CreateEndpoint(ctx context.Context, actor string, e Endpoint) (Endp
 		if err := auditInclude(ctx, tx, actor, e.ID, false, e.IncludePeer, false, e.IncludeMessageBody); err != nil {
 			return err
 		}
-		got, err := scanEndpoint(tx.QueryRowContext(ctx, `SELECT `+endpointCols+` FROM webhook_endpoints e WHERE e.id = $1`, e.ID))
-		out, created = got, true
+		ep, err := getEndpoint(ctx, tx, e.ID)
+		out, created = ep, true
 		return err
 	})
 	return out, created, err
@@ -194,58 +233,55 @@ func (p *PG) CreateEndpoint(ctx context.Context, actor string, e Endpoint) (Endp
 
 // GetEndpoint implements Store.
 func (p *PG) GetEndpoint(ctx context.Context, id int64) (Endpoint, error) {
-	e, err := scanEndpoint(p.DB.QueryRowContext(ctx, `SELECT `+endpointCols+` FROM webhook_endpoints e WHERE e.id = $1`, id))
+	e, err := getEndpoint(ctx, p.DB, id)
 	return e, mapErr(err)
 }
 
 // ListEndpoints implements Store.
 func (p *PG) ListEndpoints(ctx context.Context) ([]Endpoint, error) {
-	rows, err := p.DB.QueryContext(ctx, `SELECT `+endpointCols+` FROM webhook_endpoints e ORDER BY e.id`)
+	scans, err := momo.Query[endpointScan](ctx, p.DB, `SELECT `+endpointCols+` FROM webhook_endpoints e ORDER BY e.id`)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := []Endpoint{}
-	for rows.Next() {
-		e, err := scanEndpoint(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, e)
+	out := make([]Endpoint, 0, len(scans))
+	for _, s := range scans {
+		out = append(out, s.endpoint())
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // UpdateEndpoint implements Store.
 func (p *PG) UpdateEndpoint(ctx context.Context, actor string, e Endpoint, resetHealth bool) (Endpoint, error) {
 	var out Endpoint
-	err := p.tx(ctx, func(tx *sql.Tx) error {
-		var wasPeer, wasBody bool
-		if err := tx.QueryRowContext(ctx, `SELECT include_peer, include_message_body FROM webhook_endpoints WHERE id = $1 FOR UPDATE`,
-			e.ID).Scan(&wasPeer, &wasBody); err != nil {
-			return err
-		}
-		res, err := tx.ExecContext(ctx, `
-			UPDATE webhook_endpoints SET name = $2, url = $3, events = $4::text[], extensions = $5::text[], enabled = $6,
-				allow_private = $7, disabled_reason = $8,
-				consecutive_failures = CASE WHEN $9::boolean THEN 0 ELSE consecutive_failures END, updated_at = now(),
-				include_peer = $10, include_message_body = $11
-			WHERE id = $1`,
-			e.ID, e.Name, e.URL, pgArray(e.Events), pgArray(e.Extensions), e.Enabled, e.AllowPrivate, e.DisabledReason, resetHealth,
-			e.IncludePeer, e.IncludeMessageBody)
+	err := p.tx(ctx, func(tx *momo.Tx) error {
+		was, err := one(momo.Query[momo.Row2[bool, bool]](ctx, tx,
+			`SELECT include_peer, include_message_body FROM webhook_endpoints WHERE id = @id FOR UPDATE`, momo.Named("id", e.ID)))
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
+		n, err := momo.Exec(ctx, tx, `
+			UPDATE webhook_endpoints SET name = @name, url = @url, events = @events::text[], extensions = @extensions::text[], enabled = @enabled,
+				allow_private = @allow_private, disabled_reason = @disabled_reason,
+				consecutive_failures = CASE WHEN @reset_health::boolean THEN 0 ELSE consecutive_failures END, updated_at = now(),
+				include_peer = @include_peer, include_message_body = @include_message_body
+			WHERE id = @id`,
+			momo.Named("id", e.ID), momo.Named("name", e.Name), momo.Named("url", e.URL), momo.Named("events", pgArray(e.Events)),
+			momo.Named("extensions", pgArray(e.Extensions)), momo.Named("enabled", e.Enabled), momo.Named("allow_private", e.AllowPrivate),
+			momo.Named("disabled_reason", e.DisabledReason), momo.Named("reset_health", resetHealth),
+			momo.Named("include_peer", e.IncludePeer), momo.Named("include_message_body", e.IncludeMessageBody))
+		if err != nil {
+			return err
+		}
+		if n == 0 {
 			return sql.ErrNoRows
 		}
 		if err := audit(ctx, tx, actor, "update", "webhook_endpoint", strconv.FormatInt(e.ID, 10)); err != nil {
 			return err
 		}
-		if err := auditInclude(ctx, tx, actor, e.ID, wasPeer, e.IncludePeer, wasBody, e.IncludeMessageBody); err != nil {
+		if err := auditInclude(ctx, tx, actor, e.ID, was.C1, e.IncludePeer, was.C2, e.IncludeMessageBody); err != nil {
 			return err
 		}
-		out, err = scanEndpoint(tx.QueryRowContext(ctx, `SELECT `+endpointCols+` FROM webhook_endpoints e WHERE e.id = $1`, e.ID))
+		out, err = getEndpoint(ctx, tx, e.ID)
 		return err
 	})
 	return out, err
@@ -254,20 +290,22 @@ func (p *PG) UpdateEndpoint(ctx context.Context, actor string, e Endpoint, reset
 // SetSecrets implements Store.
 func (p *PG) SetSecrets(ctx context.Context, actor string, id int64, current, previous []byte, previousExpires *time.Time) (Endpoint, error) {
 	var out Endpoint
-	err := p.tx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `
-			UPDATE webhook_endpoints SET secret_enc = $2, previous_secret_enc = $3, previous_secret_expires = $4, updated_at = now()
-			WHERE id = $1`, id, current, previous, previousExpires)
+	err := p.tx(ctx, func(tx *momo.Tx) error {
+		n, err := momo.Exec(ctx, tx, `
+			UPDATE webhook_endpoints SET secret_enc = @secret_enc, previous_secret_enc = @previous_secret_enc,
+				previous_secret_expires = @previous_secret_expires, updated_at = now()
+			WHERE id = @id`, momo.Named("id", id), momo.Named("secret_enc", current), momo.Named("previous_secret_enc", previous),
+			momo.Named("previous_secret_expires", previousExpires))
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
+		if n == 0 {
 			return sql.ErrNoRows
 		}
 		if err := audit(ctx, tx, actor, "rotate-secret", "webhook_endpoint", strconv.FormatInt(id, 10)); err != nil {
 			return err
 		}
-		out, err = scanEndpoint(tx.QueryRowContext(ctx, `SELECT `+endpointCols+` FROM webhook_endpoints e WHERE e.id = $1`, id))
+		out, err = getEndpoint(ctx, tx, id)
 		return err
 	})
 	return out, err
@@ -275,154 +313,131 @@ func (p *PG) SetSecrets(ctx context.Context, actor string, id int64, current, pr
 
 // DeleteEndpoint implements Store.
 func (p *PG) DeleteEndpoint(ctx context.Context, actor string, id int64) error {
-	return p.tx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE id = $1`, id)
+	return p.tx(ctx, func(tx *momo.Tx) error {
+		n, err := momo.Exec(ctx, tx, `DELETE FROM webhook_endpoints WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
+		if n == 0 {
 			return sql.ErrNoRows
 		}
 		return audit(ctx, tx, actor, "delete", "webhook_endpoint", strconv.FormatInt(id, 10))
 	})
 }
 
-// Enqueue implements Store: it runs in the event ingest transaction.
+// enqueueScan is an enabled endpoint's filter.
+type enqueueScan struct {
+	ID             int64  `momo:"column:id"`
+	EventsJSON     string `momo:"column:events_json"`
+	ExtensionsJSON string `momo:"column:extensions_json"`
+}
+
+// Enqueue implements Store: it runs in the event ingest transaction, which
+// the caller commits or rolls back.
 func (p *PG) Enqueue(ctx context.Context, tx *sql.Tx, e events.Entry) error {
-	rows, err := tx.QueryContext(ctx, `SELECT id, to_json(events)::text, to_json(extensions)::text FROM webhook_endpoints WHERE enabled`)
+	q := hellodb.AdoptTx(p.DB, tx)
+	scans, err := momo.Query[enqueueScan](ctx, q,
+		`SELECT id, to_json(events)::text AS events_json, to_json(extensions)::text AS extensions_json FROM webhook_endpoints WHERE enabled`)
 	if err != nil {
 		return err
 	}
 	var ids []int64
-	for rows.Next() {
-		var (
-			id        int64
-			evs, exts string
-			f         events.Filter
-		)
-		if err := rows.Scan(&id, &evs, &exts); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		_ = json.Unmarshal([]byte(evs), &f.Types)
-		_ = json.Unmarshal([]byte(exts), &f.Allowed)
+	for _, s := range scans {
+		var f events.Filter
+		_ = json.Unmarshal([]byte(s.EventsJSON), &f.Types)
+		_ = json.Unmarshal([]byte(s.ExtensionsJSON), &f.Allowed)
 		if len(f.Allowed) == 0 {
 			f.Allowed = nil // an empty filter is every extension
 		}
 		if f.Matches(e.Event) {
-			ids = append(ids, id)
+			ids = append(ids, s.ID)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
-	}
-	_ = rows.Close()
 	for _, id := range ids {
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := momo.Exec(ctx, q, `
 			INSERT INTO webhook_deliveries (endpoint_id, event_id, event_type, status, next_attempt_at)
-			VALUES ($1, $2, $3, 'pending', now())
-			ON CONFLICT (endpoint_id, event_id) DO NOTHING`, id, e.ID, e.Type); err != nil {
+			VALUES (@endpoint_id, @event_id, @event_type, 'pending', now())
+			ON CONFLICT (endpoint_id, event_id) DO NOTHING`,
+			momo.Named("endpoint_id", id), momo.Named("event_id", e.ID), momo.Named("event_type", e.Type)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// claimScan is a leased delivery with what sending it needs.
+type claimScan struct {
+	ID                    int64      `momo:"column:id"`
+	EndpointID            int64      `momo:"column:endpoint_id"`
+	EventID               string     `momo:"column:event_id"`
+	EventType             string     `momo:"column:event_type"`
+	Status                string     `momo:"column:status"`
+	Attempt               int        `momo:"column:attempt"`
+	SeriesAttempt         int        `momo:"column:series_attempt"`
+	URL                   string     `momo:"column:url"`
+	AllowPrivate          bool       `momo:"column:allow_private"`
+	IncludePeer           bool       `momo:"column:include_peer"`
+	IncludeMessageBody    bool       `momo:"column:include_message_body"`
+	SecretEnc             []byte     `momo:"column:secret_enc"`
+	PreviousSecretEnc     []byte     `momo:"column:previous_secret_enc"`
+	PreviousSecretExpires *time.Time `momo:"column:previous_secret_expires"`
+	Payload               *string    `momo:"column:payload"`
+}
+
 // Claim implements Store.
 func (p *PG) Claim(ctx context.Context, now time.Time, limit, perEndpoint int, lease time.Duration) ([]Claim, error) {
 	var out []Claim
-	err := p.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(claimLock)); err != nil {
+	err := p.tx(ctx, func(tx *momo.Tx) error {
+		if err := advisory.XactLock(ctx, tx, claimLock); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `
+		ids, err := momo.Scalars[int64](ctx, tx, `
 			WITH busy AS (
-				SELECT endpoint_id, count(*) AS n FROM webhook_deliveries WHERE claimed_until > $1 GROUP BY endpoint_id
+				SELECT endpoint_id, count(*) AS n FROM webhook_deliveries WHERE claimed_until > @now GROUP BY endpoint_id
 			), due AS (
 				SELECT d.id, d.endpoint_id, d.next_attempt_at,
 					row_number() OVER (PARTITION BY d.endpoint_id ORDER BY d.next_attempt_at, d.id) AS rn
 				FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id = d.endpoint_id
-				WHERE e.enabled AND d.status IN ('pending', 'retrying') AND d.next_attempt_at <= $1
-					AND (d.claimed_until IS NULL OR d.claimed_until <= $1)
+				WHERE e.enabled AND d.status IN ('pending', 'retrying') AND d.next_attempt_at <= @now
+					AND (d.claimed_until IS NULL OR d.claimed_until <= @now)
 			)
 			SELECT due.id FROM due LEFT JOIN busy ON busy.endpoint_id = due.endpoint_id
-			WHERE due.rn <= $2::bigint - COALESCE(busy.n, 0)
-			ORDER BY due.next_attempt_at, due.id LIMIT $3`, now, perEndpoint, limit)
-		if err != nil {
+			WHERE due.rn <= @per_endpoint::bigint - COALESCE(busy.n, 0)
+			ORDER BY due.next_attempt_at, due.id LIMIT @limit`,
+			momo.Named("now", now), momo.Named("per_endpoint", perEndpoint), momo.Named("limit", limit))
+		if err != nil || len(ids) == 0 {
 			return err
-		}
-		var ids []int64
-		for rows.Next() {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			ids = append(ids, id)
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		_ = rows.Close()
-		if len(ids) == 0 {
-			return nil
 		}
 		// Lease the rows another transaction is not changing right now.
-		rows, err = tx.QueryContext(ctx, `
-			UPDATE webhook_deliveries SET claimed_until = $2
-			WHERE id IN (SELECT id FROM webhook_deliveries WHERE id = ANY($1::bigint[]) AND status IN ('pending', 'retrying') FOR UPDATE SKIP LOCKED)
-			RETURNING id`, idArray(ids), now.Add(lease))
-		if err != nil {
+		ids, err = momo.Scalars[int64](ctx, tx, `
+			UPDATE webhook_deliveries SET claimed_until = @claimed_until
+			WHERE id IN (SELECT id FROM webhook_deliveries WHERE id = ANY(@ids::bigint[]) AND status IN ('pending', 'retrying') FOR UPDATE SKIP LOCKED)
+			RETURNING id`, momo.Named("ids", idArray(ids)), momo.Named("claimed_until", now.Add(lease)))
+		if err != nil || len(ids) == 0 {
 			return err
 		}
-		ids = ids[:0]
-		for rows.Next() {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			ids = append(ids, id)
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		_ = rows.Close()
-		if len(ids) == 0 {
-			return nil
-		}
-		rows, err = tx.QueryContext(ctx, `
+		scans, err := momo.Query[claimScan](ctx, tx, `
 			SELECT d.id, d.endpoint_id, d.event_id, d.event_type, d.status, d.attempt, d.series_attempt,
 				e.url, e.allow_private, e.include_peer, e.include_message_body, e.secret_enc, e.previous_secret_enc,
-				e.previous_secret_expires, ev.payload::text
+				e.previous_secret_expires, ev.payload::text AS payload
 			FROM webhook_deliveries d
 			JOIN webhook_endpoints e ON e.id = d.endpoint_id
 			LEFT JOIN integration_events ev ON ev.id = d.event_id
-			WHERE d.id = ANY($1::bigint[]) ORDER BY d.next_attempt_at, d.id`, idArray(ids))
+			WHERE d.id = ANY(@ids::bigint[]) ORDER BY d.next_attempt_at, d.id`, momo.Named("ids", idArray(ids)))
 		if err != nil {
 			return err
 		}
-		defer func() { _ = rows.Close() }()
-		for rows.Next() {
-			var (
-				c       Claim
-				prevExp sql.NullTime
-				payload sql.NullString
-			)
-			if err := rows.Scan(&c.ID, &c.EndpointID, &c.EventID, &c.EventType, &c.Status, &c.Attempts, &c.SeriesAttempt,
-				&c.URL, &c.AllowPrivate, &c.IncludePeer, &c.IncludeMessageBody, &c.SecretEnc, &c.PreviousSecretEnc, &prevExp, &payload); err != nil {
-				return err
-			}
-			c.PreviousSecretExpires = timePtr(prevExp)
-			if payload.Valid {
-				c.Payload = []byte(payload.String)
+		for _, s := range scans {
+			c := Claim{Delivery: Delivery{ID: s.ID, EndpointID: s.EndpointID, EventID: s.EventID, EventType: s.EventType,
+				Status: s.Status, Attempts: s.Attempt}, SeriesAttempt: s.SeriesAttempt, URL: s.URL, AllowPrivate: s.AllowPrivate,
+				IncludePeer: s.IncludePeer, IncludeMessageBody: s.IncludeMessageBody, SecretEnc: s.SecretEnc,
+				PreviousSecretEnc: s.PreviousSecretEnc, PreviousSecretExpires: s.PreviousSecretExpires}
+			if s.Payload != nil {
+				c.Payload = []byte(*s.Payload)
 			}
 			out = append(out, c)
 		}
-		return rows.Err()
+		return nil
 	})
 	return out, err
 }
@@ -430,7 +445,7 @@ func (p *PG) Claim(ctx context.Context, now time.Time, limit, perEndpoint int, l
 // Finish implements Store.
 func (p *PG) Finish(ctx context.Context, f Finish) (FinishResult, error) {
 	var res FinishResult
-	err := p.tx(ctx, func(tx *sql.Tx) error {
+	err := p.tx(ctx, func(tx *momo.Tx) error {
 		status, next := StatusSucceeded, f.Now
 		switch f.Outcome {
 		case OutcomeRetry:
@@ -438,44 +453,46 @@ func (p *PG) Finish(ctx context.Context, f Finish) (FinishResult, error) {
 		case OutcomeDead, OutcomeGone:
 			status = StatusDead
 		}
-		var (
-			endpointID int64
-			attempt    int
-			code       any
-		)
+		var code any
 		if f.Status != 0 {
 			code = f.Status
 		}
-		err := tx.QueryRowContext(ctx, `
-			UPDATE webhook_deliveries SET status = $2::text, attempt = attempt + 1, series_attempt = series_attempt + 1,
-				next_attempt_at = $3, claimed_until = NULL, last_status = $4, last_error = $5, last_latency_ms = $6,
-				delivered_at = CASE WHEN $2::text = 'succeeded' THEN $7::timestamptz ELSE delivered_at END, updated_at = $7
-			WHERE id = $1 RETURNING endpoint_id, attempt`,
-			f.DeliveryID, status, next, code, f.Error, f.LatencyMs, f.Now).Scan(&endpointID, &attempt)
+		d, err := one(momo.Query[momo.Row2[int64, int]](ctx, tx, `
+			UPDATE webhook_deliveries SET status = @status::text, attempt = attempt + 1, series_attempt = series_attempt + 1,
+				next_attempt_at = @next_attempt_at, claimed_until = NULL, last_status = @last_status, last_error = @last_error,
+				last_latency_ms = @last_latency_ms,
+				delivered_at = CASE WHEN @status::text = 'succeeded' THEN @now::timestamptz ELSE delivered_at END, updated_at = @now
+			WHERE id = @id RETURNING endpoint_id, attempt`,
+			momo.Named("id", f.DeliveryID), momo.Named("status", status), momo.Named("next_attempt_at", next), momo.Named("last_status", code),
+			momo.Named("last_error", f.Error), momo.Named("last_latency_ms", f.LatencyMs), momo.Named("now", f.Now)))
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `
+		endpointID, attempt := d.C1, d.C2
+		if _, err := momo.Exec(ctx, tx, `
 			INSERT INTO webhook_attempts (delivery_id, attempt, delivery_ref, at, http_status, error, latency_ms)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)`, f.DeliveryID, attempt, f.Ref, f.Now, code, f.Error, f.LatencyMs); err != nil {
+			VALUES (@delivery_id, @attempt, @delivery_ref, @at, @http_status, @error, @latency_ms)`,
+			momo.Named("delivery_id", f.DeliveryID), momo.Named("attempt", attempt), momo.Named("delivery_ref", f.Ref), momo.Named("at", f.Now),
+			momo.Named("http_status", code), momo.Named("error", f.Error), momo.Named("latency_ms", f.LatencyMs)); err != nil {
 			return err
 		}
 		if f.Internal {
 			return nil
 		}
 		if f.Outcome == OutcomeSuccess {
-			_, err := tx.ExecContext(ctx, `
-				UPDATE webhook_endpoints SET consecutive_failures = 0, last_success_at = $2, last_status = $3 WHERE id = $1`,
-				endpointID, f.Now, code)
+			_, err := momo.Exec(ctx, tx, `
+				UPDATE webhook_endpoints SET consecutive_failures = 0, last_success_at = @now, last_status = @last_status WHERE id = @id`,
+				momo.Named("id", endpointID), momo.Named("now", f.Now), momo.Named("last_status", code))
 			return err
 		}
-		var failures int
-		var enabled bool
-		if err := tx.QueryRowContext(ctx, `
-			UPDATE webhook_endpoints SET consecutive_failures = consecutive_failures + 1, last_failure_at = $2, last_status = $3
-			WHERE id = $1 RETURNING consecutive_failures, enabled`, endpointID, f.Now, code).Scan(&failures, &enabled); err != nil {
+		ep, err := one(momo.Query[momo.Row2[int, bool]](ctx, tx, `
+			UPDATE webhook_endpoints SET consecutive_failures = consecutive_failures + 1, last_failure_at = @now, last_status = @last_status
+			WHERE id = @id RETURNING consecutive_failures, enabled`,
+			momo.Named("id", endpointID), momo.Named("now", f.Now), momo.Named("last_status", code)))
+		if err != nil {
 			return err
 		}
+		failures, enabled := ep.C1, ep.C2
 		reason := ""
 		switch {
 		case f.Outcome == OutcomeGone:
@@ -486,18 +503,18 @@ func (p *PG) Finish(ctx context.Context, f Finish) (FinishResult, error) {
 		if reason == "" || !enabled {
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE webhook_endpoints SET enabled = false, disabled_reason = $2, updated_at = now() WHERE id = $1`,
-			endpointID, reason); err != nil {
+		if _, err := momo.Exec(ctx, tx, `UPDATE webhook_endpoints SET enabled = false, disabled_reason = @reason, updated_at = now() WHERE id = @id`,
+			momo.Named("id", endpointID), momo.Named("reason", reason)); err != nil {
 			return err
 		}
 		if err := audit(ctx, tx, "system:webhooks", "disable", "webhook_endpoint", strconv.FormatInt(endpointID, 10)); err != nil {
 			return err
 		}
-		ep, err := scanEndpoint(tx.QueryRowContext(ctx, `SELECT `+endpointCols+` FROM webhook_endpoints e WHERE e.id = $1`, endpointID))
+		got, err := getEndpoint(ctx, tx, endpointID)
 		if err != nil {
 			return err
 		}
-		res = FinishResult{Disabled: true, Reason: reason, Endpoint: ep}
+		res = FinishResult{Disabled: true, Reason: reason, Endpoint: got}
 		return nil
 	})
 	return res, err
@@ -506,30 +523,32 @@ func (p *PG) Finish(ctx context.Context, f Finish) (FinishResult, error) {
 const deliveryCols = `d.id, d.endpoint_id, d.event_id, d.event_type, d.status, d.attempt, d.next_attempt_at, d.last_status, d.last_error,
 	d.last_latency_ms, d.delivered_at, d.created_at, d.updated_at`
 
-func scanDelivery(r rowScanner) (Delivery, error) {
-	var (
-		d          Delivery
-		next       time.Time
-		last, lat  sql.NullInt64
-		deliveredA sql.NullTime
-	)
-	if err := r.Scan(&d.ID, &d.EndpointID, &d.EventID, &d.EventType, &d.Status, &d.Attempts, &next, &last, &d.LastError,
-		&lat, &deliveredA, &d.CreatedAt, &d.UpdatedAt); err != nil {
-		return Delivery{}, err
-	}
+// deliveryScan is a deliveryCols row.
+type deliveryScan struct {
+	ID            int64      `momo:"column:id"`
+	EndpointID    int64      `momo:"column:endpoint_id"`
+	EventID       string     `momo:"column:event_id"`
+	EventType     string     `momo:"column:event_type"`
+	Status        string     `momo:"column:status"`
+	Attempt       int        `momo:"column:attempt"`
+	NextAttemptAt time.Time  `momo:"column:next_attempt_at"`
+	LastStatus    *int       `momo:"column:last_status"`
+	LastError     string     `momo:"column:last_error"`
+	LastLatencyMs *int       `momo:"column:last_latency_ms"`
+	DeliveredAt   *time.Time `momo:"column:delivered_at"`
+	CreatedAt     time.Time  `momo:"column:created_at"`
+	UpdatedAt     time.Time  `momo:"column:updated_at"`
+}
+
+func (s deliveryScan) delivery() Delivery {
+	d := Delivery{ID: s.ID, EndpointID: s.EndpointID, EventID: s.EventID, EventType: s.EventType, Status: s.Status, Attempts: s.Attempt,
+		LastStatus: s.LastStatus, LastError: s.LastError, LastLatencyMs: s.LastLatencyMs, DeliveredAt: s.DeliveredAt,
+		CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt}
 	if d.Status == StatusPending || d.Status == StatusRetrying {
+		next := s.NextAttemptAt
 		d.NextAttemptAt = &next
 	}
-	if last.Valid {
-		v := int(last.Int64)
-		d.LastStatus = &v
-	}
-	if lat.Valid {
-		v := int(lat.Int64)
-		d.LastLatencyMs = &v
-	}
-	d.DeliveredAt = timePtr(deliveredA)
-	return d, nil
+	return d
 }
 
 // ListDeliveries implements Store.
@@ -538,18 +557,17 @@ func (p *PG) ListDeliveries(ctx context.Context, q DeliveryQuery) ([]Delivery, e
 		where []string
 		args  []any
 	)
-	arg := func(v any) string {
-		args = append(args, v)
-		return "$" + strconv.Itoa(len(args))
-	}
 	if q.EndpointID != 0 {
-		where = append(where, "d.endpoint_id = "+arg(q.EndpointID))
+		where = append(where, "d.endpoint_id = @endpoint_id")
+		args = append(args, momo.Named("endpoint_id", q.EndpointID))
 	}
 	if q.Status != "" {
-		where = append(where, "d.status = "+arg(q.Status))
+		where = append(where, "d.status = @status")
+		args = append(args, momo.Named("status", q.Status))
 	}
 	if q.Before != 0 {
-		where = append(where, "d.id < "+arg(q.Before))
+		where = append(where, "d.id < @before")
+		args = append(args, momo.Named("before", q.Before))
 	}
 	text := `SELECT ` + deliveryCols + ` FROM webhook_deliveries d`
 	if len(where) > 0 {
@@ -559,72 +577,66 @@ func (p *PG) ListDeliveries(ctx context.Context, q DeliveryQuery) ([]Delivery, e
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	//nolint:gosec // G202: only fixed fragments and $n placeholders are joined; every value is bound.
-	text += " ORDER BY d.id DESC LIMIT " + arg(limit)
-	rows, err := p.DB.QueryContext(ctx, text, args...)
+	text += " ORDER BY d.id DESC LIMIT @limit"
+	args = append(args, momo.Named("limit", limit))
+	scans, err := momo.Query[deliveryScan](ctx, p.DB, text, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := []Delivery{}
-	for rows.Next() {
-		d, err := scanDelivery(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, d)
+	out := make([]Delivery, 0, len(scans))
+	for _, s := range scans {
+		out = append(out, s.delivery())
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// attemptScan is a webhook_attempts row.
+type attemptScan struct {
+	Attempt     int       `momo:"column:attempt"`
+	DeliveryRef string    `momo:"column:delivery_ref"`
+	At          time.Time `momo:"column:at"`
+	HTTPStatus  *int      `momo:"column:http_status"`
+	Error       string    `momo:"column:error"`
+	LatencyMs   int       `momo:"column:latency_ms"`
 }
 
 // GetDelivery implements Store.
 func (p *PG) GetDelivery(ctx context.Context, id int64) (DeliveryDetail, error) {
-	d, err := scanDelivery(p.DB.QueryRowContext(ctx, `SELECT `+deliveryCols+` FROM webhook_deliveries d WHERE d.id = $1`, id))
+	s, err := one(momo.Query[deliveryScan](ctx, p.DB, `SELECT `+deliveryCols+` FROM webhook_deliveries d WHERE d.id = @id`, momo.Named("id", id)))
 	if err != nil {
 		return DeliveryDetail{}, mapErr(err)
 	}
+	d := s.delivery()
 	out := DeliveryDetail{Delivery: d, Log: []Attempt{}}
-	var payload sql.NullString
-	if err := p.DB.QueryRowContext(ctx, `SELECT payload::text FROM integration_events WHERE id = $1`, d.EventID).Scan(&payload); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	payload, err := one(momo.Scalars[sql.NullString](ctx, p.DB, `SELECT payload::text FROM integration_events WHERE id = @id`, momo.Named("id", d.EventID)))
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return DeliveryDetail{}, err
 	}
 	if payload.Valid {
 		out.Event = []byte(payload.String)
 	}
-	rows, err := p.DB.QueryContext(ctx, `SELECT attempt, delivery_ref, at, http_status, error, latency_ms FROM webhook_attempts WHERE delivery_id = $1 ORDER BY attempt`, id)
+	attempts, err := momo.Query[attemptScan](ctx, p.DB,
+		`SELECT attempt, delivery_ref, at, http_status, error, latency_ms FROM webhook_attempts WHERE delivery_id = @id ORDER BY attempt`,
+		momo.Named("id", id))
 	if err != nil {
 		return DeliveryDetail{}, err
 	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var (
-			a    Attempt
-			code sql.NullInt64
-		)
-		if err := rows.Scan(&a.Attempt, &a.Ref, &a.At, &code, &a.Error, &a.LatencyMs); err != nil {
-			return DeliveryDetail{}, err
-		}
-		if code.Valid {
-			v := int(code.Int64)
-			a.Status = &v
-		}
-		out.Log = append(out.Log, a)
+	for _, a := range attempts {
+		out.Log = append(out.Log, Attempt{Attempt: a.Attempt, Ref: a.DeliveryRef, At: a.At, Status: a.HTTPStatus, Error: a.Error, LatencyMs: a.LatencyMs})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // Redeliver implements Store.
 func (p *PG) Redeliver(ctx context.Context, actor string, id int64, now time.Time) (Delivery, error) {
 	var out Delivery
-	err := p.tx(ctx, func(tx *sql.Tx) error {
-		row := tx.QueryRowContext(ctx, `
-			UPDATE webhook_deliveries d SET status = 'pending', series_attempt = 0, next_attempt_at = $2, claimed_until = NULL, updated_at = $2
-			WHERE d.id = $1 AND (d.claimed_until IS NULL OR d.claimed_until <= $2)
-			RETURNING `+deliveryCols, id, now)
-		d, err := scanDelivery(row)
+	err := p.tx(ctx, func(tx *momo.Tx) error {
+		s, err := one(momo.Query[deliveryScan](ctx, tx, `
+			UPDATE webhook_deliveries d SET status = 'pending', series_attempt = 0, next_attempt_at = @now, claimed_until = NULL, updated_at = @now
+			WHERE d.id = @id AND (d.claimed_until IS NULL OR d.claimed_until <= @now)
+			RETURNING `+deliveryCols, momo.Named("id", id), momo.Named("now", now)))
 		if errors.Is(err, sql.ErrNoRows) {
-			var one int
-			if e2 := tx.QueryRowContext(ctx, `SELECT 1 FROM webhook_deliveries WHERE id = $1`, id).Scan(&one); e2 == nil {
+			if found, e2 := momo.Scalars[int](ctx, tx, `SELECT 1 FROM webhook_deliveries WHERE id = @id`, momo.Named("id", id)); e2 == nil && len(found) > 0 {
 				return ErrInFlight
 			}
 			return sql.ErrNoRows
@@ -632,7 +644,7 @@ func (p *PG) Redeliver(ctx context.Context, actor string, id int64, now time.Tim
 		if err != nil {
 			return err
 		}
-		out = d
+		out = s.delivery()
 		return audit(ctx, tx, actor, "redeliver", "webhook_delivery", strconv.FormatInt(id, 10))
 	})
 	return out, err
@@ -641,14 +653,14 @@ func (p *PG) Redeliver(ctx context.Context, actor string, id int64, now time.Tim
 // RedeliverDead implements Store.
 func (p *PG) RedeliverDead(ctx context.Context, actor string, endpointID int64, now time.Time) (int64, error) {
 	var n int64
-	err := p.tx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `
-			UPDATE webhook_deliveries SET status = 'pending', series_attempt = 0, next_attempt_at = $2, claimed_until = NULL, updated_at = $2
-			WHERE endpoint_id = $1 AND status = 'dead'`, endpointID, now)
+	err := p.tx(ctx, func(tx *momo.Tx) error {
+		var err error
+		n, err = momo.Exec(ctx, tx, `
+			UPDATE webhook_deliveries SET status = 'pending', series_attempt = 0, next_attempt_at = @now, claimed_until = NULL, updated_at = @now
+			WHERE endpoint_id = @endpoint_id AND status = 'dead'`, momo.Named("endpoint_id", endpointID), momo.Named("now", now))
 		if err != nil {
 			return err
 		}
-		n, _ = res.RowsAffected()
 		return audit(ctx, tx, actor, "redeliver-dead", "webhook_endpoint", strconv.FormatInt(endpointID, 10))
 	})
 	return n, err
@@ -657,39 +669,39 @@ func (p *PG) RedeliverDead(ctx context.Context, actor string, endpointID int64, 
 // Purge implements Store. An event is kept while a delivery that is not
 // finished depends on it (events.Service's purge checks the same).
 func (p *PG) Purge(ctx context.Context, succeededBefore, deadBefore time.Time, deadCap int) (PurgeResult, error) {
-	var r PurgeResult
-	res, err := p.DB.ExecContext(ctx, `DELETE FROM webhook_deliveries WHERE status = 'succeeded' AND updated_at < $1`, succeededBefore)
-	if err != nil {
-		return r, err
+	var (
+		r   PurgeResult
+		err error
+	)
+	if r.Succeeded, err = momo.Exec(ctx, p.DB, `DELETE FROM webhook_deliveries WHERE status = 'succeeded' AND updated_at < @before`,
+		momo.Named("before", succeededBefore)); err != nil {
+		return PurgeResult{}, err
 	}
-	r.Succeeded, _ = res.RowsAffected()
-	if res, err = p.DB.ExecContext(ctx, `DELETE FROM webhook_deliveries WHERE status = 'dead' AND updated_at < $1`, deadBefore); err != nil {
-		return r, err
+	if r.Dead, err = momo.Exec(ctx, p.DB, `DELETE FROM webhook_deliveries WHERE status = 'dead' AND updated_at < @before`,
+		momo.Named("before", deadBefore)); err != nil {
+		return PurgeResult{Succeeded: r.Succeeded}, err
 	}
-	r.Dead, _ = res.RowsAffected()
 	if deadCap > 0 {
-		if res, err = p.DB.ExecContext(ctx, `
+		if r.Dropped, err = momo.Exec(ctx, p.DB, `
 			DELETE FROM webhook_deliveries WHERE id IN (
 				SELECT id FROM (
 					SELECT id, row_number() OVER (PARTITION BY endpoint_id ORDER BY updated_at DESC, id DESC) AS rn
 					FROM webhook_deliveries WHERE status = 'dead') x
-				WHERE x.rn > $1)`, deadCap); err != nil {
-			return r, err
+				WHERE x.rn > @cap)`, momo.Named("cap", deadCap)); err != nil {
+			return PurgeResult{Succeeded: r.Succeeded, Dead: r.Dead}, err
 		}
-		r.Dropped, _ = res.RowsAffected()
 	}
 	return r, nil
 }
 
 // Counts implements Store.
 func (p *PG) Counts(ctx context.Context) (Counts, error) {
-	var c Counts
-	err := p.DB.QueryRowContext(ctx, `
+	c, err := one(momo.Query[momo.Row3[int64, int64, int64]](ctx, p.DB, `
 		SELECT
 			(SELECT count(*) FROM webhook_deliveries WHERE status IN ('pending', 'retrying')),
 			(SELECT count(*) FROM webhook_deliveries WHERE status = 'dead'),
-			(SELECT count(*) FROM webhook_endpoints WHERE NOT enabled)`).Scan(&c.Pending, &c.Dead, &c.DisabledEndpoints)
-	return c, err
+			(SELECT count(*) FROM webhook_endpoints WHERE NOT enabled)`))
+	return Counts{Pending: c.C1, Dead: c.C2, DisabledEndpoints: c.C3}, err
 }
 
 var _ Store = (*PG)(nil)

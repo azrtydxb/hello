@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -66,7 +69,7 @@ func newPipeline(t *testing.T) *pipeline {
 	if err := vk.Do(ctx, vk.B().Flushdb().Build()).Error(); err != nil {
 		t.Fatal(err)
 	}
-	svc := &Service{DB: db, Valkey: func() valkey.Client { return vk }, Consumer: "test-1", Log: slog.New(slog.NewTextHandler(testLog{t}, nil)),
+	svc := &Service{DB: hellodb.New(db, slog.New(slog.DiscardHandler)), Valkey: func() valkey.Client { return vk }, Consumer: "test-1", Log: slog.New(slog.NewTextHandler(testLog{t}, nil)),
 		ClaimIdle: 200 * time.Millisecond, ClaimEvery: 100 * time.Millisecond}
 	return &pipeline{svc: svc, vk: vk, db: db, app: ValkeyAppender{C: vk}}
 }
@@ -566,5 +569,69 @@ func (p *pipeline) dump(t *testing.T) {
 	} {
 		m, err := p.vk.Do(context.Background(), p.vk.B().Arbitrary(args[0]).Args(args[1:]...).Build()).ToMessage()
 		t.Logf("%v: %v (err %v)", args, m.String(), err)
+	}
+}
+
+// TestIngestHooksShareTheTransaction fails if a hook is not handed the ingest
+// transaction (the event row it is called for must be visible to it), if a
+// hook's raw database/sql write or its momo write through internal/db.AdoptTx
+// is not committed with the event, or if a failing hook does not roll back
+// what the hooks before it wrote.
+func TestIngestHooksShareTheTransaction(t *testing.T) {
+	p := newPipeline(t)
+	ctx := context.Background()
+	m := hellodb.New(p.db, slog.New(slog.DiscardHandler))
+	var mu sync.Mutex
+	failOnce := true
+	var hookErr error
+	p.svc.Hooks = []TxHook{
+		func(ctx context.Context, tx *sql.Tx, e Entry) error {
+			var n int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM integration_events WHERE id = $1`, e.ID).Scan(&n); err != nil || n != 1 {
+				mu.Lock()
+				hookErr = fmt.Errorf("the hook does not see its event: %d, %w", n, err)
+				mu.Unlock()
+			}
+			_, err := tx.ExecContext(ctx, `INSERT INTO audit_events (actor, action, resource, resource_id) VALUES ('test', 'raw', 'event', $1)`, e.ID)
+			return err
+		},
+		func(ctx context.Context, tx *sql.Tx, e Entry) error {
+			_, err := momo.Exec(ctx, hellodb.AdoptTx(m, tx),
+				`INSERT INTO audit_events (actor, action, resource, resource_id) VALUES ('test', 'adopted', 'event', @id)`, momo.Named("id", e.ID))
+			return err
+		},
+		func(_ context.Context, _ *sql.Tx, e Entry) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if e.Data.Extension == "300" && failOnce {
+				failOnce = false
+				return fmt.Errorf("hook failed")
+			}
+			return nil
+		},
+	}
+	p.run(t)
+	p.emit(t, ev(CallRinging, "200"))
+	p.emit(t, ev(CallMissed, "300"))
+	p.waitStored(t, 2)
+	waitFor(t, "the failed batch to be retried", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return !failOnce
+	})
+	mu.Lock()
+	err := hookErr
+	mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"raw", "adopted"} {
+		var n int
+		if err := p.db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE actor = 'test' AND action = $1`, action).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 2 {
+			t.Fatalf("%d %s hook rows, want 2 (one per event; the failed attempt rolled back)", n, action)
+		}
 	}
 }

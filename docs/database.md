@@ -11,10 +11,10 @@ is no second connection pool. Statements are logged at debug level with the
 component `db`, and at warn when slower than `db.SlowQuery`; argument values
 are never logged.
 
-Moved so far: `internal/crm` (`crm.PG`), the CDR writer (`internal/cdr`),
+Moved so far: `internal/crm` (`crm.PG`) and the CDR writer (`internal/cdr`),
 which runs on hello-sip's pgx pool through `db.NewPool`, in the pool's own
-query execution mode, the directory sync store (`directory.PG`) and the SCIM
-store (`scim.PG`).
+query execution mode. `internal/webhook` (`webhook.PG`) takes its advisory
+locks through momo's `advisory` package with the same keys as before.
 
 ## Writing a statement
 
@@ -27,16 +27,8 @@ store (`scim.PG`).
   for positional tuples, or `momo.Scalars[V]` for one column. An empty
   result is an empty slice, not `sql.ErrNoRows`; map it to the package's
   not-found error yourself.
-- A wide row whose scan code already exists can keep it: `momo.RawRows`
-  returns a cursor whose `Scan` is `database/sql`'s, so the positional scan,
-  its NULL handling and conversions stay as they were (`internal/directory`
-  wraps it as `queryRow`, which returns `sql.ErrNoRows` on no row, and
-  `queryEach`).
 - A statement inside a transaction that raw `database/sql` code began runs
-  on `db.AdoptTx(m, tx)`; the caller still commits or rolls back. The other
-  way round, a momo transaction hands its `*sql.Tx` to code not moved yet
-  with `pgxdriver.UnwrapSQLTx` (`directory.PG` does for the configuration
-  store's provisioner); momo still commits it.
+  on `db.AdoptTx(m, tx)`; the caller still commits or rolls back.
 - Errors keep the driver's error inside: `errors.As(err, &*pgconn.PgError)`
   still works, and momo adds kinds such as `momo.ErrUniqueViolation`.
 - A statement worth freezing goes into a `momo.QueryRegistry` and a
@@ -46,10 +38,11 @@ store (`scim.PG`).
 - A test that runs every method on `momo.NewOffline(dialect.Postgres)` proves
   that each statement builds without a database (see
   `internal/crm/pg_offline_test.go`), so the pull request tier catches a
-  misspelled `@name`. The offline handle refuses BEGIN, so a store whose
-  statements sit in transactions runs its methods on a scripted driver
-  instead, which answers every statement that built without a server
-  (`internal/directory/pg_offline_test.go`).
+  misspelled `@name`. A package whose statements mostly run inside
+  transactions, which the offline handle stops at BEGIN, uses a recording
+  stub driver instead (`internal/webhook/pg_offline_test.go`): it answers
+  every statement with one row so each method runs down its longest path,
+  and it pins the advisory lock statements and keys.
 
 ## Models
 
