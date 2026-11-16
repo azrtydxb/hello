@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/fax"
 )
 
@@ -56,7 +58,7 @@ func (s *Store) ListFaxDestinations(ctx context.Context) ([]fax.Destination, err
 
 // GetFaxDestination returns one destination.
 func (s *Store) GetFaxDestination(ctx context.Context, id int64) (fax.Destination, error) {
-	d, err := scanFaxDest(s.db.QueryRowContext(ctx, `SELECT `+faxDestCols+faxDestFrom+` WHERE d.id = $1`, id))
+	d, err := scanFaxDest(s.db.QueryRowContext(ctx, `SELECT `+faxDestCols+faxDestFrom+` WHERE d.id = @id`, momo.Named("id", id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -65,7 +67,7 @@ func (s *Store) GetFaxDestination(ctx context.Context, id int64) (fax.Destinatio
 
 func extensionID(ctx context.Context, tx *dbTx, number string) (int64, error) {
 	var id int64
-	err := tx.QueryRowContext(ctx, `SELECT id FROM extensions WHERE number = $1`, number).Scan(&id)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM extensions WHERE number = @number`, momo.Named("number", number)).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, fieldError("extension", "extension "+number+" does not exist")
 	}
@@ -80,8 +82,8 @@ func (s *Store) CreateFaxDestination(ctx context.Context, actor string, in FaxDe
 		if err != nil {
 			return 0, err
 		}
-		err = tx.QueryRowContext(ctx, `INSERT INTO fax_destinations (name, extension_id, email) VALUES ($1, $2, $3) RETURNING id`,
-			in.Name, ext, in.Email).Scan(&id)
+		err = tx.QueryRowContext(ctx, `INSERT INTO fax_destinations (name, extension_id, email) VALUES (@name, @extension_id, @email) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("extension_id", ext), momo.Named("email", in.Email)).Scan(&id)
 		return id, err
 	})
 	if err != nil {
@@ -98,7 +100,8 @@ func (s *Store) UpdateFaxDestination(ctx context.Context, actor string, id int64
 		if err != nil {
 			return id, err
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE fax_destinations SET extension_id = $2, email = $3, updated_at = now() WHERE id = $1`, id, ext, in.Email)
+		res, err := tx.ExecContext(ctx, `UPDATE fax_destinations SET extension_id = @extension_id, email = @email, updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("extension_id", ext), momo.Named("email", in.Email))
 		if err != nil {
 			return id, err
 		}
@@ -110,11 +113,19 @@ func (s *Store) UpdateFaxDestination(ctx context.Context, actor string, id int64
 	return s.GetFaxDestination(ctx, id)
 }
 
+// The routes and IVR menus that name a fax destination (@name), which
+// DeleteFaxDestination refuses to leave dangling.
+const (
+	faxDestRoutes = `SELECT name FROM inbound_routes WHERE destination_kind = 'fax' AND destination = @name`
+	faxDestMenus  = `SELECT m.name FROM ivr_menus m WHERE (m.timeout_kind = 'fax' AND m.timeout_target = @name) OR (m.invalid_kind = 'fax' AND m.invalid_target = @name)
+				OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind = 'fax' AND o.dest_target = @name)`
+)
+
 // DeleteFaxDestination removes a destination no route and no IVR key names.
 func (s *Store) DeleteFaxDestination(ctx context.Context, actor string, id int64) error {
 	return s.configChange(ctx, actor, "delete", "fax_destination", nil, func(tx *dbTx) (int64, error) {
 		var name string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM fax_destinations WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM fax_destinations WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&name); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return id, ErrNotFound
 			}
@@ -122,11 +133,10 @@ func (s *Store) DeleteFaxDestination(ctx context.Context, actor string, id int64
 		}
 		var users []string
 		for _, q := range []struct{ what, sql string }{
-			{"inbound route", `SELECT name FROM inbound_routes WHERE destination_kind = 'fax' AND destination = $1`},
-			{"IVR menu", `SELECT m.name FROM ivr_menus m WHERE (m.timeout_kind = 'fax' AND m.timeout_target = $1) OR (m.invalid_kind = 'fax' AND m.invalid_target = $1)
-				OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind = 'fax' AND o.dest_target = $1)`},
+			{"inbound route", faxDestRoutes},
+			{"IVR menu", faxDestMenus},
 		} {
-			rows, err := tx.QueryContext(ctx, q.sql, name)
+			rows, err := tx.QueryContext(ctx, q.sql, momo.Named("name", name))
 			if err != nil {
 				return id, err
 			}
@@ -145,7 +155,7 @@ func (s *Store) DeleteFaxDestination(ctx context.Context, actor string, id int64
 		if len(users) > 0 {
 			return id, &InUseError{Msg: "fax destination " + name + " is used by " + strings.Join(users, ", ")}
 		}
-		_, err := tx.ExecContext(ctx, `DELETE FROM fax_destinations WHERE id = $1`, id)
+		_, err := tx.ExecContext(ctx, `DELETE FROM fax_destinations WHERE id = @id`, momo.Named("id", id))
 		return id, err
 	})
 }
@@ -189,21 +199,22 @@ func (s *Store) ListFaxes(ctx context.Context, fl fax.ListFilter) ([]fax.Fax, er
 		where []string
 		args  []any
 	)
-	add := func(cond string, v any) {
-		args = append(args, v)
-		where = append(where, fmt.Sprintf(cond, len(args)))
+	// Each condition binds its own @name, and its Named goes in with it.
+	add := func(cond string, arg any) {
+		where = append(where, cond)
+		args = append(args, arg)
 	}
 	if fl.Direction != "" {
-		add("f.direction = $%d", fl.Direction)
+		add("f.direction = @direction", momo.Named("direction", fl.Direction))
 	}
 	if fl.Status != "" {
-		add("f.status = $%d", fl.Status)
+		add("f.status = @status", momo.Named("status", fl.Status))
 	}
 	if fl.Before > 0 {
-		add("f.id < $%d", fl.Before)
+		add("f.id < @before", momo.Named("before", fl.Before))
 	}
 	if fl.Owners != nil {
-		add("f.owner_extension = ANY($%d::text[])", fl.Owners)
+		add("f.owner_extension = ANY(@owners::text[])", momo.Named("owners", fl.Owners))
 	}
 	limit := fl.Limit
 	if limit <= 0 || limit > 500 {
@@ -213,8 +224,8 @@ func (s *Store) ListFaxes(ctx context.Context, fl fax.ListFilter) ([]fax.Fax, er
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, " AND ")
 	}
-	args = append(args, limit)
-	q += fmt.Sprintf(` ORDER BY f.id DESC LIMIT $%d`, len(args)) //nolint:gosec // G202: only a placeholder number is formatted in; every value is an argument
+	args = append(args, momo.Named("limit", limit))
+	q += ` ORDER BY f.id DESC LIMIT @limit`
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -233,7 +244,7 @@ func (s *Store) ListFaxes(ctx context.Context, fl fax.ListFilter) ([]fax.Fax, er
 
 // GetFax returns one fax.
 func (s *Store) GetFax(ctx context.Context, id int64) (fax.Fax, error) {
-	f, err := scanFax(s.db.QueryRowContext(ctx, `SELECT `+faxCols+faxFrom+` WHERE f.id = $1`, id))
+	f, err := scanFax(s.db.QueryRowContext(ctx, `SELECT `+faxCols+faxFrom+` WHERE f.id = @id`, momo.Named("id", id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return f, ErrNotFound
 	}
@@ -254,7 +265,9 @@ type OutboundFax struct {
 func (s *Store) CreateOutboundFax(ctx context.Context, o OutboundFax) (fax.Fax, error) {
 	var id int64
 	if err := s.db.QueryRowContext(ctx, `INSERT INTO faxes (direction, status, peer_number, local_number, pages, created_by)
-		VALUES ('outbound', 'queued', $1, $2, $3, $4) RETURNING id`, o.Peer, o.CallerID, o.Pages, o.Actor).Scan(&id); err != nil {
+		VALUES ('outbound', 'queued', @peer_number, @local_number, @pages, @created_by) RETURNING id`,
+		momo.Named("peer_number", o.Peer), momo.Named("local_number", o.CallerID), momo.Named("pages", o.Pages),
+		momo.Named("created_by", o.Actor)).Scan(&id); err != nil {
 		return fax.Fax{}, err
 	}
 	if err := insertAudit(ctx, s.db, o.Actor, "create", "fax", fmt.Sprint(id)); err != nil {
@@ -265,7 +278,8 @@ func (s *Store) CreateOutboundFax(ctx context.Context, o OutboundFax) (fax.Fax, 
 
 // SetFaxObject records where a fax's PDF is stored.
 func (s *Store) SetFaxObject(ctx context.Context, id int64, key string) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE faxes SET object_key = $2 WHERE id = $1`, id, key)
+	res, err := s.db.ExecContext(ctx, `UPDATE faxes SET object_key = @object_key WHERE id = @id`,
+		momo.Named("id", id), momo.Named("object_key", key))
 	if err != nil {
 		return err
 	}
@@ -276,7 +290,7 @@ func (s *Store) SetFaxObject(ctx context.Context, id int64, key string) error {
 // which the caller deletes from storage. A queued fax is cancelled and removed.
 func (s *Store) DeleteFax(ctx context.Context, actor string, id int64) (string, error) {
 	var key string
-	err := s.db.QueryRowContext(ctx, `DELETE FROM faxes WHERE id = $1 AND status NOT IN ('sending', 'receiving') RETURNING object_key`, id).Scan(&key)
+	err := s.db.QueryRowContext(ctx, `DELETE FROM faxes WHERE id = @id AND status NOT IN ('sending', 'receiving') RETURNING object_key`, momo.Named("id", id)).Scan(&key)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, gerr := s.GetFax(ctx, id); gerr != nil {
 			return "", gerr
@@ -293,7 +307,7 @@ func (s *Store) DeleteFax(ctx context.Context, actor string, id int64) (string, 
 // at its node's next lease renewal.
 func (s *Store) CancelFax(ctx context.Context, actor string, id int64) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE faxes SET status = 'cancelled', result_text = 'cancelled', finished_at = now(),
-		claimed_by = '', lease_until = NULL WHERE id = $1 AND direction = 'outbound' AND status IN ('queued', 'sending')`, id)
+		claimed_by = '', lease_until = NULL WHERE id = @id AND direction = 'outbound' AND status IN ('queued', 'sending')`, momo.Named("id", id))
 	if err != nil {
 		return err
 	}
@@ -309,7 +323,7 @@ func (s *Store) CancelFax(ctx context.Context, actor string, id int64) error {
 // FaxOwnerExtensions returns the extension numbers a user account is linked
 // to: the faxes whose owner is among them are the user's.
 func (s *Store) FaxOwnerExtensions(ctx context.Context, userID int64) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT e.number FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id WHERE ue.user_id = $1`, userID)
+	rows, err := s.db.QueryContext(ctx, `SELECT e.number FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id WHERE ue.user_id = @user_id`, momo.Named("user_id", userID))
 	if err != nil {
 		return nil, err
 	}
@@ -344,8 +358,10 @@ func (f *Faxes) BeginReceive(ctx context.Context, in fax.Receive) (int64, error)
 	}
 	var id int64
 	err := f.db.QueryRowContext(ctx, `INSERT INTO faxes (direction, status, peer_number, local_number, destination_id, owner_extension, correlation_id)
-		VALUES ('inbound', 'receiving', $1, $2, $3, $4, $5) RETURNING id`,
-		trunc(in.PeerNumber, 40), trunc(in.LocalNumber, 40), dest, in.OwnerExtension, in.CorrelationID).Scan(&id)
+		VALUES ('inbound', 'receiving', @peer_number, @local_number, @destination_id, @owner_extension, @correlation_id) RETURNING id`,
+		momo.Named("peer_number", trunc(in.PeerNumber, 40)), momo.Named("local_number", trunc(in.LocalNumber, 40)),
+		momo.Named("destination_id", dest), momo.Named("owner_extension", in.OwnerExtension),
+		momo.Named("correlation_id", in.CorrelationID)).Scan(&id)
 	return id, err
 }
 
@@ -358,12 +374,14 @@ func trunc(s string, n int) string {
 
 // Finish implements fax.Store.
 func (f *Faxes) Finish(ctx context.Context, id int64, fin fax.Finish) error {
-	_, err := f.db.ExecContext(ctx, `UPDATE faxes SET status = $2, pages = $3, mode = $4, bit_rate = $5, result_code = $6,
-			result_text = $7, object_key = COALESCE(NULLIF($8, ''), object_key), mail_to = $9,
-			mail_status = CASE WHEN $9 <> '' AND $8 <> '' THEN 'pending' ELSE 'none' END, mail_next_at = now(),
+	_, err := f.db.ExecContext(ctx, `UPDATE faxes SET status = @status, pages = @pages, mode = @mode, bit_rate = @bit_rate, result_code = @result_code,
+			result_text = @result_text, object_key = COALESCE(NULLIF(@object_key::text, ''), object_key), mail_to = @mail_to,
+			mail_status = CASE WHEN @mail_to::text <> '' AND @object_key::text <> '' THEN 'pending' ELSE 'none' END, mail_next_at = now(),
 			finished_at = now(), claimed_by = '', lease_until = NULL
-		WHERE id = $1 AND status IN ('receiving', 'sending', 'queued')`,
-		id, fin.Status, fin.Pages, fin.Mode, fin.BitRate, fin.ResultCode, trunc(fin.ResultText, 200), fin.ObjectKey, fin.MailTo)
+		WHERE id = @id AND status IN ('receiving', 'sending', 'queued')`,
+		momo.Named("id", id), momo.Named("status", fin.Status), momo.Named("pages", fin.Pages), momo.Named("mode", fin.Mode),
+		momo.Named("bit_rate", fin.BitRate), momo.Named("result_code", fin.ResultCode),
+		momo.Named("result_text", trunc(fin.ResultText, 200)), momo.Named("object_key", fin.ObjectKey), momo.Named("mail_to", fin.MailTo))
 	return err
 }
 
@@ -372,17 +390,17 @@ func (f *Faxes) ClaimOutbound(ctx context.Context, node string, lease time.Durat
 	// A send whose node vanished, on its last attempt, is over.
 	if _, err := f.db.ExecContext(ctx, `UPDATE faxes SET status = 'failed', result_text = 'the sending node was lost',
 			finished_at = now(), claimed_by = '', lease_until = NULL
-		WHERE direction = 'outbound' AND status = 'sending' AND lease_until < now() AND attempts >= $1`, fax.MaxAttempts); err != nil {
+		WHERE direction = 'outbound' AND status = 'sending' AND lease_until < now() AND attempts >= @max_attempts`, momo.Named("max_attempts", fax.MaxAttempts)); err != nil {
 		return nil, err
 	}
 	// The claim is one UPDATE over rows locked with SKIP LOCKED; the rows are
 	// read afterwards, because a statement does not see its own changes.
-	idrows, err := f.db.QueryContext(ctx, `UPDATE faxes SET status = 'sending', claimed_by = $1,
-			lease_until = now() + make_interval(secs => $2), attempts = attempts + 1
+	idrows, err := f.db.QueryContext(ctx, `UPDATE faxes SET status = 'sending', claimed_by = @node,
+			lease_until = now() + make_interval(secs => @lease), attempts = attempts + 1
 		WHERE id IN (SELECT id FROM faxes WHERE direction = 'outbound' AND object_key <> ''
 				AND ((status = 'queued' AND next_attempt_at <= now()) OR (status = 'sending' AND lease_until < now()))
-			ORDER BY next_attempt_at, id LIMIT $3 FOR UPDATE SKIP LOCKED)
-		RETURNING id`, node, lease.Seconds(), limit)
+			ORDER BY next_attempt_at, id LIMIT @limit FOR UPDATE SKIP LOCKED)
+		RETURNING id`, momo.Named("node", node), momo.Named("lease", lease.Seconds()), momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +419,7 @@ func (f *Faxes) ClaimOutbound(ctx context.Context, node string, lease time.Durat
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := f.db.QueryContext(ctx, `SELECT `+faxCols+faxFrom+` WHERE f.id = ANY($1::bigint[]) ORDER BY f.id`, ids)
+	rows, err := f.db.QueryContext(ctx, `SELECT `+faxCols+faxFrom+` WHERE f.id = ANY(@ids::bigint[]) ORDER BY f.id`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -419,8 +437,8 @@ func (f *Faxes) ClaimOutbound(ctx context.Context, node string, lease time.Durat
 
 // Renew implements fax.Store.
 func (f *Faxes) Renew(ctx context.Context, id int64, node string, lease time.Duration) (bool, error) {
-	res, err := f.db.ExecContext(ctx, `UPDATE faxes SET lease_until = now() + make_interval(secs => $3)
-		WHERE id = $1 AND claimed_by = $2 AND status = 'sending'`, id, node, lease.Seconds())
+	res, err := f.db.ExecContext(ctx, `UPDATE faxes SET lease_until = now() + make_interval(secs => @lease)
+		WHERE id = @id AND claimed_by = @node AND status = 'sending'`, momo.Named("id", id), momo.Named("node", node), momo.Named("lease", lease.Seconds()))
 	if err != nil {
 		return false, err
 	}
@@ -430,15 +448,16 @@ func (f *Faxes) Renew(ctx context.Context, id int64, node string, lease time.Dur
 
 // Retry implements fax.Store.
 func (f *Faxes) Retry(ctx context.Context, id int64, after time.Duration, text string) error {
-	_, err := f.db.ExecContext(ctx, `UPDATE faxes SET status = 'queued', next_attempt_at = now() + make_interval(secs => $2),
-			result_text = $3, claimed_by = '', lease_until = NULL
-		WHERE id = $1 AND status = 'sending'`, id, after.Seconds(), trunc(text, 200))
+	_, err := f.db.ExecContext(ctx, `UPDATE faxes SET status = 'queued', next_attempt_at = now() + make_interval(secs => @after),
+			result_text = @result_text, claimed_by = '', lease_until = NULL
+		WHERE id = @id AND status = 'sending'`, momo.Named("id", id), momo.Named("after", after.Seconds()), momo.Named("result_text", trunc(text, 200)))
 	return err
 }
 
 // Link implements fax.Store.
 func (f *Faxes) Link(ctx context.Context, id int64, correlationID string) error {
-	_, err := f.db.ExecContext(ctx, `UPDATE faxes SET correlation_id = $2 WHERE id = $1`, id, correlationID)
+	_, err := f.db.ExecContext(ctx, `UPDATE faxes SET correlation_id = @correlation_id WHERE id = @id`,
+		momo.Named("id", id), momo.Named("correlation_id", correlationID))
 	return err
 }
 
@@ -449,12 +468,13 @@ func (f *Faxes) Link(ctx context.Context, id int64, correlationID string) error 
 // destination's address, or the enabled users linked to the owner extension.
 func (s *Store) ClaimFaxMail(ctx context.Context, limit int, stale time.Duration) ([]fax.MailJob, error) {
 	rows, err := s.db.QueryContext(ctx, `WITH c AS (
-			UPDATE faxes SET mail_status = 'sending', mail_attempts = mail_attempts + 1, mail_next_at = now() + make_interval(secs => $2)
+			UPDATE faxes SET mail_status = 'sending', mail_attempts = mail_attempts + 1, mail_next_at = now() + make_interval(secs => @stale)
 			WHERE id IN (SELECT id FROM faxes WHERE (mail_status = 'pending' AND mail_next_at <= now())
 					OR (mail_status = 'sending' AND mail_next_at <= now())
-				ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED)
+				ORDER BY id LIMIT @limit FOR UPDATE SKIP LOCKED)
 			RETURNING id, mail_to, peer_number, pages, created_at, object_key, mail_attempts, owner_extension)
-		SELECT id, mail_to, peer_number, pages, created_at, object_key, mail_attempts, owner_extension FROM c ORDER BY id`, limit, stale.Seconds())
+		SELECT id, mail_to, peer_number, pages, created_at, object_key, mail_attempts, owner_extension FROM c ORDER BY id`,
+		momo.Named("limit", limit), momo.Named("stale", stale.Seconds()))
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +500,7 @@ func (s *Store) ClaimFaxMail(ctx context.Context, limit int, stale time.Duration
 		}
 		urows, err := s.db.QueryContext(ctx, `SELECT DISTINCT u.email FROM users u
 			JOIN user_extensions ue ON ue.user_id = u.id JOIN extensions e ON e.id = ue.extension_id
-			WHERE e.number = $1 AND u.enabled AND u.email <> '' ORDER BY u.email`, out[i].Owner)
+			WHERE e.number = @number AND u.enabled AND u.email <> '' ORDER BY u.email`, momo.Named("number", out[i].Owner))
 		if err != nil {
 			return nil, err
 		}
@@ -504,13 +524,15 @@ func (s *Store) ClaimFaxMail(ctx context.Context, limit int, stale time.Duration
 func (s *Store) FinishFaxMail(ctx context.Context, id int64, errText string, final bool, retryAt time.Time) error {
 	switch {
 	case errText == "":
-		_, err := s.db.ExecContext(ctx, `UPDATE faxes SET mail_status = 'sent', mail_error = '' WHERE id = $1`, id)
+		_, err := s.db.ExecContext(ctx, `UPDATE faxes SET mail_status = 'sent', mail_error = '' WHERE id = @id`, momo.Named("id", id))
 		return err
 	case final:
-		_, err := s.db.ExecContext(ctx, `UPDATE faxes SET mail_status = 'failed', mail_error = $2 WHERE id = $1`, id, trunc(errText, 200))
+		_, err := s.db.ExecContext(ctx, `UPDATE faxes SET mail_status = 'failed', mail_error = @mail_error WHERE id = @id`,
+			momo.Named("id", id), momo.Named("mail_error", trunc(errText, 200)))
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE faxes SET mail_status = 'pending', mail_next_at = $3, mail_error = $2 WHERE id = $1`, id, trunc(errText, 200), retryAt)
+	_, err := s.db.ExecContext(ctx, `UPDATE faxes SET mail_status = 'pending', mail_next_at = @mail_next_at, mail_error = @mail_error WHERE id = @id`,
+		momo.Named("id", id), momo.Named("mail_error", trunc(errText, 200)), momo.Named("mail_next_at", retryAt))
 	return err
 }
 
@@ -520,8 +542,8 @@ func (s *Store) FinishFaxMail(ctx context.Context, id int64, errText string, fin
 // object keys, oldest first. The caller deletes the objects, then the rows.
 func (s *Store) ExpiredFaxes(ctx context.Context, days, limit int) (ids []int64, keys []string, err error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, object_key FROM faxes
-		WHERE status NOT IN ('queued', 'sending', 'receiving') AND created_at < now() - make_interval(days => $1)
-		ORDER BY id LIMIT $2`, days, limit)
+		WHERE status NOT IN ('queued', 'sending', 'receiving') AND created_at < now() - make_interval(days => @days)
+		ORDER BY id LIMIT @limit`, momo.Named("days", days), momo.Named("limit", limit))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -539,7 +561,7 @@ func (s *Store) ExpiredFaxes(ctx context.Context, days, limit int) (ids []int64,
 
 // DeleteFaxRows removes fax rows by id.
 func (s *Store) DeleteFaxRows(ctx context.Context, ids []int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM faxes WHERE id = ANY($1::bigint[])`, ids)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM faxes WHERE id = ANY(@ids::bigint[])`, momo.Named("ids", ids))
 	return err
 }
 
@@ -547,7 +569,8 @@ func (s *Store) DeleteFaxRows(ctx context.Context, ids []int64) error {
 // and sends nobody's lease will ever finish; it returns how many it closed.
 func (s *Store) ExpireStuckFaxes(ctx context.Context, olderThan time.Duration) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `UPDATE faxes SET status = 'failed', result_text = 'the call ended without a result',
-			finished_at = now() WHERE direction = 'inbound' AND status = 'receiving' AND created_at < now() - make_interval(secs => $1)`, olderThan.Seconds())
+			finished_at = now() WHERE direction = 'inbound' AND status = 'receiving' AND created_at < now() - make_interval(secs => @older_than)`,
+		momo.Named("older_than", olderThan.Seconds()))
 	if err != nil {
 		return 0, err
 	}

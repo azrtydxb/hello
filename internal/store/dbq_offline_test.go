@@ -46,6 +46,9 @@ var namedFiles = map[string]bool{
 	"door_webhook.go":      true,
 	"scep.go":              true,
 	"wifi.go":              true,
+	"backup.go":            true,
+	"faxes.go":             true,
+	"mail.go":              true,
 }
 
 // TestStatementsBuild renders every statement the store's code passes as a

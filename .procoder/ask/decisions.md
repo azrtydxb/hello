@@ -6347,3 +6347,37 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   These, the `wifiIDs` reads and ListSCEPCertificates are assembled or
   passed at run time, so the DB tier checks them, not
   `TestStatementsBuild`.
+
+## momo Phase 3, domain 3: internal/store faxes, mail and backup on @name (2026-11-16, momo/store-fax-mail)
+
+- **Scope.** `faxes.go`, `mail.go` and `backup.go` in `internal/store` bind
+  by name: every `$n` became `@name` with `momo.Named`, through the seam,
+  with the SQL text, `FOR UPDATE` / `SKIP LOCKED`, Scan targets and error
+  handling unchanged. No schema change, no migration, `go.mod` and
+  `internal/db` unchanged.
+- **Reused binds carry the old type.** fax Finish casts `@object_key::text`
+  in `NULLIF(...)` and `@object_key::text <> ''`, and `@mail_to::text <> ''`
+  (its `mail_to = @mail_to` use takes the column's type). AdoptArchive's
+  `INSERT ... SELECT` casts every select-list use to its column's type,
+  `@at::timestamptz` (twice), `@archive_bytes::bigint` and
+  `@object_key::text`, and `@object_key::text` in its `NOT EXISTS`, since a
+  select-list bind cannot type itself once it is a bind of its own. The
+  `@name` uses in DeleteFaxDestination's IVR read compare with TEXT columns,
+  and the upserts' (PutSMTPSettings, PutBackupSettings) repeated uses are
+  each a column's value; the sealed bytes and the clear flag were already
+  cast (`::bytea`, `::boolean`).
+- **ListFaxes' assembled WHERE.** Each filter condition carries its own
+  `@name` (`@direction`, `@status`, `@before`, `@owners`) and its Named goes
+  in only with it; the limit is `@limit`. The statement PostgreSQL receives
+  is the one it received before (`TestListFaxesSends` pins it, values in
+  order). The `fmt.Sprintf` of placeholder numbers, and its gosec
+  suppression, are gone.
+- **DeleteFaxDestination's in-use reads** are now the constants
+  `faxDestRoutes` and `faxDestMenus`, with the same text, so
+  `TestFaxStatementsOffline` builds them (the sweep cannot see a statement
+  taken from a struct field) along with every ListFaxes filter combination.
+- **BumpRevision's NOTIFY** goes through `notifyConfig`, which sends the
+  same `SELECT pg_notify($1, $2::text)` with `hello_config` and the revision
+  as the code did inline.
+- **SchemaVersion stays raw** (`s.db.raw`): goose owns `goose_db_version`
+  until the migration engine moves (Phase 5).
