@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/prometheus/client_golang/prometheus"
 
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/secret"
@@ -175,8 +177,9 @@ func pgEnv(t *testing.T) env {
 		t.Fatal(err)
 	}
 	var n int64
+	pg := &PG{DB: hellodb.New(db, slog.New(slog.DiscardHandler))}
 	return env{
-		store: &PG{DB: db},
+		store: pg,
 		emit: func(t *testing.T, e events.Event) {
 			n++
 			b, _ := json.Marshal(e)
@@ -190,7 +193,7 @@ func pgEnv(t *testing.T) env {
 				e.ID, n, e.Type, e.CreatedAt, e.Data.CallID, e.Data.Extension, string(b)); err != nil {
 				t.Fatal(err)
 			}
-			if err := (&PG{DB: db}).Enqueue(ctx, tx, events.Entry{Cursor: strconv.FormatInt(n, 10) + "-0", Event: e}); err != nil {
+			if err := pg.Enqueue(ctx, tx, events.Entry{Cursor: strconv.FormatInt(n, 10) + "-0", Event: e}); err != nil {
 				t.Fatal(err)
 			}
 			if err := tx.Commit(); err != nil {
