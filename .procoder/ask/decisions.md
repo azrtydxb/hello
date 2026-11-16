@@ -5679,3 +5679,53 @@ answered, whatever the order.
   a 42 s wall-clock gap inside a run the test timed at 1.28 s). Its 300 ms
   leases cannot survive the machine sleeping, which is not a product or
   test bug. Local loops now run under `caffeinate -i`.
+
+## Two flakes: Grandstream DTLS/ICE test token, CANCEL crossing a 200 (2026-11-16, fix/flakes-cancel-gs)
+
+- **TestGrandstreamDTLSAndICE: the random token spelled a forbidden word.**
+  The check that Yealink, Poly and Fanvil write no DTLS or ICE key searched
+  the whole lower-cased config for "dtls", or for "ice" and "nat". Every one
+  of those configs already contains "ice" ("device", "voice"), so the check
+  was really "dtls" or "nat". renderSample puts a fresh NewToken (52 random
+  base32 letters) in the provisioning URL that each config carries. A token
+  containing "nat" (about 1 render in 650, 3 renders per run) or "dtls"
+  failed the test. Forcing a token that starts with "nat" or "dtls" failed it
+  for all three vendors.
+- **Fix (test only).** renderOtherVendor renders the vendor config and
+  removes the sample's token before the word check. It fails if the token
+  cannot be found, so the check cannot pass vacuously. The word check is
+  unchanged. The test now also checks that the DTLS and ICE settings change
+  no byte of these vendors' configs, which catches a key under any name. The
+  same token could spell "srtp" in TestGrandstreamSRTPMode's matching
+  check (about 1 render in 21,000), so that check uses the helper too.
+- **TestCallCancelRacing200: a 200 arriving after the 487 was never ACKed
+  (product bug).** When a fork's CANCEL completes, sipgo's WaitAnswer takes
+  the first final response and terminates the INVITE transaction. If the
+  callee's 200 came first, drive ACKed and BYEd it. If the 487 came first,
+  the 200 no longer matched a transaction, and Hello's unhandled-response
+  handler only logged it at debug. The callee was left in a confirmed
+  dialog nobody ACKed or hung up, which breaks RFC 3261 §13.2.2.4. A forking
+  proxy or SBC in front of a phone sends exactly this order (it forwards a
+  2xx after its 487, §16.7), and UDP datagrams can swap. The test's callee
+  sent the 200, slept 100 ms, then let the transaction send the 487; the
+  helper's comment already said a 487 handled first "would drop the 200". On
+  a loaded CI runner (run 43822034934 attempt 1, the api package took 1283 s
+  alongside it) the 200's goroutine fell more than 100 ms behind, and the
+  test timed out waiting for the ACK.
+- **Fix (product).** A fork whose INVITE ends without a 2xx is kept for
+  64*T1, the time a UAS keeps retransmitting its 2xx (late2xx.go). The
+  unhandled-response handler matches a 2xx to INVITE by Call-ID, Hello's
+  From tag and the INVITE CSeq, then ACKs and BYEs it through the fork's own
+  dialog (l.bye), the same path a 200 that wins the race takes.
+  Remaining gap, in sipgo: a 2xx handled in the microseconds between the
+  487 and WaitAnswer terminating the transaction falls into the Completed
+  state, which ignores 2xx.
+- **Test.** TestCallCancelRacing200 runs both orders: "200 before 487" (as
+  before) and "487 before 200" (the callee sends a 487, waits 100 ms, then
+  the 200). It now also checks that the ACK is the ACK of the 2xx (a new
+  Via branch, the INVITE's CSeq) and the BYE is on the fork's Call-ID.
+- **Rates** (`go test -race -count=50 -run TestCallCancelRacing200`, M-series
+  Mac). Old test, old code: 0/50 idle, 0/1,800 under 36 concurrent copies
+  at GOMAXPROCS=2. The CI failure did not reproduce locally. New test on
+  old code: "487 before 200" failed 50/50 with the CI message ("timed out waiting for ACK to the callee's crossing 200"); "200 before 487" failed 0/50. New test with the fix: 0/50 for
+  each order.

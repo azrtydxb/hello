@@ -241,35 +241,56 @@ func TestCallSimultaneous2xx(t *testing.T) {
 
 // TestCallCancelRacing200 fails if, when the caller's CANCEL crosses the
 // callee's 200, the call does not end cleanly: 487 to the caller, ACK and
-// BYE to the answering callee, one CDR recording a cancelled call.
+// BYE to the answering callee, one CDR recording a cancelled call. The 200
+// reaches Hello before the callee's 487 or after it: a 200 after the 487
+// arrives once the fork's INVITE transaction has ended, and must still be
+// ACKed and hung up (RFC 3261 §13.2.2.4).
 func TestCallCancelRacing200(t *testing.T) {
-	pbx := startPBX(t, ringAllDevices())
-	a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
-	a.register(t)
-	b.register(t)
-	b.setCallee(answerOnCancel())
-	ctx, cancel := context.WithCancel(t.Context())
-	res := dial(ctx, a, "200")
-	waitReq(t, b.invites, "callee INVITE")
-	waitRing(t, a)
-	cancel()
-	r := waitCall(t, res)
-	if r.err == nil {
-		t.Fatal("cancelled call connected")
+	for _, tc := range []struct {
+		name    string
+		late487 bool
+	}{{"200 before 487", false}, {"487 before 200", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			pbx := startPBX(t, ringAllDevices())
+			a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
+			a.register(t)
+			b.register(t)
+			b.setCallee(answerOnCancel(tc.late487))
+			ctx, cancel := context.WithCancel(t.Context())
+			res := dial(ctx, a, "200")
+			inv := waitReq(t, b.invites, "callee INVITE")
+			waitRing(t, a)
+			cancel()
+			r := waitCall(t, res)
+			if r.err == nil {
+				t.Fatal("cancelled call connected")
+			}
+			if r.dcs.InviteResponse == nil || r.dcs.InviteResponse.StatusCode != 487 {
+				t.Fatalf("caller final = %v, want 487", r.dcs.InviteResponse)
+			}
+			ack := waitReq(t, b.acks, "ACK to the callee's crossing 200")
+			// The ACK of a 2xx is a request of its own (a new branch); the
+			// ACK of a 487 is part of the INVITE transaction.
+			ackBranch, _ := ack.Via().Params.Get("branch")
+			invBranch, _ := inv.Via().Params.Get("branch")
+			if ackBranch == invBranch || ack.CSeq().SeqNo != inv.CSeq().SeqNo {
+				t.Fatalf("ACK %s is not the ACK of the 200 to INVITE %s", ack.Via().Value(), inv.Via().Value())
+			}
+			bye := waitReq(t, b.byes, "BYE to the callee's crossing 200")
+			if bye.CallID().Value() != inv.CallID().Value() {
+				t.Fatal("BYE on the wrong dialog")
+			}
+			cd := pbx.nextCDR(t)
+			if cd.FinalStatus != 487 || cd.TerminationSide != "caller" || !cd.AnswerTime.IsZero() || cd.BillableMs != 0 {
+				t.Fatalf("CDR = %+v", cd)
+			}
+			if v := pbx.metric(t, "hello_calls_total", map[string]string{"result": ResultCancelled}); v != 1 {
+				t.Fatalf("cancelled calls = %v", v)
+			}
+			pbx.noCDR(t, 200*time.Millisecond)
+			noReq(t, b.acks, 200*time.Millisecond, "second ACK to the crossing 200")
+		})
 	}
-	if r.dcs.InviteResponse == nil || r.dcs.InviteResponse.StatusCode != 487 {
-		t.Fatalf("caller final = %v, want 487", r.dcs.InviteResponse)
-	}
-	waitReq(t, b.acks, "ACK to the callee's crossing 200")
-	waitReq(t, b.byes, "BYE to the callee's crossing 200")
-	cd := pbx.nextCDR(t)
-	if cd.FinalStatus != 487 || cd.TerminationSide != "caller" || !cd.AnswerTime.IsZero() || cd.BillableMs != 0 {
-		t.Fatalf("CDR = %+v", cd)
-	}
-	if v := pbx.metric(t, "hello_calls_total", map[string]string{"result": ResultCancelled}); v != 1 {
-		t.Fatalf("cancelled calls = %v", v)
-	}
-	pbx.noCDR(t, 200*time.Millisecond)
 }
 
 // TestCallCancelWhileRinging fails if a caller CANCEL does not cancel every
