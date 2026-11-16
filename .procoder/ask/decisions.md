@@ -5839,6 +5839,59 @@ answered, whatever the order.
   old code: "487 before 200" failed 50/50 with the CI message ("timed out waiting for ACK to the callee's crossing 200"); "200 before 487" failed 0/50. New test with the fix: 0/50 for
   each order.
 
+## momo Phase 2: internal/slack on momo (2026-11-16, momo/slack)
+
+- **Scope of this group.** Of the packages assigned (slack, chat,
+  livestate, cluster, telemetry, oauth), only `internal/slack` uses
+  database/sql. The grep matches in chat, livestate, cluster and oauth are
+  Valkey `Script.Exec` calls and `url.Query()`; telemetry's is
+  `url.Query()`. The SQL behind `oauth.Store` and chat's webchat store is in
+  `internal/store` (Phase 3). So this group is one PR, and the lease,
+  heartbeat and lock timing of livestate and cluster is untouched.
+- **Hand-written SQL with @name binds.** `slack.PG` holds a `*momo.DB`,
+  built inline in hello-control with `hellodb.New(db, log)`. Every
+  statement keeps its SQL; `$n` became `@name`. Rows are read with
+  `momo.RawRows` into the same Scan destinations as before (`scanDest`,
+  `scanPost` unchanged), and single-row reads go through a local
+  `queryRow`, which reports `sql.ErrNoRows` on an empty result as
+  `QueryRow` did (G7), so `mapErr` and Retry's not-found/conflict split are
+  unchanged. `FOR UPDATE OF sp SKIP LOCKED` in Claim is as it was.
+- **Casts for reused binds.** A reused `@name` is one bind per use, so
+  every use carries a cast where PostgreSQL must give the uses one type:
+  Update's `@reset::boolean` (twice) and `@secret_enc::bytea`, Finish's
+  `@now::timestamptz` (the `updated_at` use gained the cast the
+  `delivered_at` use had), and ListPosts' `@dest::bigint`, `@status::text`,
+  `@before::bigint`. Before, ListPosts' `$1 = 0` made the destination and
+  cursor parameters int4; they are int8 now, which matches the bigint
+  columns and changes no result for any id that fitted.
+- **Transactions.** `PG.tx` keeps its shape on `momo.DB.Begin`: commit on
+  nil, else roll back (error ignored, as before) and return fn's error
+  through `mapErr`. The rollback runs on `context.WithoutCancel(ctx)` so it
+  still reaches the database when ctx ended the work; with `FromSQLDB` a
+  transaction is not rolled back by its Begin context ending (noted in
+  Phase 1). Enqueue joins the event ingest `*sql.Tx` through
+  `db.AdoptTx`, which never commits it; the `Store` interface still takes
+  `*sql.Tx`. A nil tx now runs on the pool where it panicked before; no
+  caller passes nil.
+- **Errors.** `isUnique` accepts `momo.ErrUniqueViolation` or the 23505
+  `*pgconn.PgError` check it always made. Other errors now read
+  `momo: <kind> (op=...): <driver error>`.
+- **Hot path.** None. The slack store runs in hello-control (admin API,
+  event ingest hook, the post worker); hello-sip does not build it. momo's
+  hook adds one debug log call per statement.
+- **Tests.** `TestPGStatementsBuild` runs every method on momo's offline
+  handle. `TestPGStatementsBuildInTx` runs every method on a stub
+  `momo.Driver` that answers queries with zero or one row, so the
+  statements inside transactions build too: all 19 distinct statements
+  must reach the driver with no unrendered `@` and `$1` present. Both run
+  on the pull request tier. `TestStoreContractMem` and
+  `TestStoreContractPG` run the same assertions on Mem and PG (error
+  kinds, the nil-secret update, queue filters and de-duplication, the
+  claim lease, health counters, both disable rules, manual retry, paging,
+  purge, cascade on delete); the file header lists the differences left
+  out on purpose. `TestPGQueue` is unchanged apart from building the store
+  with `hellodb.New`.
+
 ## momo Phase 2: internal/ai/proposal and internal/ai/detect (2026-11-16, feat/momo-p2-ai)
 
 - **Handle.** `proposal.NewStore` and `detect.Env.DB` take the `*momo.DB`
