@@ -263,7 +263,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// the ingest transaction of every event that matches an endpoint, and
 	// the dispatcher on each replica sends the due ones.
 	hooks := &webhook.Service{
-		Store: &webhook.PG{DB: db}, Box: box, AllowedCIDRs: cfg.IntegrationsAllowedCIDRs,
+		Store: &webhook.PG{DB: hellodb.New(db, log)}, Box: box, AllowedCIDRs: cfg.IntegrationsAllowedCIDRs,
 		Log: log.With("component", "webhooks"), Enrich: inboxWebhookEnricher(st),
 	}
 	evSvc.Hooks = append(evSvc.Hooks, hooks.Hook())
@@ -414,7 +414,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			_ = ln.Close()
 			return fmt.Errorf("ai proposals: %w", err)
 		}
-		props := proposal.NewStore(db, validator)
+		props := proposal.NewStore(hellodb.New(db, log), validator)
 		props.OnStatus = func(source string, st proposal.Status) {
 			agent.Metrics().Proposal(proposalSource(source), string(st))
 		}
@@ -446,7 +446,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		// and explain findings through it when it answers.
 		if cfg.AIAgent.AIOpsInterval > 0 {
 			env := &detect.Env{
-				DB: db, Store: st, Live: vk, Cluster: vk,
+				DB: hellodb.New(db, log), Store: st, Live: vk, Cluster: vk,
 				VKFunc:        vk.Client,
 				AuthFailLimit: cfg.AuthFailLimit,
 				Log:           log,

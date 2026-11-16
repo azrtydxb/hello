@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // call_quality (spec S-19, S-5.1): per trunk (trunk_name) and per node
@@ -39,45 +41,33 @@ func (q qualityCDR) bad() bool {
 // The last qualityCDRs CDRs with quality per trunk or node, newest first.
 const (
 	qualityRankHead = `SELECT k, id, rtp_packets, rtp_lost, rtp_jitter_ms FROM (SELECT `
-	qualityRankTail = ` AS rn FROM cdrs WHERE end_time >= $1 AND end_time <= $2 AND rtp_packets IS NOT NULL`
+	qualityRankTail = ` AS rn FROM cdrs WHERE end_time >= @from AND end_time <= @to AND rtp_packets IS NOT NULL`
 	qualityTrunkSQL = qualityRankHead + `trunk_name AS k, id, rtp_packets, rtp_lost, rtp_jitter_ms,
 		row_number() OVER (PARTITION BY trunk_name ORDER BY end_time DESC, id DESC)` + qualityRankTail +
-		` AND trunk_name <> '') t WHERE rn <= $3 ORDER BY k, rn`
+		` AND trunk_name <> '') t WHERE rn <= @n ORDER BY k, rn`
 	qualityNodeSQL = qualityRankHead + `sip_node AS k, id, rtp_packets, rtp_lost, rtp_jitter_ms,
 		row_number() OVER (PARTITION BY sip_node ORDER BY end_time DESC, id DESC)` + qualityRankTail +
-		`) t WHERE rn <= $3 ORDER BY k, rn`
+		`) t WHERE rn <= @n ORDER BY k, rn`
 )
 
 func callQuality(ctx context.Context, r *Run) ([]Candidate, error) {
 	var out []Candidate
 	for _, dim := range []struct{ kind, query string }{{"trunk", qualityTrunkSQL}, {"node", qualityNodeSQL}} {
-		rows, err := r.DB.QueryContext(ctx, dim.query, r.Now.Add(-qualityWindow), r.Now, qualityCDRs)
+		rows, err := momo.Query[momo.Row5[string, int64, int64, *int64, *float64]](ctx, r.DB, dim.query,
+			momo.Named("from", r.Now.Add(-qualityWindow)), momo.Named("to", r.Now), momo.Named("n", qualityCDRs))
 		if err != nil {
 			return nil, err
 		}
 		by := map[string][]qualityCDR{}
-		for rows.Next() {
-			var k string
-			var q qualityCDR
-			var lost *int64
-			var jitter *float64
-			if err := rows.Scan(&k, &q.ID, &q.Packets, &lost, &jitter); err != nil {
-				_ = rows.Close()
-				return nil, err
+		for _, row := range rows {
+			q := qualityCDR{ID: row.C2, Packets: row.C3}
+			if row.C4 != nil {
+				q.Lost = *row.C4
 			}
-			if lost != nil {
-				q.Lost = *lost
+			if row.C5 != nil {
+				q.Jitter = *row.C5
 			}
-			if jitter != nil {
-				q.Jitter = *jitter
-			}
-			by[k] = append(by[k], q)
-		}
-		if err := rows.Close(); err != nil {
-			return nil, err
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
+			by[row.C1] = append(by[row.C1], q)
 		}
 		for k, cdrs := range by {
 			if c, ok := evalQuality(dim.kind, k, cdrs); ok {
