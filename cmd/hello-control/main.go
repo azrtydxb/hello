@@ -315,7 +315,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// and the LDAP bind login of AD-synced users. The sign-in state and the
 	// throttles live in Valkey; without HELLO_PUBLIC_URL SSO is off.
 	ssoSvc := &sso.Service{
-		Store: &sso.PG{DB: db, Box: box}, PublicURL: cfg.AI.PublicURL,
+		Store: &sso.PG{DB: hellodb.New(db, log), Box: box}, PublicURL: cfg.AI.PublicURL,
 		States: sso.ValkeyStates{Client: vk.Client}, Throttle: sso.ValkeyThrottle{Client: vk.Client},
 		Directory: dirEngine, Metrics: sso.NewMetrics(metrics.Registry), Log: log.With("component", "sso"),
 	}
