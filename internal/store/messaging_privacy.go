@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/media"
 )
@@ -31,14 +33,24 @@ func newRedactionBatch(what string) string {
 // provider, provider message id; args bind q's parameters) for deletion
 // under batch. A message queued before and not yet done joins this batch
 // and starts its tries again; one already done stays done.
+//
+// q binds by name (args are momo.Named) and the batch is then bound as
+// @batch, a name q must not use; a q of a file not yet converted to @name
+// (messaging.go) binds with $n, and the batch is then the next $n.
 func queueRedactions(ctx context.Context, tx *dbTx, batch, q string, args ...any) error {
+	bind, arg := "@batch", any(momo.Named("batch", batch))
+	if len(args) > 0 {
+		if _, named := args[0].(momo.NamedArg); !named {
+			bind, arg = "$"+strconv.Itoa(len(args)+1), batch
+		}
+	}
 	//nolint:gosec // G202: q is a fixed query of this package with bound parameters.
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO msg_provider_redactions (channel_id, provider, provider_message_id, batch)
-		SELECT x.channel_id, x.provider, x.provider_message_id, $`+strconv.Itoa(len(args)+1)+` FROM (`+q+`) AS x(channel_id, provider, provider_message_id)
+		SELECT x.channel_id, x.provider, x.provider_message_id, `+bind+` FROM (`+q+`) AS x(channel_id, provider, provider_message_id)
 		ON CONFLICT (channel_id, provider_message_id) DO UPDATE SET batch = EXCLUDED.batch, state = 'pending', attempts = 0,
 			next_attempt_at = now(), claimed_until = NULL, last_error = '', finished_at = NULL
-		WHERE msg_provider_redactions.state <> 'done'`, append(args, batch)...)
+		WHERE msg_provider_redactions.state <> 'done'`, append(args, arg)...)
 	return err
 }
 
@@ -50,9 +62,9 @@ func (s *Store) ClaimRedactions(ctx context.Context, batch string, limit int) ([
 		WHERE id IN (
 			SELECT id FROM msg_provider_redactions
 			WHERE state = 'pending' AND next_attempt_at <= now() AND (claimed_until IS NULL OR claimed_until < now())
-			  AND ($1 = '' OR batch = $1)
-			ORDER BY next_attempt_at, id LIMIT $2 FOR UPDATE SKIP LOCKED)
-		RETURNING id, channel_id, provider, provider_message_id, attempts`, batch, limit)
+			  AND (@batch::text = '' OR batch = @batch::text)
+			ORDER BY next_attempt_at, id LIMIT @limit FOR UPDATE SKIP LOCKED)
+		RETURNING id, channel_id, provider, provider_message_id, attempts`, momo.Named("batch", batch), momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
@@ -75,10 +87,10 @@ func (s *Store) FinishRedaction(ctx context.Context, job messaging.RedactJob, re
 		errText = errText[:200]
 	}
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE msg_provider_redactions SET state = $2, last_error = $3, claimed_until = NULL,
-			next_attempt_at = now() + make_interval(secs => $4),
-			finished_at = CASE WHEN $2 = 'pending' THEN NULL ELSE now() END
-		WHERE id = $1`, job.ID, res.State, errText, res.RetryIn.Seconds())
+		UPDATE msg_provider_redactions SET state = @state::text, last_error = @last_error, claimed_until = NULL,
+			next_attempt_at = now() + make_interval(secs => @retry_in),
+			finished_at = CASE WHEN @state::text = 'pending' THEN NULL ELSE now() END
+		WHERE id = @id`, momo.Named("id", job.ID), momo.Named("state", res.State), momo.Named("last_error", errText), momo.Named("retry_in", res.RetryIn.Seconds()))
 	return err
 }
 
@@ -87,7 +99,7 @@ func (s *Store) FinishRedaction(ctx context.Context, job messaging.RedactJob, re
 func (s *Store) MaintainRedactions(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE msg_provider_redactions SET state = 'failed', finished_at = now(), last_error = 'retries exhausted'
-		WHERE state = 'pending' AND attempts >= $1 AND (claimed_until IS NULL OR claimed_until < now())`, messaging.MaxRedactAttempts); err != nil {
+		WHERE state = 'pending' AND attempts >= @max_attempts AND (claimed_until IS NULL OR claimed_until < now())`, momo.Named("max_attempts", messaging.MaxRedactAttempts)); err != nil {
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM msg_provider_redactions WHERE finished_at < now() - interval '30 days'`)
@@ -109,7 +121,7 @@ func (s *Store) RedactionCounts(ctx context.Context, batch string) ([]RedactionC
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT provider, count(*) FILTER (WHERE state = 'pending'), count(*) FILTER (WHERE state = 'done'),
 		       count(*) FILTER (WHERE state = 'failed'), count(*) FILTER (WHERE state = 'unsupported')
-		FROM msg_provider_redactions WHERE $1 = '' OR batch = $1 GROUP BY provider ORDER BY provider`, batch)
+		FROM msg_provider_redactions WHERE @batch::text = '' OR batch = @batch::text GROUP BY provider ORDER BY provider`, momo.Named("batch", batch))
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +172,7 @@ func (s *Store) ProviderReport(ctx context.Context, actor, batch string, provide
 			var on bool
 			if err := s.db.QueryRowContext(ctx, `
 				SELECT coalesce(bool_or(last_error LIKE '%profile_redaction_on%'), false) FROM msg_provider_redactions
-				WHERE batch = $1 AND provider = $2 AND state = 'unsupported'`, batch, p).Scan(&on); err != nil {
+				WHERE batch = @batch AND provider = @provider AND state = 'unsupported'`, momo.Named("batch", batch), momo.Named("provider", p)).Scan(&on); err != nil {
 				return nil, err
 			}
 			e.Detail = "the provider has no API to delete a single message: turn on its own redaction (Telnyx: the messaging profile's redaction setting); it keeps its own logs"
@@ -232,7 +244,7 @@ func (s *Store) RedactConversationMessage(ctx context.Context, actor string, con
 		err := tx.QueryRowContext(ctx, `
 			SELECT m.kind, ch.provider, m.provider_message_id, m.redacted_at
 			FROM conversation_messages m JOIN msg_channels ch ON ch.id = m.channel_id
-			WHERE m.id = $1 AND m.conversation_id = $2 FOR NO KEY UPDATE OF m`, msgID, convID).Scan(&kind, &prov, &providerID, &redacted)
+			WHERE m.id = @id AND m.conversation_id = @conversation_id FOR NO KEY UPDATE OF m`, momo.Named("id", msgID), momo.Named("conversation_id", convID)).Scan(&kind, &prov, &providerID, &redacted)
 		if err != nil {
 			return err
 		}
@@ -242,10 +254,10 @@ func (s *Store) RedactConversationMessage(ctx context.Context, actor string, con
 		if redacted.Valid {
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE conversation_messages SET body = '', redacted_at = now() WHERE id = $1`, msgID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE conversation_messages SET body = '', redacted_at = now() WHERE id = @id`, momo.Named("id", msgID)); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE conversation_message_id = $1`, msgID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE conversation_message_id = @message_id`, momo.Named("message_id", msgID)); err != nil {
 			return err
 		}
 		if rep.Media, err = detachMessageMedia(ctx, tx, msgID); err != nil {
@@ -259,7 +271,7 @@ func (s *Store) RedactConversationMessage(ctx context.Context, actor string, con
 		if providerID.Valid && prov != messaging.ProviderSIPTrunk {
 			rep.Batch = newRedactionBatch("redact")
 			if err := queueRedactions(ctx, tx, rep.Batch, `
-				SELECT channel_id, $2::text, provider_message_id FROM conversation_messages WHERE id = $1`, msgID, prov); err != nil {
+				SELECT channel_id, @provider::text, provider_message_id FROM conversation_messages WHERE id = @id`, momo.Named("id", msgID), momo.Named("provider", prov)); err != nil {
 				return err
 			}
 		}
@@ -271,7 +283,7 @@ func (s *Store) RedactConversationMessage(ctx context.Context, actor string, con
 	if err != nil {
 		return rep, mapErr(err)
 	}
-	rep.Message, err = scanConvMessage(s.db.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = $1`, msgID))
+	rep.Message, err = scanConvMessage(s.db.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = @id`, momo.Named("id", msgID)))
 	if err != nil {
 		return rep, err
 	}
@@ -305,15 +317,15 @@ func redactAIOutput(ctx context.Context, tx *dbTx, convID, msgID int64) error {
 			state = CASE WHEN state = 'running' THEN 'stale' ELSE state END,
 			error = CASE WHEN state = 'running' THEN 'redacted' ELSE error END,
 			finished_at = CASE WHEN state = 'running' THEN now() ELSE finished_at END
-		WHERE conversation_id = $1
-		  AND (message_id >= $2 OR id = (SELECT ai_run_id FROM conversation_messages WHERE id = $2))
-		  AND (result IS NOT NULL OR state IN ('queued', 'running'))`, convID, msgID); err != nil {
+		WHERE conversation_id = @conversation_id
+		  AND (message_id >= @message_id OR id = (SELECT ai_run_id FROM conversation_messages WHERE id = @message_id))
+		  AND (result IS NOT NULL OR state IN ('queued', 'running'))`, momo.Named("conversation_id", convID), momo.Named("message_id", msgID)); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `
 		UPDATE conversations SET ai_triage = jsonb_set(ai_triage, '{summary}', '""')
-		WHERE id = $1 AND ai_triage IS NOT NULL AND coalesce((ai_triage ->> 'messageId')::bigint, 0) >= $2
-		  AND coalesce(ai_triage ->> 'summary', '') <> ''`, convID, msgID)
+		WHERE id = @id AND ai_triage IS NOT NULL AND coalesce((ai_triage ->> 'messageId')::bigint, 0) >= @message_id
+		  AND coalesce(ai_triage ->> 'summary', '') <> ''`, momo.Named("id", convID), momo.Named("message_id", msgID))
 	return err
 }
 
@@ -322,7 +334,7 @@ func redactAIOutput(ctx context.Context, tx *dbTx, convID, msgID int64) error {
 // that the caller removes now or the media sweeper later, and any public
 // link to it stops working at once.
 func detachMessageMedia(ctx context.Context, tx *dbTx, msgID int64) ([]media.Garbage, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id, object_key, TRUE FROM message_media WHERE message_id = $1 ORDER BY id FOR UPDATE`, msgID)
+	rows, err := tx.QueryContext(ctx, `SELECT id, object_key, TRUE FROM message_media WHERE message_id = @message_id ORDER BY id FOR UPDATE`, momo.Named("message_id", msgID))
 	if err != nil {
 		return nil, err
 	}
@@ -344,10 +356,10 @@ func detachMessageMedia(ctx context.Context, tx *dbTx, msgID int64) ([]media.Gar
 	ids := garbageIDs(gs)
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE message_media SET message_id = NULL, conversation_id = NULL, attached_at = coalesce(attached_at, now()), source_ref = '{}'
-		WHERE id = ANY($1::bigint[])`, ids); err != nil {
+		WHERE id = ANY(@ids::bigint[])`, momo.Named("ids", ids)); err != nil {
 		return nil, err
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM media_links WHERE media_id = ANY($1::bigint[])`, ids)
+	_, err = tx.ExecContext(ctx, `DELETE FROM media_links WHERE media_id = ANY(@ids::bigint[])`, momo.Named("ids", ids))
 	return gs, err
 }
 
@@ -466,7 +478,7 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 	var n int
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT count(*) FROM conversation_messages m JOIN conversations c ON c.id = m.conversation_id
-		WHERE c.peer_key = $1`, peerKey).Scan(&n); err != nil {
+		WHERE c.peer_key = @peer_key`, momo.Named("peer_key", peerKey)).Scan(&n); err != nil {
 		return out, err
 	}
 	if n > MaxExportMessages {
@@ -478,7 +490,7 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 		       coalesce(c.ai_triage::text, 'null'), c.ai_applied::text, c.ai_spam, c.ai_handoff_at, c.ai_handoff_reason
 		FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id JOIN msg_addresses a ON a.id = c.address_id
 		LEFT JOIN users u ON u.id = c.assignee_user_id
-		WHERE c.peer_key = $1 ORDER BY c.created_at, c.id`, peerKey)
+		WHERE c.peer_key = @peer_key ORDER BY c.created_at, c.id`, momo.Named("peer_key", peerKey))
 	if err != nil {
 		return out, err
 	}
@@ -516,7 +528,7 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 		SELECT m.conversation_id, m.id, m.direction, m.kind, m.sender_kind, m.sender_name, m.body, m.status, m.error_code,
 		       m.created_at, m.sent_at, m.delivered_at, m.read_at, m.redacted_at
 		FROM conversation_messages m JOIN conversations c ON c.id = m.conversation_id
-		WHERE c.peer_key = $1 AND m.kind IN `+kinds+` ORDER BY m.conversation_id, m.id`, peerKey)
+		WHERE c.peer_key = @peer_key AND m.kind IN `+kinds+` ORDER BY m.conversation_id, m.id`, momo.Named("peer_key", peerKey))
 	if err != nil {
 		return out, err
 	}
@@ -557,7 +569,7 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 	files, err := s.exportMedia(ctx, `
 		SELECT `+convMediaCols+`, coalesce(mm.conversation_id, 0), mm.object_key, mm.sha256 FROM message_media mm
 		JOIN conversation_messages m ON m.id = mm.message_id JOIN conversations c ON c.id = m.conversation_id
-		WHERE c.peer_key = $1 AND m.kind IN `+kinds+` ORDER BY mm.id`, peerKey)
+		WHERE c.peer_key = @peer_key AND m.kind IN `+kinds+` ORDER BY mm.id`, peerKey)
 	if err != nil {
 		return out, err
 	}
@@ -575,13 +587,13 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 	if out.Uploads, err = s.exportMedia(ctx, `
 		SELECT `+convMediaCols+`, coalesce(mm.conversation_id, 0), mm.object_key, mm.sha256 FROM message_media mm
 		JOIN chat_visitors v ON v.id = mm.uploader_visitor_id
-		WHERE 'visitor:' || v.id::text = $1 AND mm.message_id IS NULL ORDER BY mm.id`, peerKey); err != nil {
+		WHERE 'visitor:' || v.id::text = @peer_key AND mm.message_id IS NULL ORDER BY mm.id`, peerKey); err != nil {
 		return out, err
 	}
 	nMedia += len(out.Uploads)
 	rows, err = s.db.QueryContext(ctx, `
 		SELECT a.address, o.state, o.source, o.at FROM sms_opt_outs o JOIN msg_addresses a ON a.id = o.address_id
-		WHERE o.peer_key = $1 ORDER BY o.at`, peerKey)
+		WHERE o.peer_key = @peer_key ORDER BY o.at`, momo.Named("peer_key", peerKey))
 	if err != nil {
 		return out, err
 	}
@@ -609,7 +621,7 @@ func (s *Store) exportAIRuns(ctx context.Context, peerKey string, at map[int64][
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT r.message_id, r.id, r.kind, r.state, coalesce(r.result::text, 'null'), r.created_at, r.finished_at
 		FROM ai_message_runs r JOIN conversations c ON c.id = r.conversation_id
-		WHERE c.peer_key = $1 ORDER BY r.message_id, r.id`, peerKey)
+		WHERE c.peer_key = @peer_key ORDER BY r.message_id, r.id`, momo.Named("peer_key", peerKey))
 	if err != nil {
 		return 0, err
 	}
@@ -636,9 +648,10 @@ func (s *Store) exportAIRuns(ctx context.Context, peerKey string, at map[int64][
 }
 
 // exportMedia reads the attachments q selects (convMediaCols, then the
-// conversation, the object key and the hash; $1 is the peer key).
+// conversation, the object key and the hash; it binds the peer key as
+// @peer_key).
 func (s *Store) exportMedia(ctx context.Context, q, peerKey string) ([]ExportMedia, error) {
-	rows, err := s.db.QueryContext(ctx, q, peerKey)
+	rows, err := s.db.QueryContext(ctx, q, momo.Named("peer_key", peerKey))
 	if err != nil {
 		return nil, err
 	}
@@ -704,9 +717,10 @@ func (s *Store) SupervisorViews(ctx context.Context, f SupervisorViewFilter) (Su
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT e.id, e.at, e.actor, u.id, coalesce(NULLIF(u.display_name, ''), u.username, ''), e.resource_id, coalesce(e.via, '')
 		FROM audit_events e LEFT JOIN users u ON 'user:' || u.username = e.actor
-		WHERE e.action = 'supervisor_view' AND e.resource = 'conversation' AND e.at >= $1 AND e.at < $2
-		  AND ($3 = '' OR e.actor = $3) AND ($4 = 0 OR e.id < $4)
-		ORDER BY e.id DESC LIMIT $5`, f.From, f.To, f.Actor, f.Before, f.Limit+1)
+		WHERE e.action = 'supervisor_view' AND e.resource = 'conversation' AND e.at >= @from AND e.at < @to
+		  AND (@actor::text = '' OR e.actor = @actor::text) AND (@before::bigint = 0 OR e.id < @before::bigint)
+		ORDER BY e.id DESC LIMIT @limit`, momo.Named("from", f.From), momo.Named("to", f.To), momo.Named("actor", f.Actor),
+		momo.Named("before", f.Before), momo.Named("limit", f.Limit+1))
 	if err != nil {
 		return out, err
 	}
@@ -736,9 +750,9 @@ func (s *Store) SupervisorViews(ctx context.Context, f SupervisorViewFilter) (Su
 	rows, err = s.db.QueryContext(ctx, `
 		SELECT e.actor, coalesce(max(NULLIF(u.display_name, '')), max(u.username), ''), count(*), count(DISTINCT e.resource_id)
 		FROM audit_events e LEFT JOIN users u ON 'user:' || u.username = e.actor
-		WHERE e.action = 'supervisor_view' AND e.resource = 'conversation' AND e.at >= $1 AND e.at < $2
-		  AND ($3 = '' OR e.actor = $3)
-		GROUP BY e.actor ORDER BY count(*) DESC, e.actor`, f.From, f.To, f.Actor)
+		WHERE e.action = 'supervisor_view' AND e.resource = 'conversation' AND e.at >= @from AND e.at < @to
+		  AND (@actor::text = '' OR e.actor = @actor::text)
+		GROUP BY e.actor ORDER BY count(*) DESC, e.actor`, momo.Named("from", f.From), momo.Named("to", f.To), momo.Named("actor", f.Actor))
 	if err != nil {
 		return out, err
 	}
