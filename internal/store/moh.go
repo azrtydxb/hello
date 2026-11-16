@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // Music on hold (phone-feature-parity S-33, migration 00029). A class is a
@@ -102,7 +104,7 @@ func listMOH(ctx context.Context, q querier, where string, args ...any) ([]MOHCl
 	trows, err := q.QueryContext(ctx, `
 		SELECT t.class_id, t.announcement_id, a.name
 		FROM moh_class_tracks t JOIN announcements a ON a.id = t.announcement_id
-		WHERE t.class_id = ANY($1) ORDER BY t.class_id, t.position`, ids)
+		WHERE t.class_id = ANY(@ids) ORDER BY t.class_id, t.position`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +132,7 @@ func (s *Store) GetMOHClass(ctx context.Context, id int64) (MOHClass, error) {
 }
 
 func getMOH(ctx context.Context, q querier, id int64) (MOHClass, error) {
-	cs, err := listMOH(ctx, q, `WHERE id = $1`, id)
+	cs, err := listMOH(ctx, q, `WHERE id = @id`, momo.Named("id", id))
 	if err != nil {
 		return MOHClass{}, err
 	}
@@ -147,7 +149,7 @@ func checkMOHClass(ctx context.Context, q querier, path string, id *int64) error
 		return nil
 	}
 	var n int
-	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM moh_classes WHERE id = $1`, *id).Scan(&n); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM moh_classes WHERE id = @id`, momo.Named("id", *id)).Scan(&n); err != nil {
 		return err
 	}
 	if n == 0 {
@@ -159,19 +161,19 @@ func checkMOHClass(ctx context.Context, q querier, path string, id *int64) error
 // writeMOHTracks replaces a class's playlist; an unknown announcement is a
 // field error naming its index.
 func writeMOHTracks(ctx context.Context, tx *dbTx, classID int64, ids []int64) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM moh_class_tracks WHERE class_id = $1`, classID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM moh_class_tracks WHERE class_id = @class_id`, momo.Named("class_id", classID)); err != nil {
 		return err
 	}
 	for i, aid := range ids {
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM announcements WHERE id = $1`, aid).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM announcements WHERE id = @id`, momo.Named("id", aid)).Scan(&n); err != nil {
 			return err
 		}
 		if n == 0 {
 			return fieldError(fmt.Sprintf("announcementIds[%d]", i), "no such announcement")
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO moh_class_tracks (class_id, position, announcement_id) VALUES ($1, $2, $3)`,
-			classID, i, aid); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO moh_class_tracks (class_id, position, announcement_id) VALUES (@class_id, @position, @announcement_id)`,
+			momo.Named("class_id", classID), momo.Named("position", i), momo.Named("announcement_id", aid)); err != nil {
 			return err
 		}
 	}
@@ -192,8 +194,8 @@ func (s *Store) CreateMOHClass(ctx context.Context, actor string, in MOHClassInp
 			}
 		}
 		var id int64
-		if err := tx.QueryRowContext(ctx, `INSERT INTO moh_classes (name, mode, is_default) VALUES ($1, $2, $3) RETURNING id`,
-			in.Name, in.Mode, in.IsDefault).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO moh_classes (name, mode, is_default) VALUES (@name, @mode, @is_default) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("mode", in.Mode), momo.Named("is_default", in.IsDefault)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := writeMOHTracks(ctx, tx, id, in.AnnouncementIDs); err != nil {
@@ -214,12 +216,12 @@ func (s *Store) UpdateMOHClass(ctx context.Context, actor string, id int64, in M
 	var out MOHClass
 	err := s.configChange(ctx, actor, "update", "moh_class", nil, func(tx *dbTx) (int64, error) {
 		if in.IsDefault {
-			if _, err := tx.ExecContext(ctx, `UPDATE moh_classes SET is_default = FALSE WHERE is_default AND id <> $1`, id); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE moh_classes SET is_default = FALSE WHERE is_default AND id <> @id`, momo.Named("id", id)); err != nil {
 				return id, err
 			}
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE moh_classes SET name = $2, mode = $3, is_default = $4, updated_at = now()
-			WHERE id = $1`, id, in.Name, in.Mode, in.IsDefault)
+		res, err := tx.ExecContext(ctx, `UPDATE moh_classes SET name = @name, mode = @mode, is_default = @is_default, updated_at = now()
+			WHERE id = @id`, momo.Named("id", id), momo.Named("name", in.Name), momo.Named("mode", in.Mode), momo.Named("is_default", in.IsDefault))
 		if err != nil {
 			return id, err
 		}
@@ -239,7 +241,7 @@ func (s *Store) UpdateMOHClass(ctx context.Context, actor string, id int64, in M
 // it fall back to the global default.
 func (s *Store) DeleteMOHClass(ctx context.Context, actor string, id int64) error {
 	return s.configChange(ctx, actor, "delete", "moh_class", nil, func(tx *dbTx) (int64, error) {
-		res, err := tx.ExecContext(ctx, `DELETE FROM moh_classes WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM moh_classes WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}

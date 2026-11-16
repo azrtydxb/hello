@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // ttsAAD binds the sealed OpenRouter key to its purpose.
@@ -62,12 +64,12 @@ func (s *Store) PutTTSSettings(ctx context.Context, actor string, c TTSChange) (
 	err := s.provChange(ctx, actor, "update", "tts_settings", func(tx *dbTx) (string, bool, error) {
 		_, err := tx.ExecContext(ctx, `
 			UPDATE tts_settings SET
-				api_key_enc = COALESCE($1, api_key_enc),
-				key_hint    = CASE WHEN $1::bytea IS NULL THEN key_hint ELSE $2 END,
-				model       = COALESCE($3, model),
-				voice       = COALESCE($4, voice),
+				api_key_enc = COALESCE(@api_key_enc::bytea, api_key_enc),
+				key_hint    = CASE WHEN @api_key_enc::bytea IS NULL THEN key_hint ELSE @key_hint END,
+				model       = COALESCE(@model, model),
+				voice       = COALESCE(@voice, voice),
 				updated_at  = now()
-			WHERE id = 1`, enc, hint, c.Model, c.Voice)
+			WHERE id = 1`, momo.Named("api_key_enc", enc), momo.Named("key_hint", hint), momo.Named("model", c.Model), momo.Named("voice", c.Voice))
 		return "tts", false, err
 	})
 	if err != nil {

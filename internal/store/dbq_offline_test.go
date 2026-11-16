@@ -31,15 +31,24 @@ import (
 // pull request that converts a file adds it here.
 var namedFiles = map[string]bool{
 	"batch.go":             true,
+	"cdr.go":               true,
 	"config.go":            true,
 	"dialspace.go":         true,
 	"dirprovision.go":      true,
 	"flow_canvas.go":       true,
 	"locations.go":         true,
+	"media.go":             true,
+	"moh.go":               true,
+	"pbx.go":               true,
 	"personal_contacts.go": true,
 	"phonebook.go":         true,
 	"phonebook_lookup.go":  true,
+	"recording_links.go":   true,
+	"ringtones.go":         true,
 	"store.go":             true,
+	"tts.go":               true,
+	"video_recording.go":   true,
+	"voicemail_groups.go":  true,
 }
 
 // TestStatementsBuild renders every statement the store's code passes as a

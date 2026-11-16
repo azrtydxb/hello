@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/prov"
 )
 
@@ -59,7 +61,7 @@ func (s *Store) ListRingtones(ctx context.Context) ([]RingtoneFile, error) {
 // RingtoneExists reports whether the library has a tone of that name.
 func (s *Store) RingtoneExists(ctx context.Context, name string) (bool, error) {
 	var one int
-	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM ringtones WHERE name = $1`, name).Scan(&one)
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM ringtones WHERE name = @name`, momo.Named("name", name)).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -76,7 +78,7 @@ func (s *Store) CreateRingtone(ctx context.Context, actor, name string, info pro
 	var out RingtoneFile
 	err := s.provChange(ctx, actor, "create", "ringtones", func(tx *dbTx) (string, bool, error) {
 		var id int64
-		switch err := tx.QueryRowContext(ctx, `SELECT id FROM ringtones WHERE name = $1`, name).Scan(&id); {
+		switch err := tx.QueryRowContext(ctx, `SELECT id FROM ringtones WHERE name = @name`, momo.Named("name", name)).Scan(&id); {
 		case err == nil:
 			return "", false, conflict("the tone %s already exists; delete it first", name)
 		case !errors.Is(err, sql.ErrNoRows):
@@ -84,12 +86,13 @@ func (s *Store) CreateRingtone(ctx context.Context, actor, name string, info pro
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO ringtones (name, object_key, size_bytes, sha256, sample_rate, duration_ms)
-			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-			name, RingtoneObjectKey(name, sha256), size, sha256, info.SampleRate, int(info.Duration/time.Millisecond)).Scan(&id); err != nil {
+			VALUES (@name, @object_key, @size_bytes, @sha256, @sample_rate, @duration_ms) RETURNING id`,
+			momo.Named("name", name), momo.Named("object_key", RingtoneObjectKey(name, sha256)), momo.Named("size_bytes", size),
+			momo.Named("sha256", sha256), momo.Named("sample_rate", info.SampleRate), momo.Named("duration_ms", int(info.Duration/time.Millisecond))).Scan(&id); err != nil {
 			return "", false, err
 		}
 		var err error
-		out, err = scanRingtone(tx.QueryRowContext(ctx, `SELECT `+ringtoneCols+` FROM ringtones t WHERE t.id = $1`, id))
+		out, err = scanRingtone(tx.QueryRowContext(ctx, `SELECT `+ringtoneCols+` FROM ringtones t WHERE t.id = @id`, momo.Named("id", id)))
 		return strconv.FormatInt(id, 10), false, err
 	})
 	return out, err
@@ -104,7 +107,7 @@ func (s *Store) DeleteRingtone(ctx context.Context, actor string, id int64) (str
 	err := s.provChange(ctx, actor, "delete", "ringtones", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(id, 10)
 		var name string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM ringtones WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM ringtones WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&name); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return sid, false, ErrNotFound
 			}
@@ -112,7 +115,7 @@ func (s *Store) DeleteRingtone(ctx context.Context, actor string, id int64) (str
 		}
 		var tag, vendor string
 		var group sql.NullInt64
-		switch err := tx.QueryRowContext(ctx, `SELECT tag, vendor, group_id FROM ring_map WHERE custom_tone_id = $1 ORDER BY id LIMIT 1`, id).Scan(&tag, &vendor, &group); {
+		switch err := tx.QueryRowContext(ctx, `SELECT tag, vendor, group_id FROM ring_map WHERE custom_tone_id = @id ORDER BY id LIMIT 1`, momo.Named("id", id)).Scan(&tag, &vendor, &group); {
 		case err == nil:
 			where := "the ring map"
 			if group.Valid {
@@ -122,7 +125,7 @@ func (s *Store) DeleteRingtone(ctx context.Context, actor string, id int64) (str
 		case !errors.Is(err, sql.ErrNoRows):
 			return sid, false, err
 		}
-		return sid, false, tx.QueryRowContext(ctx, `DELETE FROM ringtones WHERE id = $1 RETURNING object_key`, id).Scan(&key)
+		return sid, false, tx.QueryRowContext(ctx, `DELETE FROM ringtones WHERE id = @id RETURNING object_key`, momo.Named("id", id)).Scan(&key)
 	})
 	return key, err
 }
@@ -130,7 +133,7 @@ func (s *Store) DeleteRingtone(ctx context.Context, actor string, id int64) (str
 // RingtoneByName implements prov.Store.
 func (s *Store) RingtoneByName(ctx context.Context, name string) (prov.Ringtone, error) {
 	var t prov.Ringtone
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, object_key, size_bytes, sha256, sample_rate, duration_ms, created_at FROM ringtones WHERE name = $1`, name).
+	err := s.db.QueryRowContext(ctx, `SELECT id, name, object_key, size_bytes, sha256, sample_rate, duration_ms, created_at FROM ringtones WHERE name = @name`, momo.Named("name", name)).
 		Scan(&t.ID, &t.Name, &t.ObjectKey, &t.Size, &t.SHA256, &t.SampleRate, &t.DurationMS, &t.UploadedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = prov.ErrNotFound
