@@ -25,15 +25,12 @@ Moved so far:
   transaction is momo's and whose hooks still get the `*sql.Tx` behind it.
 - The directory sync store (`internal/directory`), the SCIM store
   (`internal/scim`) and the SSO store (`internal/sso`).
-- `internal/store`, at its seam, with the files of the core and
-  configuration domain converted to `@name` binds: `store.go`, `batch.go`,
-  `config.go`, `dialspace.go`, `dirprovision.go` and `flow_canvas.go`; and
-  those of the phonebook domain: `phonebook.go`, `phonebook_lookup.go`,
-  `personal_contacts.go` and `locations.go`. Its other files still bind
-  `$n` and move one domain at a time (below).
-  those of the security and door domain: `scep.go`, `wifi.go`, `door.go`,
-  `door_open.go`, `door_camera.go` and `door_webhook.go`. Its other files
-  still bind `$n` and move one domain at a time (below).
+- `internal/store`, at its seam. Its files move to `@name` binds one
+  domain at a time (below); the files still on `$n` are those not listed
+  here. Converted so far:
+  - core and configuration: `store.go`, `batch.go`, `config.go`, `dialspace.go`, `dirprovision.go`, `flow_canvas.go`
+  - phonebook: `phonebook.go`, `phonebook_lookup.go`, `personal_contacts.go`, `locations.go`
+  - security and door: `scep.go`, `wifi.go`, `door.go`, `door_open.go`, `door_camera.go`, `door_webhook.go`
 
 Every package above builds its handle with `db.New` (or `db.NewPool`) where
 the binary constructs it, except `internal/store`, which builds its own in

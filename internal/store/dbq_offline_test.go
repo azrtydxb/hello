@@ -40,17 +40,11 @@ var namedFiles = map[string]bool{
 	"phonebook.go":         true,
 	"phonebook_lookup.go":  true,
 	"store.go":             true,
-	"batch.go":             true,
-	"config.go":            true,
-	"dialspace.go":         true,
-	"dirprovision.go":      true,
 	"door.go":              true,
 	"door_camera.go":       true,
 	"door_open.go":         true,
 	"door_webhook.go":      true,
-	"flow_canvas.go":       true,
 	"scep.go":              true,
-	"store.go":             true,
 	"wifi.go":              true,
 }
 
