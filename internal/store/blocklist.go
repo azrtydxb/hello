@@ -15,8 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/azrtydxb/hello/internal/routing"
+	"github.com/azrtydxb/momo"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/azrtydxb/hello/internal/routing"
 )
 
 // ErrBlocklistFull is returned when a change would take the blocklist past
@@ -99,14 +101,15 @@ func (s *Store) ListBlocklist(ctx context.Context, f BlocklistFilter) ([]Blockli
 	if f.Limit <= 0 {
 		f.Limit = 200
 	}
-	where := ` WHERE ($1 = '' OR strpos(b.pattern, $1) > 0) AND ($2 = '' OR b.action = $2)
-		AND ($3 = '' OR ($3 = 'global' AND b.trunk_id IS NULL) OR b.trunk_id::text = $3)`
+	where := ` WHERE (@q::text = '' OR strpos(b.pattern, @q::text) > 0) AND (@action::text = '' OR b.action = @action::text)
+		AND (@scope::text = '' OR (@scope::text = 'global' AND b.trunk_id IS NULL) OR b.trunk_id::text = @scope::text)`
+	filter := []any{momo.Named("q", f.Q), momo.Named("action", f.Action), momo.Named("scope", f.Scope)}
 	var total int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*)`+blocklistFrom+where, f.Q, f.Action, f.Scope).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*)`+blocklistFrom+where, filter...).Scan(&total); err != nil {
 		return nil, "", 0, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+blocklistCols+blocklistFrom+where+` AND b.id > $4 ORDER BY b.id LIMIT $5`,
-		f.Q, f.Action, f.Scope, f.After, f.Limit+1)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+blocklistCols+blocklistFrom+where+` AND b.id > @after ORDER BY b.id LIMIT @limit`,
+		append(filter, momo.Named("after", f.After), momo.Named("limit", f.Limit+1))...)
 	if err != nil {
 		return nil, "", 0, err
 	}
@@ -132,7 +135,7 @@ func (s *Store) ListBlocklist(ctx context.Context, f BlocklistFilter) ([]Blockli
 
 // GetBlocklistEntry returns one entry.
 func (s *Store) GetBlocklistEntry(ctx context.Context, id int64) (BlocklistEntry, error) {
-	e, err := scanBlocklist(s.db.QueryRowContext(ctx, `SELECT `+blocklistCols+blocklistFrom+` WHERE b.id = $1`, id))
+	e, err := scanBlocklist(s.db.QueryRowContext(ctx, `SELECT `+blocklistCols+blocklistFrom+` WHERE b.id = @id`, momo.Named("id", id)))
 	return e, mapErr(err)
 }
 
@@ -181,12 +184,14 @@ func (s *Store) CreateBlocklistEntry(ctx context.Context, actor string, in Block
 		}
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO call_blocklist (pattern, match, action, trunk_id, reason, announcement_id, enabled)
-			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-			in.Pattern, in.Match, in.Action, in.TrunkID, in.Reason, in.AnnouncementID, in.Enabled).Scan(&id); err != nil {
+			VALUES (@pattern, @match, @action, @trunk_id, @reason, @announcement_id, @enabled) RETURNING id`,
+			momo.Named("pattern", in.Pattern), momo.Named("match", in.Match), momo.Named("action", in.Action),
+			momo.Named("trunk_id", in.TrunkID), momo.Named("reason", in.Reason), momo.Named("announcement_id", in.AnnouncementID),
+			momo.Named("enabled", in.Enabled)).Scan(&id); err != nil {
 			return 0, blocklistConflict(blocklistFK(err))
 		}
 		var err error
-		e, err = scanBlocklist(tx.QueryRowContext(ctx, `SELECT `+blocklistCols+blocklistFrom+` WHERE b.id = $1`, id))
+		e, err = scanBlocklist(tx.QueryRowContext(ctx, `SELECT `+blocklistCols+blocklistFrom+` WHERE b.id = @id`, momo.Named("id", id)))
 		return id, err
 	})
 	return e, err
@@ -198,7 +203,7 @@ func (s *Store) CreateBlocklistEntry(ctx context.Context, actor string, in Block
 func (s *Store) UpdateBlocklistEntry(ctx context.Context, actor string, id int64, apply func(cur BlocklistInput) (BlocklistInput, error)) (BlocklistEntry, error) {
 	var e BlocklistEntry
 	err := s.configChange(ctx, actor, "update", "blocklist", nil, func(tx *dbTx) (int64, error) {
-		cur, err := scanBlocklist(tx.QueryRowContext(ctx, `SELECT `+blocklistCols+blocklistFrom+` WHERE b.id = $1 FOR UPDATE OF b`, id))
+		cur, err := scanBlocklist(tx.QueryRowContext(ctx, `SELECT `+blocklistCols+blocklistFrom+` WHERE b.id = @id FOR UPDATE OF b`, momo.Named("id", id)))
 		if err != nil {
 			return id, err
 		}
@@ -206,12 +211,14 @@ func (s *Store) UpdateBlocklistEntry(ctx context.Context, actor string, id int64
 		if err != nil {
 			return id, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE call_blocklist SET pattern = $2, match = $3, action = $4, trunk_id = $5,
-				reason = $6, announcement_id = $7, enabled = $8, updated_at = now() WHERE id = $1`,
-			id, in.Pattern, in.Match, in.Action, in.TrunkID, in.Reason, in.AnnouncementID, in.Enabled); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE call_blocklist SET pattern = @pattern, match = @match, action = @action, trunk_id = @trunk_id,
+				reason = @reason, announcement_id = @announcement_id, enabled = @enabled, updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("pattern", in.Pattern), momo.Named("match", in.Match), momo.Named("action", in.Action),
+			momo.Named("trunk_id", in.TrunkID), momo.Named("reason", in.Reason), momo.Named("announcement_id", in.AnnouncementID),
+			momo.Named("enabled", in.Enabled)); err != nil {
 			return id, blocklistConflict(blocklistFK(err))
 		}
-		e, err = scanBlocklist(tx.QueryRowContext(ctx, `SELECT `+blocklistCols+blocklistFrom+` WHERE b.id = $1`, id))
+		e, err = scanBlocklist(tx.QueryRowContext(ctx, `SELECT `+blocklistCols+blocklistFrom+` WHERE b.id = @id`, momo.Named("id", id)))
 		return id, err
 	})
 	return e, err
@@ -220,7 +227,7 @@ func (s *Store) UpdateBlocklistEntry(ctx context.Context, actor string, id int64
 // DeleteBlocklistEntry removes an entry.
 func (s *Store) DeleteBlocklistEntry(ctx context.Context, actor string, id int64) error {
 	return s.configChange(ctx, actor, "delete", "blocklist", nil, func(tx *dbTx) (int64, error) {
-		res, err := tx.ExecContext(ctx, `DELETE FROM call_blocklist WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM call_blocklist WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -247,11 +254,13 @@ func (s *Store) ImportBlocklist(ctx context.Context, actor string, rows []Blockl
 		for i, in := range rows {
 			var inserted bool
 			err := tx.QueryRowContext(ctx, `INSERT INTO call_blocklist (pattern, match, action, trunk_id, reason, announcement_id, enabled)
-				VALUES ($1, $2, $3, $4, $5, $6, $7)
+				VALUES (@pattern, @match, @action, @trunk_id, @reason, @announcement_id, @enabled)
 				ON CONFLICT (pattern, match, (coalesce(trunk_id, 0))) DO UPDATE
 				SET action = EXCLUDED.action, reason = EXCLUDED.reason, enabled = EXCLUDED.enabled, updated_at = now()
 				RETURNING (xmax = 0)`,
-				in.Pattern, in.Match, in.Action, in.TrunkID, in.Reason, in.AnnouncementID, in.Enabled).Scan(&inserted)
+				momo.Named("pattern", in.Pattern), momo.Named("match", in.Match), momo.Named("action", in.Action),
+				momo.Named("trunk_id", in.TrunkID), momo.Named("reason", in.Reason), momo.Named("announcement_id", in.AnnouncementID),
+				momo.Named("enabled", in.Enabled)).Scan(&inserted)
 			if err != nil {
 				var ve *ValidationError
 				if errors.As(blocklistFK(err), &ve) {

@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/prov"
 )
 
@@ -46,22 +48,23 @@ type IgnoredMAC struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// upsertSQL inserts or refreshes a candidate. Arguments: $1 mac, $2 vendor,
-// $3 model, $4 firmware, $5 source ip (nullable), $6 path, $7 ttl seconds.
+// upsertSQL inserts or refreshes a candidate. It binds @mac, @vendor,
+// @model, @firmware, @source_ip (nullable), @path and @ttl (seconds), the
+// arguments CaptureCandidate passes to it and to its refresh.
 // A row unseen for the TTL (not pruned yet) starts over. Times come from the
 // database clock, so pods with skewed clocks agree.
 const upsertSQL = `
 	INSERT INTO onboarding_candidates (mac, vendor, model, firmware, source_ip, requested_path)
-	VALUES ($1, $2, $3, $4, $5::inet, $6)
+	VALUES (@mac, @vendor, @model, @firmware, @source_ip::inet, @path)
 	ON CONFLICT (mac) DO UPDATE SET
 		vendor = CASE WHEN EXCLUDED.vendor <> 'generic' THEN EXCLUDED.vendor ELSE onboarding_candidates.vendor END,
 		model = COALESCE(NULLIF(EXCLUDED.model, ''), onboarding_candidates.model),
 		firmware = COALESCE(NULLIF(EXCLUDED.firmware, ''), onboarding_candidates.firmware),
 		source_ip = COALESCE(EXCLUDED.source_ip, onboarding_candidates.source_ip),
 		requested_path = EXCLUDED.requested_path,
-		first_seen = CASE WHEN onboarding_candidates.last_seen < now() - $7::float8 * interval '1 second'
+		first_seen = CASE WHEN onboarding_candidates.last_seen < now() - @ttl::float8 * interval '1 second'
 		                  THEN now() ELSE onboarding_candidates.first_seen END,
-		request_count = CASE WHEN onboarding_candidates.last_seen < now() - $7::float8 * interval '1 second'
+		request_count = CASE WHEN onboarding_candidates.last_seen < now() - @ttl::float8 * interval '1 second'
 		                     THEN 1 ELSE onboarding_candidates.request_count + 1 END,
 		last_seen = now()`
 
@@ -80,22 +83,24 @@ func (s *Store) CaptureCandidate(ctx context.Context, c prov.Candidate) (prov.Ca
 	if c.IP.IsValid() {
 		ip = c.IP.Unmap().String()
 	}
-	args := []any{c.MAC, string(vendor), c.Model, c.Firmware, ip, c.Path, ttlSeconds}
+	// Every name the refresh below and upsertSQL bind; both use them all.
+	args := []any{momo.Named("mac", c.MAC), momo.Named("vendor", string(vendor)), momo.Named("model", c.Model),
+		momo.Named("firmware", c.Firmware), momo.Named("source_ip", ip), momo.Named("path", c.Path), momo.Named("ttl", ttlSeconds)}
 	// Fast path: refresh a row that is queued, unless the MAC has become a
 	// phone or been ignored meanwhile.
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE onboarding_candidates SET
-			vendor = CASE WHEN $2 <> 'generic' THEN $2 ELSE vendor END,
-			model = COALESCE(NULLIF($3, ''), model),
-			firmware = COALESCE(NULLIF($4, ''), firmware),
-			source_ip = COALESCE($5::inet, source_ip),
-			requested_path = $6,
-			first_seen = CASE WHEN last_seen < now() - $7::float8 * interval '1 second' THEN now() ELSE first_seen END,
-			request_count = CASE WHEN last_seen < now() - $7::float8 * interval '1 second' THEN 1 ELSE request_count + 1 END,
+			vendor = CASE WHEN @vendor::text <> 'generic' THEN @vendor::text ELSE vendor END,
+			model = COALESCE(NULLIF(@model, ''), model),
+			firmware = COALESCE(NULLIF(@firmware, ''), firmware),
+			source_ip = COALESCE(@source_ip::inet, source_ip),
+			requested_path = @path,
+			first_seen = CASE WHEN last_seen < now() - @ttl::float8 * interval '1 second' THEN now() ELSE first_seen END,
+			request_count = CASE WHEN last_seen < now() - @ttl::float8 * interval '1 second' THEN 1 ELSE request_count + 1 END,
 			last_seen = now()
-		WHERE mac = $1
-		  AND NOT EXISTS (SELECT 1 FROM phones WHERE mac = $1)
-		  AND NOT EXISTS (SELECT 1 FROM onboarding_ignored WHERE mac = $1)`, args...)
+		WHERE mac = @mac
+		  AND NOT EXISTS (SELECT 1 FROM phones WHERE mac = @mac)
+		  AND NOT EXISTS (SELECT 1 FROM onboarding_ignored WHERE mac = @mac)`, args...)
 	if err != nil {
 		return "", err
 	}
@@ -106,13 +111,13 @@ func (s *Store) CaptureCandidate(ctx context.Context, c prov.Candidate) (prov.Ca
 	}
 	out := prov.CaptureStored
 	err = s.tx(ctx, func(tx *dbTx) error {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(onboardLockKey)); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(onboardLockKey))); err != nil {
 			return err
 		}
 		var known, ignored bool
 		if err := tx.QueryRowContext(ctx, `SELECT
-			EXISTS (SELECT 1 FROM phones WHERE mac = $1),
-			EXISTS (SELECT 1 FROM onboarding_ignored WHERE mac = $1)`, c.MAC).Scan(&known, &ignored); err != nil {
+			EXISTS (SELECT 1 FROM phones WHERE mac = @mac),
+			EXISTS (SELECT 1 FROM onboarding_ignored WHERE mac = @mac)`, momo.Named("mac", c.MAC)).Scan(&known, &ignored); err != nil {
 			return err
 		}
 		switch {
@@ -125,8 +130,8 @@ func (s *Store) CaptureCandidate(ctx context.Context, c prov.Candidate) (prov.Ca
 		}
 		var n int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT count(*) FROM onboarding_candidates WHERE last_seen >= now() - $1::float8 * interval '1 second'`,
-			ttlSeconds).Scan(&n); err != nil {
+			`SELECT count(*) FROM onboarding_candidates WHERE last_seen >= now() - @ttl::float8 * interval '1 second'`,
+			momo.Named("ttl", ttlSeconds)).Scan(&n); err != nil {
 			return err
 		}
 		if n >= prov.MaxCandidates {
@@ -153,7 +158,7 @@ func scanCandidate(r interface{ Scan(...any) error }) (Candidate, error) {
 // the TTL is expired and not listed even before the pruner removes it.
 func (s *Store) ListCandidates(ctx context.Context) ([]Candidate, error) {
 	rows, err := s.db.QueryContext(ctx, candidateSelect+`
-		WHERE last_seen >= now() - $1::float8 * interval '1 second' ORDER BY last_seen DESC, mac`, ttlSeconds)
+		WHERE last_seen >= now() - @ttl::float8 * interval '1 second' ORDER BY last_seen DESC, mac`, momo.Named("ttl", ttlSeconds))
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +178,7 @@ func (s *Store) ListCandidates(ctx context.Context) ([]Candidate, error) {
 // queued (or has expired).
 func (s *Store) GetCandidate(ctx context.Context, mac string) (Candidate, error) {
 	c, err := scanCandidate(s.db.QueryRowContext(ctx, candidateSelect+
-		` WHERE mac = $1 AND last_seen >= now() - $2::float8 * interval '1 second'`, mac, ttlSeconds))
+		` WHERE mac = @mac AND last_seen >= now() - @ttl::float8 * interval '1 second'`, momo.Named("mac", mac), momo.Named("ttl", ttlSeconds)))
 	return c, mapErr(err)
 }
 
@@ -182,8 +187,8 @@ func (s *Store) GetCandidate(ctx context.Context, mac string) (Candidate, error)
 func (s *Store) CountCandidates(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT count(*) FROM onboarding_candidates WHERE last_seen >= now() - $1::float8 * interval '1 second'`,
-		ttlSeconds).Scan(&n)
+		`SELECT count(*) FROM onboarding_candidates WHERE last_seen >= now() - @ttl::float8 * interval '1 second'`,
+		momo.Named("ttl", ttlSeconds)).Scan(&n)
 	return n, err
 }
 
@@ -191,7 +196,7 @@ func (s *Store) CountCandidates(ctx context.Context) (int, error) {
 // control pod may run it.
 func (s *Store) PruneCandidates(ctx context.Context) (int64, error) {
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM onboarding_candidates WHERE last_seen < now() - $1::float8 * interval '1 second'`, ttlSeconds)
+		`DELETE FROM onboarding_candidates WHERE last_seen < now() - @ttl::float8 * interval '1 second'`, momo.Named("ttl", ttlSeconds))
 	if err != nil {
 		return 0, err
 	}
@@ -205,15 +210,16 @@ func (s *Store) DismissCandidate(ctx context.Context, actor, mac string, ignore 
 	return s.tx(ctx, func(tx *dbTx) error {
 		var vendor, model string
 		if err := tx.QueryRowContext(ctx,
-			`DELETE FROM onboarding_candidates WHERE mac = $1 RETURNING vendor, model`, mac).Scan(&vendor, &model); err != nil {
+			`DELETE FROM onboarding_candidates WHERE mac = @mac RETURNING vendor, model`, momo.Named("mac", mac)).Scan(&vendor, &model); err != nil {
 			return err
 		}
 		action := "dismiss"
 		if ignore {
 			action = "ignore"
 			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO onboarding_ignored (mac, vendor, model, created_by) VALUES ($1, $2, $3, $4)
-				ON CONFLICT (mac) DO NOTHING`, mac, vendor, model, actor); err != nil {
+				INSERT INTO onboarding_ignored (mac, vendor, model, created_by) VALUES (@mac, @vendor, @model, @created_by)
+				ON CONFLICT (mac) DO NOTHING`, momo.Named("mac", mac), momo.Named("vendor", vendor), momo.Named("model", model),
+				momo.Named("created_by", actor)); err != nil {
 				return err
 			}
 		}
@@ -243,7 +249,7 @@ func (s *Store) ListIgnored(ctx context.Context) ([]IgnoredMAC, error) {
 // Unignore takes a MAC off the ignore list; ErrNotFound when it is not on it.
 func (s *Store) Unignore(ctx context.Context, actor, mac string) error {
 	return s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM onboarding_ignored WHERE mac = $1`, mac)
+		res, err := tx.ExecContext(ctx, `DELETE FROM onboarding_ignored WHERE mac = @mac`, momo.Named("mac", mac))
 		if err != nil {
 			return err
 		}
@@ -270,7 +276,7 @@ func (s *Store) AdoptCandidates(ctx context.Context, actor string, in []PhoneInp
 	}
 	err := s.provChange(ctx, actor, action, resource, func(tx *dbTx) (string, bool, error) {
 		for i, p := range in {
-			res, err := tx.ExecContext(ctx, `DELETE FROM onboarding_candidates WHERE mac = $1`, p.MAC)
+			res, err := tx.ExecContext(ctx, `DELETE FROM onboarding_candidates WHERE mac = @mac`, momo.Named("mac", p.MAC))
 			if err != nil {
 				return "", false, err
 			}

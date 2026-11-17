@@ -14,6 +14,8 @@ import (
 	"errors"
 	"strconv"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 var (
@@ -69,19 +71,19 @@ type NewClientDevice struct {
 func (s *Store) CreateClientDevice(ctx context.Context, actor string, in NewClientDevice) (ClientDevice, error) {
 	var c ClientDevice
 	err := s.configChangeID(ctx, actor, "create", "device", nil, func(tx *dbTx) (string, error) {
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id = $1 AND enabled FOR UPDATE`, in.UserID).Scan(&in.UserID); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id = @id AND enabled FOR UPDATE`, momo.Named("id", in.UserID)).Scan(&in.UserID); err != nil {
 			return "", err
 		}
 		var linked bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM user_extensions WHERE user_id = $1 AND extension_id = $2)`,
-			in.UserID, in.ExtensionID).Scan(&linked); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM user_extensions WHERE user_id = @user_id AND extension_id = @extension_id)`,
+			momo.Named("user_id", in.UserID), momo.Named("extension_id", in.ExtensionID)).Scan(&linked); err != nil {
 			return "", err
 		}
 		if !linked {
 			return "", sql.ErrNoRows
 		}
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM devices WHERE user_id = $1 AND kind <> 'desk' AND enabled`, in.UserID).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM devices WHERE user_id = @user_id AND kind <> 'desk' AND enabled`, momo.Named("user_id", in.UserID)).Scan(&n); err != nil {
 			return "", err
 		}
 		if n >= in.Max {
@@ -93,14 +95,15 @@ func (s *Store) CreateClientDevice(ctx context.Context, actor string, in NewClie
 		if err := tx.QueryRowContext(ctx, `
 			WITH n AS (SELECT nextval(pg_get_serial_sequence('devices', 'id')) AS id)
 			INSERT INTO devices (id, extension_id, sip_username, realm, enabled, kind, user_id, label, platform, app_version, auth_mode)
-			SELECT n.id, $1::bigint, (CASE WHEN $2::text = 'mobile' THEN 'm' ELSE 'w' END) || n.id::text, $3::text, TRUE, $2::text, $4::bigint,
-			       $5::text, NULLIF($6::text, ''), NULLIF($7::text, ''), 'derived'
+			SELECT n.id, @extension_id::bigint, (CASE WHEN @kind::text = 'mobile' THEN 'm' ELSE 'w' END) || n.id::text, @realm::text, TRUE, @kind::text, @user_id::bigint,
+			       @label::text, NULLIF(@platform::text, ''), NULLIF(@app_version::text, ''), 'derived'
 			FROM n RETURNING id`,
-			in.ExtensionID, in.Kind, in.Realm, in.UserID, in.Label, in.Platform, in.AppVersion).Scan(&id); err != nil {
+			momo.Named("extension_id", in.ExtensionID), momo.Named("kind", in.Kind), momo.Named("realm", in.Realm), momo.Named("user_id", in.UserID),
+			momo.Named("label", in.Label), momo.Named("platform", in.Platform), momo.Named("app_version", in.AppVersion)).Scan(&id); err != nil {
 			return "", err
 		}
 		var err error
-		c, err = scanSoftphone(tx.QueryRowContext(ctx, `SELECT `+softphoneCols+` FROM devices d JOIN extensions e ON e.id = d.extension_id WHERE d.id = $1`, id))
+		c, err = scanSoftphone(tx.QueryRowContext(ctx, `SELECT `+softphoneCols+` FROM devices d JOIN extensions e ON e.id = d.extension_id WHERE d.id = @id`, momo.Named("id", id)))
 		return strconv.FormatInt(id, 10), err
 	})
 	return c, err
@@ -109,7 +112,7 @@ func (s *Store) CreateClientDevice(ctx context.Context, actor string, in NewClie
 // ListClientDevices returns the user's active client devices, oldest first.
 func (s *Store) ListClientDevices(ctx context.Context, userID int64) ([]ClientDevice, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+softphoneCols+` FROM devices d JOIN extensions e ON e.id = d.extension_id
-		WHERE d.user_id = $1 AND d.kind <> 'desk' AND d.enabled ORDER BY d.id`, userID)
+		WHERE d.user_id = @user_id AND d.kind <> 'desk' AND d.enabled ORDER BY d.id`, momo.Named("user_id", userID))
 	if err != nil {
 		return nil, err
 	}
@@ -131,8 +134,8 @@ func (s *Store) ListClientDevices(ctx context.Context, userID int64) ([]ClientDe
 func (s *Store) RefreshClientDevice(ctx context.Context, userID, id int64) (ClientDevice, error) {
 	c, err := scanSoftphone(s.db.QueryRowContext(ctx, `
 		WITH u AS (UPDATE devices SET last_seen_at = now()
-		           WHERE id = $2 AND user_id = $1 AND kind <> 'desk' AND enabled RETURNING *)
-		SELECT `+softphoneCols+` FROM u d JOIN extensions e ON e.id = d.extension_id`, userID, id))
+		           WHERE id = @id AND user_id = @user_id AND kind <> 'desk' AND enabled RETURNING *)
+		SELECT `+softphoneCols+` FROM u d JOIN extensions e ON e.id = d.extension_id`, momo.Named("user_id", userID), momo.Named("id", id)))
 	return c, mapErr(err)
 }
 
@@ -142,7 +145,7 @@ func (s *Store) RefreshClientDevice(ctx context.Context, userID, id int64) (Clie
 func (s *Store) RevokeClientDevice(ctx context.Context, actor string, userID, id int64) error {
 	return s.configChange(ctx, actor, "revoke", "device", nil, func(tx *dbTx) (int64, error) {
 		res, err := tx.ExecContext(ctx, `UPDATE devices SET enabled = FALSE, updated_at = now()
-			WHERE id = $1 AND user_id = $2 AND kind <> 'desk' AND enabled`, id, userID)
+			WHERE id = @id AND user_id = @user_id AND kind <> 'desk' AND enabled`, momo.Named("id", id), momo.Named("user_id", userID))
 		if err != nil {
 			return id, err
 		}

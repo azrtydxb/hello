@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
 	"github.com/azrtydxb/hello/internal/secmedia"
@@ -44,14 +46,14 @@ func scanRecord(r interface{ Scan(...any) error }) (prov.PhoneRecord, []byte, er
 // PhoneByToken implements prov.Store.
 func (s *Store) PhoneByToken(ctx context.Context, hash []byte) (prov.PhoneRecord, error) {
 	rec, cur, err := scanRecord(s.db.QueryRowContext(ctx, recordSelect+`
-		WHERE p.token_hash = $1 OR (p.prev_token_hash = $1 AND p.prev_token_expires > now())`, hash))
+		WHERE p.token_hash = @hash OR (p.prev_token_hash = @hash AND p.prev_token_expires > now())`, momo.Named("hash", hash)))
 	rec.ViaPrevious = err == nil && string(cur) != string(hash)
 	return rec, err
 }
 
 // PhoneByMAC implements prov.Store.
 func (s *Store) PhoneByMAC(ctx context.Context, mac string) (prov.PhoneRecord, error) {
-	rec, _, err := scanRecord(s.db.QueryRowContext(ctx, recordSelect+` WHERE p.mac = $1`, mac))
+	rec, _, err := scanRecord(s.db.QueryRowContext(ctx, recordSelect+` WHERE p.mac = @mac`, momo.Named("mac", mac)))
 	return rec, err
 }
 
@@ -67,14 +69,15 @@ func ipArg(st prov.FetchState) any {
 // since replaced (a re-arm or a rotation) changes nothing.
 func (s *Store) MarkFetched(ctx context.Context, phoneID int64, hash []byte, st prov.FetchState) error {
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE phones SET first_fetch_at = COALESCE(first_fetch_at, $2), last_fetch_at = $2,
-		       last_fetch_ip = $3::inet, last_fetch_ua = $4, last_fetch_file = $5,
-		       firmware_seen = COALESCE(NULLIF($6, ''), firmware_seen),
-		       ua_mismatch = ua_mismatch OR $7, boot_armed = FALSE,
-		       ldap_prev_password_enc = CASE WHEN ldap_rotated_at IS NOT NULL AND ldap_rotated_at <= $2 AND $5 NOT LIKE 'pb/%'
+		UPDATE phones SET first_fetch_at = COALESCE(first_fetch_at, @at::timestamptz), last_fetch_at = @at::timestamptz,
+		       last_fetch_ip = @ip::inet, last_fetch_ua = @user_agent, last_fetch_file = @file::text,
+		       firmware_seen = COALESCE(NULLIF(@firmware_seen, ''), firmware_seen),
+		       ua_mismatch = ua_mismatch OR @ua_mismatch, boot_armed = FALSE,
+		       ldap_prev_password_enc = CASE WHEN ldap_rotated_at IS NOT NULL AND ldap_rotated_at <= @at::timestamptz AND @file::text NOT LIKE 'pb/%'
 		                                     THEN NULL ELSE ldap_prev_password_enc END
-		WHERE id = $1 AND (token_hash = $8 OR (prev_token_hash = $8 AND prev_token_expires > now()))`,
-		phoneID, st.At, ipArg(st), st.UserAgent, st.File, st.FirmwareSeen, st.UAMismatch, hash)
+		WHERE id = @id AND (token_hash = @hash OR (prev_token_hash = @hash AND prev_token_expires > now()))`,
+		momo.Named("id", phoneID), momo.Named("at", st.At), momo.Named("ip", ipArg(st)), momo.Named("user_agent", st.UserAgent),
+		momo.Named("file", st.File), momo.Named("firmware_seen", st.FirmwareSeen), momo.Named("ua_mismatch", st.UAMismatch), momo.Named("hash", hash))
 	return err
 }
 
@@ -83,13 +86,13 @@ func (s *Store) MarkFetched(ctx context.Context, phoneID int64, hash []byte, st 
 func (s *Store) PromoteToken(ctx context.Context, phoneID int64, hash []byte) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE phones SET prev_token_hash = NULL, prev_token_expires = NULL
-		WHERE id = $1 AND token_hash = $2`, phoneID, hash)
+		WHERE id = @id AND token_hash = @hash`, momo.Named("id", phoneID), momo.Named("hash", hash))
 	return err
 }
 
 // FlagTokenExposed implements prov.Store.
 func (s *Store) FlagTokenExposed(ctx context.Context, phoneID int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE phones SET token_exposed = TRUE WHERE id = $1`, phoneID)
+	_, err := s.db.ExecContext(ctx, `UPDATE phones SET token_exposed = TRUE WHERE id = @id`, momo.Named("id", phoneID))
 	return err
 }
 
@@ -103,7 +106,7 @@ func (s *Store) ClaimBoot(ctx context.Context, mac string, ip netip.Addr) (prov.
 	)
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var err error
-		rec, _, err = scanRecord(tx.QueryRowContext(ctx, recordSelect+` WHERE p.mac = $1 FOR UPDATE OF p`, mac))
+		rec, _, err = scanRecord(tx.QueryRowContext(ctx, recordSelect+` WHERE p.mac = @mac FOR UPDATE OF p`, momo.Named("mac", mac)))
 		if err != nil {
 			return err
 		}
@@ -117,11 +120,11 @@ func (s *Store) ClaimBoot(ctx context.Context, mac string, ip netip.Addr) (prov.
 			// The same boot cycle asking again: the same hand-off.
 			err = tx.QueryRowContext(ctx, `
 				SELECT token_enc FROM phones
-				WHERE id = $1 AND boot_handoff_at > now() - make_interval(secs => $2)
-				  AND (boot_handoff_ip IS NULL OR $3::inet IS NULL OR boot_handoff_ip = $3::inet)`,
-				rec.ID, prov.BootHandoffGrace.Seconds(), src).Scan(&enc)
+				WHERE id = @id AND boot_handoff_at > now() - make_interval(secs => @grace)
+				  AND (boot_handoff_ip IS NULL OR @ip::inet IS NULL OR boot_handoff_ip = @ip::inet)`,
+				momo.Named("id", rec.ID), momo.Named("grace", prov.BootHandoffGrace.Seconds()), momo.Named("ip", src)).Scan(&enc)
 			if errors.Is(err, sql.ErrNoRows) {
-				_, err = tx.ExecContext(ctx, `UPDATE phones SET boot_reclaimed = TRUE WHERE id = $1`, rec.ID)
+				_, err = tx.ExecContext(ctx, `UPDATE phones SET boot_reclaimed = TRUE WHERE id = @id`, momo.Named("id", rec.ID))
 				return err
 			}
 			if err != nil {
@@ -131,8 +134,8 @@ func (s *Store) ClaimBoot(ctx context.Context, mac string, ip netip.Addr) (prov.
 			return nil
 		default:
 			if err := tx.QueryRowContext(ctx, `
-				UPDATE phones SET boot_armed = FALSE, boot_handoff_at = now(), boot_handoff_ip = $2::inet
-				WHERE id = $1 AND boot_armed RETURNING token_enc`, rec.ID, src).Scan(&enc); err != nil {
+				UPDATE phones SET boot_armed = FALSE, boot_handoff_at = now(), boot_handoff_ip = @ip::inet
+				WHERE id = @id AND boot_armed RETURNING token_enc`, momo.Named("id", rec.ID), momo.Named("ip", src)).Scan(&enc); err != nil {
 				return err
 			}
 		}
@@ -199,7 +202,7 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		       COALESCE(p.side_key, g.side_key, 'ptt')
 		FROM phones p LEFT JOIN devices d ON d.id = p.device_id LEFT JOIN extensions e ON e.id = d.extension_id
 		LEFT JOIN phone_groups g ON g.id = p.group_id
-		WHERE p.id = $1`, phoneID).Scan(&d.Phone.MAC, &d.Phone.Vendor, &d.Phone.Model, &d.Phone.Label, &tokenEnc, &adminEnc,
+		WHERE p.id = @id`, momo.Named("id", phoneID)).Scan(&d.Phone.MAC, &d.Phone.Vendor, &d.Phone.Model, &d.Phone.Label, &tokenEnc, &adminEnc,
 		&tplID, &blfJSON, &groupID, &devID, nullStr(&d.Line.Username), &secEnc, nullStr(&d.Line.DisplayName), nullStr(&d.Line.Label), &d.Line.CallWaiting, &d.Line.NoVoicemail, &d.Line.SendAnonymous, &srtpPolicy, &srtpKeyEx, &mediaICE,
 		&d.SideKey.Function)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -390,8 +393,8 @@ func (s *Store) blfKeys(ctx context.Context, raw []byte) ([]prov.BLFKey, error) 
 	for _, n := range numbers {
 		var name string
 		// A key may also name a conference room: pressing it joins the room.
-		err := s.db.QueryRowContext(ctx, `SELECT name FROM extensions WHERE number = $1
-			UNION ALL SELECT name FROM conference_rooms WHERE number = $1 LIMIT 1`, n).Scan(&name)
+		err := s.db.QueryRowContext(ctx, `SELECT name FROM extensions WHERE number = @number
+			UNION ALL SELECT name FROM conference_rooms WHERE number = @number LIMIT 1`, momo.Named("number", n)).Scan(&name)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -411,7 +414,7 @@ type pinRow struct {
 func (s *Store) loadPins(ctx context.Context, v prov.Vendor) ([]pinRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT pn.model_glob, f.id, f.filename, f.version, pn.upgrade_hour FROM prov_firmware_pins pn
-		JOIN prov_firmware f ON f.id = pn.firmware_id WHERE pn.vendor = $1`, v)
+		JOIN prov_firmware f ON f.id = pn.firmware_id WHERE pn.vendor = @vendor`, momo.Named("vendor", v))
 	if err != nil {
 		return nil, err
 	}
@@ -509,7 +512,7 @@ func (s *Store) withFirmwareState(ctx context.Context, phones []Phone) error {
 
 // FirmwareByName implements prov.Store.
 func (s *Store) FirmwareByName(ctx context.Context, v prov.Vendor, filename string) (prov.Firmware, error) {
-	f, err := scanFirmware(s.db.QueryRowContext(ctx, `SELECT `+firmwareCols+` FROM prov_firmware f WHERE vendor = $1 AND filename = $2`, v, filename))
+	f, err := scanFirmware(s.db.QueryRowContext(ctx, `SELECT `+firmwareCols+` FROM prov_firmware f WHERE vendor = @vendor AND filename = @filename`, momo.Named("vendor", v), momo.Named("filename", filename)))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = prov.ErrNotFound
 	}
@@ -518,7 +521,7 @@ func (s *Store) FirmwareByName(ctx context.Context, v prov.Vendor, filename stri
 
 const insertFetchSQL = `
 			INSERT INTO prov_fetches (at, phone_id, mac_claimed, ip, user_agent, path_redacted, kind, result, status, bytes, ua_mismatch)
-			VALUES ($1, NULLIF($2::bigint, 0), $3, $4::inet, $5, $6, $7, $8, $9, $10, $11)`
+			VALUES (@at, NULLIF(@phone_id::bigint, 0), @mac_claimed, @ip::inet, @user_agent, @path_redacted, @kind, @result, @status, @bytes, @ua_mismatch)`
 
 // InsertFetches implements prov.Store.
 func (s *Store) InsertFetches(ctx context.Context, rows []prov.FetchRecord) error {
@@ -533,8 +536,9 @@ func (s *Store) InsertFetches(ctx context.Context, rows []prov.FetchRecord) erro
 			if r.IP.IsValid() {
 				ip = r.IP.Unmap().String()
 			}
-			if _, err := tx.ExecContext(ctx, insertFetchSQL, r.At, r.PhoneID, r.MACClaimed, ip, r.UserAgent, r.PathRedacted,
-				r.Kind, r.Result, r.Status, r.Bytes, r.UAMismatch); err != nil {
+			if _, err := tx.ExecContext(ctx, insertFetchSQL, momo.Named("at", r.At), momo.Named("phone_id", r.PhoneID), momo.Named("mac_claimed", r.MACClaimed),
+				momo.Named("ip", ip), momo.Named("user_agent", r.UserAgent), momo.Named("path_redacted", r.PathRedacted), momo.Named("kind", r.Kind),
+				momo.Named("result", r.Result), momo.Named("status", r.Status), momo.Named("bytes", r.Bytes), momo.Named("ua_mismatch", r.UAMismatch)); err != nil {
 				return err
 			}
 		}
@@ -550,7 +554,7 @@ type redirectQueue struct{ s *Store }
 func (q redirectQueue) DueJobs(ctx context.Context, limit int) ([]redirect.Job, error) {
 	rows, err := q.s.db.QueryContext(ctx, `
 		SELECT seq, vendor, mac, op, attempts, first_queued_at FROM prov_redirect_jobs
-		WHERE next_attempt_at <= now() ORDER BY next_attempt_at, seq LIMIT $1`, limit)
+		WHERE next_attempt_at <= now() ORDER BY next_attempt_at, seq LIMIT @limit`, momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +584,7 @@ func (q redirectQueue) Target(ctx context.Context, v prov.Vendor, mac string) (r
 		serial string
 		enc    []byte
 	)
-	err := q.s.db.QueryRowContext(ctx, `SELECT id, COALESCE(serial, ''), token_enc FROM phones WHERE mac = $1 AND vendor = $2`, mac, v).
+	err := q.s.db.QueryRowContext(ctx, `SELECT id, COALESCE(serial, ''), token_enc FROM phones WHERE mac = @mac AND vendor = @vendor`, momo.Named("mac", mac), momo.Named("vendor", v)).
 		Scan(&id, &serial, &enc)
 	if errors.Is(err, sql.ErrNoRows) {
 		return redirect.Target{}, prov.ErrNotFound
@@ -597,7 +601,8 @@ func (q redirectQueue) Account(ctx context.Context, v prov.Vendor) (redirect.Acc
 
 // jobDone runs update on the job row, only while it still has j.Seq, and
 // then, when st is not nil, sets the phone's status (when the phone exists
-// with that vendor).
+// with that vendor). update binds @vendor, @mac and @seq, which jobDone
+// passes, and the names of args.
 func (q redirectQueue) jobDone(ctx context.Context, j redirect.Job, st *redirect.Status, update string, args ...any) error {
 	var b []byte
 	if st != nil {
@@ -607,7 +612,7 @@ func (q redirectQueue) jobDone(ctx context.Context, j redirect.Job, st *redirect
 		}
 	}
 	return q.s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, update, append([]any{j.Vendor, j.MAC, j.Seq}, args...)...)
+		res, err := tx.ExecContext(ctx, update, append([]any{momo.Named("vendor", j.Vendor), momo.Named("mac", j.MAC), momo.Named("seq", j.Seq)}, args...)...)
 		if err != nil {
 			return err
 		}
@@ -617,13 +622,13 @@ func (q redirectQueue) jobDone(ctx context.Context, j redirect.Job, st *redirect
 		if st == nil {
 			return nil
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE phones SET redirect_status = $3 WHERE mac = $2 AND vendor = $1`, j.Vendor, j.MAC, string(b))
+		_, err = tx.ExecContext(ctx, `UPDATE phones SET redirect_status = @redirect_status WHERE mac = @mac AND vendor = @vendor`, momo.Named("vendor", j.Vendor), momo.Named("mac", j.MAC), momo.Named("redirect_status", string(b)))
 		return err
 	})
 }
 
 func (q redirectQueue) FinishJob(ctx context.Context, j redirect.Job, st *redirect.Status) error {
-	return q.jobDone(ctx, j, st, `DELETE FROM prov_redirect_jobs WHERE vendor = $1 AND mac = $2 AND seq = $3`)
+	return q.jobDone(ctx, j, st, `DELETE FROM prov_redirect_jobs WHERE vendor = @vendor AND mac = @mac AND seq = @seq`)
 }
 
 func (q redirectQueue) RetryJob(ctx context.Context, j redirect.Job, next time.Time, st *redirect.Status) error {
@@ -632,9 +637,9 @@ func (q redirectQueue) RetryJob(ctx context.Context, j redirect.Job, next time.T
 		reason = sql.NullString{String: st.Reason, Valid: true}
 	}
 	return q.jobDone(ctx, j, st, `
-		UPDATE prov_redirect_jobs SET attempts = attempts + 1, next_attempt_at = $4,
-			last_error = COALESCE($5, last_error)
-		WHERE vendor = $1 AND mac = $2 AND seq = $3`, next, reason)
+		UPDATE prov_redirect_jobs SET attempts = attempts + 1, next_attempt_at = @next_attempt_at,
+			last_error = COALESCE(@last_error, last_error)
+		WHERE vendor = @vendor AND mac = @mac AND seq = @seq`, momo.Named("next_attempt_at", next), momo.Named("last_error", reason))
 }
 
 func (q redirectQueue) LastDriftCheck(ctx context.Context) (time.Time, error) {
@@ -646,14 +651,14 @@ func (q redirectQueue) LastDriftCheck(ctx context.Context) (time.Time, error) {
 }
 
 func (q redirectQueue) SetLastDriftCheck(ctx context.Context, t time.Time) error {
-	_, err := q.s.db.ExecContext(ctx, `UPDATE schema_info SET prov_drift_checked_at = $1`, t)
+	_, err := q.s.db.ExecContext(ctx, `UPDATE schema_info SET prov_drift_checked_at = @t`, momo.Named("t", t))
 	return err
 }
 
 func (q redirectQueue) Registered(ctx context.Context, v prov.Vendor) ([]redirect.Target, error) {
 	rows, err := q.s.db.QueryContext(ctx, `
 		SELECT id, mac, COALESCE(serial, ''), token_enc FROM phones
-		WHERE vendor = $1 AND redirect_status->>'state' = 'registered' ORDER BY mac`, v)
+		WHERE vendor = @vendor AND redirect_status->>'state' = 'registered' ORDER BY mac`, momo.Named("vendor", v))
 	if err != nil {
 		return nil, err
 	}
@@ -682,7 +687,7 @@ func (q redirectQueue) SetStatus(ctx context.Context, mac string, st redirect.St
 	if err != nil {
 		return err
 	}
-	_, err = q.s.db.ExecContext(ctx, `UPDATE phones SET redirect_status = $2 WHERE mac = $1`, mac, string(b))
+	_, err = q.s.db.ExecContext(ctx, `UPDATE phones SET redirect_status = @redirect_status WHERE mac = @mac`, momo.Named("mac", mac), momo.Named("redirect_status", string(b)))
 	return err
 }
 
@@ -697,7 +702,7 @@ func (s *Store) emergencyInfo(ctx context.Context, phoneID int64, d prov.RenderD
 	var e911 sql.NullBool
 	var alarm sql.NullString
 	err := s.db.QueryRowContext(ctx, `SELECT g.e911_enabled, g.alarm_target FROM phones p
-		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).Scan(&e911, &alarm)
+		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = @id`, momo.Named("id", phoneID)).Scan(&e911, &alarm)
 	if err != nil {
 		return nil, "", err
 	}
@@ -726,7 +731,7 @@ func (s *Store) HELDLocation(ctx context.Context, phoneID int64) (prov.HELDLocat
 	}
 	var ext sql.NullString
 	if err := s.db.QueryRowContext(ctx, `SELECT e.number FROM phones p JOIN devices d ON d.id = p.device_id
-		JOIN extensions e ON e.id = d.extension_id WHERE p.id = $1`, phoneID).Scan(&ext); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		JOIN extensions e ON e.id = d.extension_id WHERE p.id = @id`, momo.Named("id", phoneID)).Scan(&ext); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return prov.HELDLocation{}, err
 	}
 	return prov.HELDLocation{Place: pl.Place, Extension: ext.String}, nil
