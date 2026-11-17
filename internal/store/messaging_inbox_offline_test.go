@@ -13,19 +13,6 @@ import (
 	"github.com/azrtydxb/momo/dialect"
 )
 
-// TestVisibleToMatchesVisible keeps the inbox's access condition the same in
-// both its forms: visibleTo (and poolMemberNamed) binding by name, and visible
-// (with poolMemberParam), kept for the files still on $n.
-func TestVisibleToMatchesVisible(t *testing.T) {
-	r := strings.NewReplacer("$1", "@user_id", "$2", "@all")
-	if got := r.Replace(visible); got != visibleTo {
-		t.Errorf("visible with @name binds =\n%s\nwant visibleTo =\n%s", got, visibleTo)
-	}
-	if got := r.Replace(poolMemberParam); got != poolMemberNamed {
-		t.Errorf("poolMemberParam with @name binds =\n%s\nwant poolMemberNamed =\n%s", got, poolMemberNamed)
-	}
-}
-
 // oneRowDriver answers every query with one row that scans as zero values and
 // every exec with one row affected, recording what PostgreSQL would receive,
 // so a store method runs its statements without a database. A statement
@@ -159,10 +146,11 @@ func TestInboxRuntimeStatementsBuild(t *testing.T) {
 		err := queueRedactions(ctx, tx, "b", `SELECT channel_id, @provider::text, provider_message_id FROM conversation_messages WHERE id = @id`,
 			momo.Named("id", 1), momo.Named("provider", "telnyx"))
 		notValidation(t, "queueRedactions with @name", err)
-		// A fragment still on $n (messaging.go).
+		// ErasePeer's fragment (messaging.go), binding @peer_key.
 		err = queueRedactions(ctx, tx, "b", `SELECT m.channel_id, ch.provider, m.provider_message_id FROM conversation_messages m
-			JOIN conversations c ON c.id = m.conversation_id JOIN msg_channels ch ON ch.id = m.channel_id WHERE c.peer_key = $1`, "+32")
-		notValidation(t, "queueRedactions with $n", err)
+			JOIN conversations c ON c.id = m.conversation_id JOIN msg_channels ch ON ch.id = m.channel_id WHERE c.peer_key = @peer_key`,
+			momo.Named("peer_key", "+32"))
+		notValidation(t, "queueRedactions with @peer_key", err)
 		if len(d.sent) != 2 {
 			t.Errorf("queueRedactions sent %d statements, want 2", len(d.sent))
 		}

@@ -736,7 +736,7 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 		if err := queueRedactions(ctx, tx, rep.Batch, `
 			SELECT m.channel_id, ch.provider, m.provider_message_id FROM conversation_messages m
 			JOIN conversations c ON c.id = m.conversation_id JOIN msg_channels ch ON ch.id = m.channel_id
-			WHERE c.peer_key = $1 AND m.provider_message_id IS NOT NULL AND ch.provider <> 'sip_trunk'`, peerKey); err != nil {
+			WHERE c.peer_key = @peer_key AND m.provider_message_id IS NOT NULL AND ch.provider <> 'sip_trunk'`, momo.Named("peer_key", peerKey)); err != nil {
 			return err
 		}
 		// The SIP text queue holds a copy of what went to desk phones and

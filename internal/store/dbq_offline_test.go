@@ -108,6 +108,7 @@ var namedFiles = map[string]bool{
 	"messaging_events.go":      true,
 	"messaging_route.go":       true,
 	"messaging_route_views.go": true,
+	"messaging_calls.go":       true,
 	"webchat.go":               true,
 	"webchat_sites.go":         true,
 }

@@ -157,7 +157,7 @@ const blockedReasonPrefix = "blocked: "
 // ("" at the end).
 func (s *Store) ListCDRs(ctx context.Context, f CDRFilter, before int64, limit int) ([]CDR, string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+cdrCols+`
-		FROM cdrs WHERE (@before::integer = 0 OR id < @before::integer) AND (@direction::text = '' OR direction = @direction::text)
+		FROM cdrs WHERE (@before::bigint = 0 OR id < @before::bigint) AND (@direction::text = '' OR direction = @direction::text)
 			AND (NOT @failed::boolean OR final_status NOT BETWEEN 200 AND 299)
 			AND (@disposition::text = '' OR (@disposition::text = 'blocked' AND left(failure_reason, length(@blocked_prefix::text)) = @blocked_prefix::text))
 		ORDER BY id DESC LIMIT @limit`, momo.Named("before", before), momo.Named("limit", limit+1), momo.Named("direction", f.Direction),
