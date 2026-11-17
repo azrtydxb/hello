@@ -47,20 +47,14 @@ const visibleTo = `(@all::boolean OR c.assignee_user_id = @user_id OR EXISTS (
 	SELECT 1 FROM conversation_messages vx WHERE vx.conversation_id = c.id AND vx.sender_user_id = @user_id AND vx.kind = 'message')
 	OR (c.assignee_user_id IS NULL AND ` + poolMemberNamed + `))`
 
-// poolMemberNamed is poolMemberParam (messaging_route.go) binding the caller
-// as @user_id. TestVisibleToMatchesVisible keeps the two the same.
+// poolMemberNamed is the condition "the caller is one of the people who may
+// take the unassigned conversation c" (poolMemberUser in messaging_route.go
+// is the same for a row u of users), binding the caller as @user_id.
 const poolMemberNamed = `(EXISTS (SELECT 1 FROM queues pq JOIN queue_members pm ON pm.queue_id = pq.id
 			JOIN user_extensions pe ON pe.extension_id = pm.extension_id
 			WHERE pq.id = c.queue_id AND pq.enabled AND pq.text_enabled AND pe.user_id = @user_id::bigint)
 		OR EXISTS (SELECT 1 FROM ring_group_members pg JOIN user_extensions pge ON pge.extension_id = pg.extension_id
 			WHERE pg.group_id = c.ring_group_id AND pge.user_id = @user_id::bigint))`
-
-// visible is visibleTo for the files whose statements still bind with $n
-// (messaging_calls.go): $1 is the user and $2 All. It goes when they move
-// to @name.
-const visible = `($2::boolean OR c.assignee_user_id = $1 OR EXISTS (
-	SELECT 1 FROM conversation_messages vx WHERE vx.conversation_id = c.id AND vx.sender_user_id = $1 AND vx.kind = 'message')
-	OR (c.assignee_user_id IS NULL AND ` + poolMemberParam + `))`
 
 // inboxAccessArgs are the arguments of visibleTo (and of convSelect, which
 // binds @user_id too) for a reader: @user_id and @all.
