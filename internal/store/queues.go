@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -162,6 +164,8 @@ const queueFrom = ` FROM queues q
 	LEFT JOIN announcements mp ON mp.id = q.minutes_prompt_id
 	LEFT JOIN announcements bp ON bp.id = q.breakout_prompt_id `
 
+// listQueues reads the queues the where fragment selects; args are the
+// momo.Named binds of the fragment's @names.
 func listQueues(ctx context.Context, q querier, where string, args ...any) ([]Queue, error) {
 	rows, err := q.QueryContext(ctx, `SELECT `+queueCols+queueFrom+where+` ORDER BY q.id`, args...)
 	if err != nil {
@@ -200,7 +204,7 @@ func listQueues(ctx context.Context, q querier, where string, args ...any) ([]Qu
 	}
 	mrows, err := q.QueryContext(ctx, `SELECT m.queue_id, m.extension_id, e.number, e.name, m.dynamic, m.penalty, m.position
 		FROM queue_members m JOIN extensions e ON e.id = m.extension_id
-		WHERE m.queue_id = ANY($1) ORDER BY m.queue_id, m.position`, ids)
+		WHERE m.queue_id = ANY(@ids) ORDER BY m.queue_id, m.position`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +229,7 @@ func (s *Store) ListQueues(ctx context.Context) ([]Queue, error) {
 
 // GetQueue returns one queue.
 func (s *Store) GetQueue(ctx context.Context, id int64) (Queue, error) {
-	qs, err := listQueues(ctx, s.q(ctx), ` WHERE q.id = $1`, id)
+	qs, err := listQueues(ctx, s.q(ctx), ` WHERE q.id = @id`, momo.Named("id", id))
 	if err != nil {
 		return Queue{}, err
 	}
@@ -239,7 +243,7 @@ func (s *Store) GetQueue(ctx context.Context, id int64) (Queue, error) {
 // settings that name one.
 func (s *Store) QueueNameExists(ctx context.Context, name string) (bool, error) {
 	var n int
-	if err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM queues WHERE name = $1`, name).Scan(&n); err != nil {
+	if err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM queues WHERE name = @name`, momo.Named("name", name)).Scan(&n); err != nil {
 		return false, err
 	}
 	return n > 0, nil
@@ -260,7 +264,7 @@ func checkQueue(ctx context.Context, tx *dbTx, id int64, in QueueInput) error {
 		}
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
-			WHERE e.number = $1`, in.BreakoutVoicemail).Scan(&n); err != nil {
+			WHERE e.number = @number`, momo.Named("number", in.BreakoutVoicemail)).Scan(&n); err != nil {
 			return err
 		}
 		if n == 0 {
@@ -288,7 +292,7 @@ func checkQueue(ctx context.Context, tx *dbTx, id int64, in QueueInput) error {
 		}
 		seen[m.ExtensionID] = true
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM extensions WHERE id = $1`, m.ExtensionID).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM extensions WHERE id = @id`, momo.Named("id", m.ExtensionID)).Scan(&n); err != nil {
 			return err
 		}
 		if n == 0 {
@@ -305,7 +309,7 @@ func checkQueue(ctx context.Context, tx *dbTx, id int64, in QueueInput) error {
 // the queue through other queues: a call would be passed round for ever.
 func checkQueueLoops(ctx context.Context, tx *dbTx, id int64, in QueueInput) error {
 	rows, err := tx.QueryContext(ctx, `SELECT name, timeout_kind, timeout_target, full_kind, full_target,
-		no_agents_kind, no_agents_target FROM queues WHERE id <> $1`, id)
+		no_agents_kind, no_agents_target FROM queues WHERE id <> @id`, momo.Named("id", id))
 	if err != nil {
 		return err
 	}
@@ -334,12 +338,12 @@ func checkQueueLoops(ctx context.Context, tx *dbTx, id int64, in QueueInput) err
 }
 
 func writeQueueMembers(ctx context.Context, tx *dbTx, id int64, members []QueueMember) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM queue_members WHERE queue_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM queue_members WHERE queue_id = @queue_id`, momo.Named("queue_id", id)); err != nil {
 		return err
 	}
 	for _, m := range members {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO queue_members (queue_id, extension_id, dynamic, penalty, position)
-			VALUES ($1, $2, $3, $4, $5)`, id, m.ExtensionID, m.Dynamic, m.Penalty, m.Position); err != nil {
+			VALUES (@queue_id, @extension_id, @dynamic, @penalty, @position)`, momo.Named("queue_id", id), momo.Named("extension_id", m.ExtensionID), momo.Named("dynamic", m.Dynamic), momo.Named("penalty", m.Penalty), momo.Named("position", m.Position)); err != nil {
 			return err
 		}
 	}
@@ -394,13 +398,31 @@ func (in QueueInput) textCapacity() int {
 	return in.TextCapacity
 }
 
+// args binds the input by name: one momo.Named per column of queueWriteCols,
+// named after the column.
 func (in QueueInput) args() []any {
-	return []any{in.Name, in.Number, in.Enabled, in.Strategy, in.AgentTimeout, in.RetryDelay, in.WrapUp, in.MaxCallers, in.MaxWait,
+	vals := []any{in.Name, in.Number, in.Enabled, in.Strategy, in.AgentTimeout, in.RetryDelay, in.WrapUp, in.MaxCallers, in.MaxWait,
 		in.JoinEmpty, in.LeaveEmpty, in.Timeout.Kind, in.Timeout.Target, in.Full.Kind, in.Full.Target, in.NoAgents.Kind, in.NoAgents.Target,
 		in.MOHClassID, in.AnnounceFrequency, in.AnnouncePosition, in.AnnounceWait, in.PeriodicPromptID, in.PositionPromptID,
 		in.WaitPromptID, in.MinutesPromptID, in.DigitsPrefix, in.BreakoutKey, in.BreakoutPromptID, in.BreakoutVoicemail,
 		in.CallbackEnabled, in.CallbackOfferAfter, orDefaultStr(in.CallbackDigit, queue.DefaultCallbackDigit), nullIfEmpty(in.PromptLanguage),
 		in.TextEnabled, in.textCapacity(), in.TextReassignSeconds, in.TextRequiresIdleVoice}
+	cols := queueWriteNames()
+	args := make([]any, len(cols))
+	for i, c := range cols {
+		args[i] = momo.Named(c, vals[i])
+	}
+	return args
+}
+
+// queueWriteNames are the columns of queueWriteCols; each is also the name
+// its value binds as.
+func queueWriteNames() []string {
+	cols := strings.Split(queueWriteCols, ",")
+	for i := range cols {
+		cols[i] = strings.TrimSpace(cols[i])
+	}
+	return cols
 }
 
 // CreateQueue inserts a queue with its members.
@@ -417,9 +439,9 @@ func (s *Store) CreateQueue(ctx context.Context, actor string, in QueueInput, ch
 		if err := checkQueue(ctx, tx, 0, in); err != nil {
 			return 0, err
 		}
-		ph := make([]string, 37)
+		ph := queueWriteNames()
 		for i := range ph {
-			ph[i] = fmt.Sprintf("$%d", i+1)
+			ph[i] = "@" + ph[i]
 		}
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO queues (`+queueWriteCols+`) VALUES (`+strings.Join(ph, ",")+`) RETURNING id`,
@@ -429,7 +451,7 @@ func (s *Store) CreateQueue(ctx context.Context, actor string, in QueueInput, ch
 		if err := writeQueueMembers(ctx, tx, id, in.Members); err != nil {
 			return id, err
 		}
-		qs, err := listQueues(ctx, tx, ` WHERE q.id = $1`, id)
+		qs, err := listQueues(ctx, tx, ` WHERE q.id = @id`, momo.Named("id", id))
 		if err == nil && len(qs) == 1 {
 			out = qs[0]
 		}
@@ -445,14 +467,14 @@ func queueReferences(ctx context.Context, tx *dbTx, id int64, name string) ([]st
 		query, label string
 		args         []any
 	}{
-		{`SELECT name FROM inbound_routes WHERE destination_kind = 'queue' AND destination = $1`, "inbound route", []any{name}},
-		{`SELECT name FROM ring_groups WHERE failure_kind = 'queue' AND failure_target = $1`, "ring group", []any{name}},
-		{`SELECT name FROM ivr_menus WHERE (timeout_kind = 'queue' AND timeout_target = $1) OR (invalid_kind = 'queue' AND invalid_target = $1)
-			OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = ivr_menus.id AND o.dest_kind = 'queue' AND o.dest_target = $1)`, "IVR menu", []any{name}},
-		{`SELECT name FROM queues WHERE id <> $2 AND ((timeout_kind = 'queue' AND timeout_target = $1)
-			OR (full_kind = 'queue' AND full_target = $1) OR (no_agents_kind = 'queue' AND no_agents_target = $1))`, "queue", []any{name, id}},
-		{`SELECT name FROM time_conditions WHERE (open_kind = 'queue' AND open_target = $1)
-			OR (closed_kind = 'queue' AND closed_target = $1) OR (holiday_kind = 'queue' AND holiday_target = $1)`, "time condition", []any{name}},
+		{`SELECT name FROM inbound_routes WHERE destination_kind = 'queue' AND destination = @name`, "inbound route", []any{momo.Named("name", name)}},
+		{`SELECT name FROM ring_groups WHERE failure_kind = 'queue' AND failure_target = @name`, "ring group", []any{momo.Named("name", name)}},
+		{`SELECT name FROM ivr_menus WHERE (timeout_kind = 'queue' AND timeout_target = @name) OR (invalid_kind = 'queue' AND invalid_target = @name)
+			OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = ivr_menus.id AND o.dest_kind = 'queue' AND o.dest_target = @name)`, "IVR menu", []any{momo.Named("name", name)}},
+		{`SELECT name FROM queues WHERE id <> @id AND ((timeout_kind = 'queue' AND timeout_target = @name)
+			OR (full_kind = 'queue' AND full_target = @name) OR (no_agents_kind = 'queue' AND no_agents_target = @name))`, "queue", []any{momo.Named("name", name), momo.Named("id", id)}},
+		{`SELECT name FROM time_conditions WHERE (open_kind = 'queue' AND open_target = @name)
+			OR (closed_kind = 'queue' AND closed_target = @name) OR (holiday_kind = 'queue' AND holiday_target = @name)`, "time condition", []any{momo.Named("name", name)}},
 	} {
 		rows, err := tx.QueryContext(ctx, q.query, q.args...)
 		if err != nil {
@@ -480,7 +502,7 @@ func (s *Store) UpdateQueue(ctx context.Context, actor string, id int64, in Queu
 	var out Queue
 	err := s.configChange(ctx, actor, "update", "queue", check, func(tx *dbTx) (int64, error) {
 		var cur string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = $1 FOR UPDATE`, id).Scan(&cur); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&cur); err != nil {
 			return id, err
 		}
 		if cur != in.Name {
@@ -495,19 +517,19 @@ func (s *Store) UpdateQueue(ctx context.Context, actor string, id int64, in Queu
 		if err := checkQueue(ctx, tx, id, in); err != nil {
 			return id, err
 		}
-		sets := strings.Split(queueWriteCols, ",")
+		sets := queueWriteNames()
 		for i := range sets {
-			sets[i] = fmt.Sprintf("%s = $%d", strings.TrimSpace(sets[i]), i+2)
+			sets[i] = sets[i] + " = @" + sets[i]
 		}
 		//nolint:gosec // G202: the SET list is built from the constant queueWriteCols
-		if _, err := tx.ExecContext(ctx, `UPDATE queues SET `+strings.Join(sets, ", ")+`, updated_at = now() WHERE id = $1`,
-			append([]any{id}, in.args()...)...); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE queues SET `+strings.Join(sets, ", ")+`, updated_at = now() WHERE id = @id`,
+			append([]any{momo.Named("id", id)}, in.args()...)...); err != nil {
 			return id, queueFK(err)
 		}
 		if err := writeQueueMembers(ctx, tx, id, in.Members); err != nil {
 			return id, err
 		}
-		qs, err := listQueues(ctx, tx, ` WHERE q.id = $1`, id)
+		qs, err := listQueues(ctx, tx, ` WHERE q.id = @id`, momo.Named("id", id))
 		if err == nil && len(qs) == 1 {
 			out = qs[0]
 		}
@@ -521,7 +543,7 @@ func (s *Store) UpdateQueue(ctx context.Context, actor string, id int64, in Queu
 func (s *Store) DeleteQueue(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "queue", check, func(tx *dbTx) (int64, error) {
 		var name string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&name); err != nil {
 			return id, err
 		}
 		refs, err := queueReferences(ctx, tx, id, name)
@@ -535,7 +557,7 @@ func (s *Store) DeleteQueue(ctx context.Context, actor string, id int64, check C
 		if refs = append(refs, more...); len(refs) > 0 {
 			return id, inUseBy("queue "+name, refs)
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM queues WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM queues WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -550,8 +572,8 @@ func (s *Store) DeleteQueue(ctx context.Context, actor string, id int64, check C
 func queueTextReferences(ctx context.Context, tx *dbTx, id int64) ([]string, error) {
 	var refs []string
 	rows, err := tx.QueryContext(ctx, `SELECT coalesce(NULLIF(label, ''), address) FROM msg_addresses
-		WHERE (route_kind IN ('queue', 'ai_triage') AND route_target = $1) OR (after_hours_action = 'route' AND after_hours_route_kind = 'queue' AND after_hours_route_target = $1)
-		ORDER BY id`, strconv.FormatInt(id, 10))
+		WHERE (route_kind IN ('queue', 'ai_triage') AND route_target = @target) OR (after_hours_action = 'route' AND after_hours_route_kind = 'queue' AND after_hours_route_target = @target)
+		ORDER BY id`, momo.Named("target", strconv.FormatInt(id, 10)))
 	if err != nil {
 		return nil, err
 	}
@@ -568,7 +590,7 @@ func queueTextReferences(ctx context.Context, tx *dbTx, id int64) ([]string, err
 		return nil, err
 	}
 	var open int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE queue_id = $1 AND status IN ('open', 'pending', 'snoozed')`, id).Scan(&open); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE queue_id = @queue_id AND status IN ('open', 'pending', 'snoozed')`, momo.Named("queue_id", id)).Scan(&open); err != nil {
 		return nil, err
 	}
 	if open > 0 {

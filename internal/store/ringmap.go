@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/ringtag"
 )
@@ -43,9 +45,9 @@ type RingMap struct {
 // the vendor's default for the tag's Bellcore slot.
 func (s *Store) GetRingMap(ctx context.Context) (RingMap, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.group_id, m.tag, m.vendor, CASE WHEN m.custom_tone_id IS NULL THEN m.tone ELSE $1 || t.name END
+		SELECT m.group_id, m.tag, m.vendor, CASE WHEN m.custom_tone_id IS NULL THEN m.tone ELSE @prefix || t.name END
 		FROM ring_map m LEFT JOIN ringtones t ON t.id = m.custom_tone_id
-		ORDER BY COALESCE(m.group_id, 0), m.tag, m.vendor`, prov.CustomPrefix)
+		ORDER BY COALESCE(m.group_id, 0), m.tag, m.vendor`, momo.Named("prefix", prov.CustomPrefix))
 	if err != nil {
 		return RingMap{}, err
 	}
@@ -84,7 +86,7 @@ func (s *Store) ReplaceRingMap(ctx context.Context, actor string, groupID *int64
 			rid = "group:" + strconv.FormatInt(*groupID, 10)
 			gid = *groupID
 			var one int
-			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, *groupID).Scan(&one); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = @id FOR UPDATE`, momo.Named("id", *groupID)).Scan(&one); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return rid, false, ErrNotFound
 				}
@@ -155,7 +157,7 @@ func (s *Store) ReplaceRingMap(ctx context.Context, actor string, groupID *int64
 			}
 			seen[[2]string{e.Tag, e.Vendor}] = true
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM ring_map WHERE COALESCE(group_id, 0) = COALESCE($1::bigint, 0)`, gid); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM ring_map WHERE COALESCE(group_id, 0) = COALESCE(@group_id::bigint, 0)`, momo.Named("group_id", gid)); err != nil {
 			return rid, false, err
 		}
 		for i, e := range in {
@@ -163,8 +165,8 @@ func (s *Store) ReplaceRingMap(ctx context.Context, actor string, groupID *int64
 			if toneIDs[i].Valid {
 				tone = "custom"
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO ring_map (group_id, tag, vendor, tone, custom_tone_id) VALUES ($1, $2, $3, $4, $5)`,
-				gid, e.Tag, e.Vendor, tone, toneIDs[i]); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO ring_map (group_id, tag, vendor, tone, custom_tone_id) VALUES (@group_id, @tag, @vendor, @tone, @custom_tone_id)`,
+				momo.Named("group_id", gid), momo.Named("tag", e.Tag), momo.Named("vendor", e.Vendor), momo.Named("tone", tone), momo.Named("custom_tone_id", toneIDs[i])); err != nil {
 				return rid, false, err
 			}
 		}
@@ -233,10 +235,10 @@ func (s *Store) ringInfo(ctx context.Context, phoneID int64, v prov.Vendor, mode
 	// Global rows first, then the group's, so the group's overwrite.
 	tones := map[string]string{}
 	mrows, err := s.db.QueryContext(ctx, `
-		SELECT m.tag, CASE WHEN m.custom_tone_id IS NULL THEN m.tone ELSE $3 || t.name END
+		SELECT m.tag, CASE WHEN m.custom_tone_id IS NULL THEN m.tone ELSE @prefix || t.name END
 		FROM ring_map m LEFT JOIN ringtones t ON t.id = m.custom_tone_id
-		WHERE m.vendor = $2 AND (m.group_id IS NULL OR m.group_id = (SELECT group_id FROM phones WHERE id = $1))
-		ORDER BY m.group_id IS NOT NULL`, phoneID, string(v), prov.CustomPrefix)
+		WHERE m.vendor = @vendor AND (m.group_id IS NULL OR m.group_id = (SELECT group_id FROM phones WHERE id = @phone_id))
+		ORDER BY m.group_id IS NOT NULL`, momo.Named("phone_id", phoneID), momo.Named("vendor", string(v)), momo.Named("prefix", prov.CustomPrefix))
 	if err != nil {
 		return prov.RingInfo{}, err
 	}

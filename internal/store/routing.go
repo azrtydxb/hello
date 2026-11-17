@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/secmedia"
 )
@@ -207,7 +209,7 @@ func scanTrunk(r interface{ Scan(...any) error }) (Trunk, error) {
 // destinations returns each listed trunk's destinations in saved order.
 func destinations(ctx context.Context, q querier, ids []int64) (map[int64][]routing.Destination, error) {
 	rows, err := q.QueryContext(ctx, `SELECT trunk_id, host, port, priority, weight FROM trunk_destinations
-		WHERE trunk_id = ANY($1) ORDER BY trunk_id, id`, ids)
+		WHERE trunk_id = ANY(@ids) ORDER BY trunk_id, id`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +270,7 @@ func (s *Store) GetTrunk(ctx context.Context, id int64) (Trunk, error) {
 }
 
 func getTrunk(ctx context.Context, q querier, id int64, suffix string) (Trunk, error) {
-	ts, err := listTrunks(ctx, q, "WHERE id = $1", suffix, id)
+	ts, err := listTrunks(ctx, q, "WHERE id = @id", suffix, momo.Named("id", id))
 	if err != nil {
 		return Trunk{}, err
 	}
@@ -295,7 +297,7 @@ func (s *Store) setPassword(ctx context.Context, tx *dbTx, id int64, password st
 			return fmt.Errorf("store: trunk %d password does not round-trip under HELLO_SECRET_KEY", id)
 		}
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE trunks SET password_enc = $2 WHERE id = $1`, id, sealed)
+	_, err := tx.ExecContext(ctx, `UPDATE trunks SET password_enc = @password_enc WHERE id = @id`, momo.Named("id", id), momo.Named("password_enc", sealed))
 	return err
 }
 
@@ -309,12 +311,13 @@ func sessionTimersArg(v string) string {
 }
 
 func writeDestinations(ctx context.Context, tx *dbTx, id int64, ds []routing.Destination) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM trunk_destinations WHERE trunk_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM trunk_destinations WHERE trunk_id = @trunk_id`, momo.Named("trunk_id", id)); err != nil {
 		return err
 	}
 	for _, d := range ds {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO trunk_destinations (trunk_id, host, port, priority, weight)
-			VALUES ($1, $2, $3, $4, $5)`, id, d.Host, d.Port, d.Priority, d.Weight); err != nil {
+			VALUES (@trunk_id, @host, @port, @priority, @weight)`,
+			momo.Named("trunk_id", id), momo.Named("host", d.Host), momo.Named("port", d.Port), momo.Named("priority", d.Priority), momo.Named("weight", d.Weight)); err != nil {
 			return err
 		}
 	}
@@ -331,12 +334,19 @@ func (s *Store) CreateTrunk(ctx context.Context, actor string, in TrunkInput, pa
 		if err := tx.QueryRowContext(ctx, `INSERT INTO trunks (name, mode, username, realm, from_domain, register_expires,
 				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging, geolocation,
 				anonymous_policy, asserted_identity, identity_header, reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code, srtp, session_timers, fax_mode, profile)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15, $16, $17, $18, $19, $20::text[], $21, $22, $23, $24, $25, $26) RETURNING id`,
-			in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires, in.OptionsInterval,
-			nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled, dialingArg(in.InternalDialing),
-			codecsArg(in.Codecs), in.Messaging, in.Geolocation,
-			in.AnonymousPolicy, in.AssertedIdentity, in.IdentityHeader, in.CallerPolicy.RejectAnonymous, nonNil(in.CallerPolicy.AllowedCountryCodes),
-			policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), string(secmedia.Normalize(in.SRTP, secmedia.Off)), sessionTimersArg(in.SessionTimers), faxModeArg(in.FaxMode), profileArg(in.Profile)).Scan(&id); err != nil {
+			VALUES (@name, @mode, @username, @realm, @from_domain, @register_expires, @options_interval, @source_cidrs::cidr[],
+				@max_calls, @default_caller_id, @enabled, @internal_dialing::jsonb, @codecs::jsonb, @messaging, @geolocation,
+				@anonymous_policy, @asserted_identity, @identity_header, @reject_anonymous, @allowed_country_codes::text[],
+				@unknown_caller_action, @reject_code, @srtp, @session_timers, @fax_mode, @profile) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("mode", in.Mode), momo.Named("username", in.Username),
+			momo.Named("realm", in.Realm), momo.Named("from_domain", in.FromDomain), momo.Named("register_expires", in.RegisterExpires),
+			momo.Named("options_interval", in.OptionsInterval), momo.Named("source_cidrs", nonNil(in.SourceCIDRs)), momo.Named("max_calls", in.MaxCalls),
+			momo.Named("default_caller_id", in.DefaultCallerID), momo.Named("enabled", in.Enabled), momo.Named("internal_dialing", dialingArg(in.InternalDialing)),
+			momo.Named("codecs", codecsArg(in.Codecs)), momo.Named("messaging", in.Messaging), momo.Named("geolocation", in.Geolocation),
+			momo.Named("anonymous_policy", in.AnonymousPolicy), momo.Named("asserted_identity", in.AssertedIdentity), momo.Named("identity_header", in.IdentityHeader),
+			momo.Named("reject_anonymous", in.CallerPolicy.RejectAnonymous), momo.Named("allowed_country_codes", nonNil(in.CallerPolicy.AllowedCountryCodes)), momo.Named("unknown_caller_action", policyAction(in.CallerPolicy)),
+			momo.Named("reject_code", policyCode(in.CallerPolicy)), momo.Named("srtp", string(secmedia.Normalize(in.SRTP, secmedia.Off))), momo.Named("session_timers", sessionTimersArg(in.SessionTimers)),
+			momo.Named("fax_mode", faxModeArg(in.FaxMode)), momo.Named("profile", profileArg(in.Profile))).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := s.setPassword(ctx, tx, id, password); err != nil {
@@ -373,17 +383,25 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 			return id, &ValidationError{Fields: fields}
 		}
 		in.anonymousDefaults()
-		if _, err := tx.ExecContext(ctx, `UPDATE trunks SET name = $2, mode = $3, username = $4, realm = $5,
-				from_domain = $6, register_expires = $7, options_interval = $8, source_cidrs = $9::cidr[],
-				max_calls = $10, default_caller_id = $11, enabled = $12, internal_dialing = $13::jsonb,
-				codecs = $14::jsonb, messaging = $15, geolocation = $16, anonymous_policy = $17,
-				asserted_identity = $18, identity_header = $19, reject_anonymous = $20, allowed_country_codes = $21::text[],
-				unknown_caller_action = $22, reject_code = $23, srtp = $24, session_timers = $25, fax_mode = $26, profile = $27, updated_at = now()
-			WHERE id = $1`, id, in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires,
-			in.OptionsInterval, nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled,
-			dialingArg(in.InternalDialing), codecsArg(in.Codecs), in.Messaging, in.Geolocation,
-			in.AnonymousPolicy, in.AssertedIdentity, in.IdentityHeader, in.CallerPolicy.RejectAnonymous,
-			nonNil(in.CallerPolicy.AllowedCountryCodes), policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), string(secmedia.Normalize(in.SRTP, secmedia.Off)), sessionTimersArg(in.SessionTimers), faxModeArg(in.FaxMode), profileArg(in.Profile)); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE trunks SET name = @name, mode = @mode, username = @username, realm = @realm,
+				from_domain = @from_domain, register_expires = @register_expires, options_interval = @options_interval,
+				source_cidrs = @source_cidrs::cidr[], max_calls = @max_calls, default_caller_id = @default_caller_id,
+				enabled = @enabled, internal_dialing = @internal_dialing::jsonb, codecs = @codecs::jsonb, messaging = @messaging,
+				geolocation = @geolocation, anonymous_policy = @anonymous_policy, asserted_identity = @asserted_identity,
+				identity_header = @identity_header, reject_anonymous = @reject_anonymous,
+				allowed_country_codes = @allowed_country_codes::text[], unknown_caller_action = @unknown_caller_action,
+				reject_code = @reject_code, srtp = @srtp, session_timers = @session_timers, fax_mode = @fax_mode,
+				profile = @profile, updated_at = now()
+			WHERE id = @id`,
+			momo.Named("id", id), momo.Named("name", in.Name), momo.Named("mode", in.Mode),
+			momo.Named("username", in.Username), momo.Named("realm", in.Realm), momo.Named("from_domain", in.FromDomain),
+			momo.Named("register_expires", in.RegisterExpires), momo.Named("options_interval", in.OptionsInterval), momo.Named("source_cidrs", nonNil(in.SourceCIDRs)),
+			momo.Named("max_calls", in.MaxCalls), momo.Named("default_caller_id", in.DefaultCallerID), momo.Named("enabled", in.Enabled),
+			momo.Named("internal_dialing", dialingArg(in.InternalDialing)), momo.Named("codecs", codecsArg(in.Codecs)), momo.Named("messaging", in.Messaging),
+			momo.Named("geolocation", in.Geolocation), momo.Named("anonymous_policy", in.AnonymousPolicy), momo.Named("asserted_identity", in.AssertedIdentity),
+			momo.Named("identity_header", in.IdentityHeader), momo.Named("reject_anonymous", in.CallerPolicy.RejectAnonymous), momo.Named("allowed_country_codes", nonNil(in.CallerPolicy.AllowedCountryCodes)),
+			momo.Named("unknown_caller_action", policyAction(in.CallerPolicy)), momo.Named("reject_code", policyCode(in.CallerPolicy)), momo.Named("srtp", string(secmedia.Normalize(in.SRTP, secmedia.Off))),
+			momo.Named("session_timers", sessionTimersArg(in.SessionTimers)), momo.Named("fax_mode", faxModeArg(in.FaxMode)), momo.Named("profile", profileArg(in.Profile))); err != nil {
 			return id, err
 		}
 		if pw.Set {
@@ -424,12 +442,12 @@ func routeNames(ctx context.Context, tx *dbTx, query string, args ...any) ([]str
 // source — and locks the extension row.
 func extensionRoutes(ctx context.Context, tx *dbTx, id int64) (string, []string, error) {
 	var number string
-	if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1 FOR UPDATE`, id).Scan(&number); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&number); err != nil {
 		return "", nil, err
 	}
 	routes, err := routeNames(ctx, tx, `
-		SELECT name FROM inbound_routes WHERE destination_kind = 'extension' AND destination = $1
-		UNION ALL SELECT name FROM outbound_routes WHERE $1 = ANY (source_extensions)`, number)
+		SELECT name FROM inbound_routes WHERE destination_kind = 'extension' AND destination = @number::text
+		UNION ALL SELECT name FROM outbound_routes WHERE @number::text = ANY (source_extensions)`, momo.Named("number", number))
 	return number, routes, err
 }
 
@@ -440,19 +458,19 @@ func extensionRoutes(ctx context.Context, tx *dbTx, id int64) (string, []string,
 func (s *Store) DeleteTrunk(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "trunk", check, func(tx *dbTx) (int64, error) {
 		var name string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM trunks WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM trunks WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&name); err != nil {
 			return id, err
 		}
 		routes, err := routeNames(ctx, tx, `
-			SELECT r.name FROM outbound_routes r JOIN outbound_route_trunks t ON t.route_id = r.id WHERE t.trunk_id = $1
-			UNION ALL SELECT name FROM inbound_routes WHERE trunk_id = $1`, id)
+			SELECT r.name FROM outbound_routes r JOIN outbound_route_trunks t ON t.route_id = r.id WHERE t.trunk_id = @trunk_id::bigint
+			UNION ALL SELECT name FROM inbound_routes WHERE trunk_id = @trunk_id::bigint`, momo.Named("trunk_id", id))
 		if err != nil {
 			return id, err
 		}
 		if len(routes) > 0 {
 			return id, inUse("trunk "+strconv.Quote(name), routes)
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM trunks WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM trunks WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -567,7 +585,7 @@ func (s *Store) GetOutboundRoute(ctx context.Context, id int64) (OutboundRoute, 
 }
 
 func getOutbound(ctx context.Context, q querier, id int64, suffix string) (OutboundRoute, error) {
-	os, err := listOutbound(ctx, q, "WHERE id = $1", suffix, id)
+	os, err := listOutbound(ctx, q, "WHERE id = @id", suffix, momo.Named("id", id))
 	if err != nil {
 		return OutboundRoute{}, err
 	}
@@ -612,7 +630,7 @@ func jsonArg(v any) (any, error) {
 
 // checkTrunksExist reports each listed trunk id that does not exist.
 func checkTrunksExist(ctx context.Context, tx *dbTx, path string, ids []int64) error {
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM trunks WHERE id = ANY($1)`, ids)
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM trunks WHERE id = ANY(@ids)`, momo.Named("ids", ids))
 	if err != nil {
 		return err
 	}
@@ -656,19 +674,21 @@ func writeOutbound(ctx context.Context, tx *dbTx, id int64, o OutboundRoute) err
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE outbound_routes SET name = $2, match_kind = $3, match = $4,
-			source_extensions = $5::text[], schedule = $6::jsonb, number_transform = $7::jsonb,
-			callerid_transform = $8::jsonb, failover_codes = $9::int[], emergency = $10, enabled = $11
-		WHERE id = $1`, id, o.Name, o.MatchKind, o.Match, nonNil(o.SourceExtensions), sched, num, cid,
-		o.FailoverCodes, o.Emergency, o.Enabled); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE outbound_routes SET name = @name, match_kind = @match_kind, match = @match,
+			source_extensions = @source_extensions::text[], schedule = @schedule::jsonb, number_transform = @number_transform::jsonb,
+			callerid_transform = @callerid_transform::jsonb, failover_codes = @failover_codes::int[], emergency = @emergency, enabled = @enabled
+		WHERE id = @id`,
+		momo.Named("id", id), momo.Named("name", o.Name), momo.Named("match_kind", o.MatchKind), momo.Named("match", o.Match),
+		momo.Named("source_extensions", nonNil(o.SourceExtensions)), momo.Named("schedule", sched), momo.Named("number_transform", num), momo.Named("callerid_transform", cid),
+		momo.Named("failover_codes", o.FailoverCodes), momo.Named("emergency", o.Emergency), momo.Named("enabled", o.Enabled)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM outbound_route_trunks WHERE route_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM outbound_route_trunks WHERE route_id = @route_id`, momo.Named("route_id", id)); err != nil {
 		return err
 	}
 	for i, t := range o.Trunks {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO outbound_route_trunks (route_id, trunk_id, position) VALUES ($1, $2, $3)`,
-			id, t, i+1); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO outbound_route_trunks (route_id, trunk_id, position) VALUES (@route_id, @trunk_id, @position)`,
+			momo.Named("route_id", id), momo.Named("trunk_id", t), momo.Named("position", i+1)); err != nil {
 			return err
 		}
 	}
@@ -689,8 +709,8 @@ func (s *Store) CreateOutboundRoute(ctx context.Context, actor string, o Outboun
 	err := s.configChange(ctx, actor, "create", "outbound_route", check, func(tx *dbTx) (int64, error) {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO outbound_routes (position, name, match_kind, match)
-			VALUES ((SELECT COALESCE(max(position), 0) + 1 FROM outbound_routes), $1, $2, $3) RETURNING id`,
-			o.Name, o.MatchKind, o.Match).Scan(&id); err != nil {
+			VALUES ((SELECT COALESCE(max(position), 0) + 1 FROM outbound_routes), @name, @match_kind, @match) RETURNING id`,
+			momo.Named("name", o.Name), momo.Named("match_kind", o.MatchKind), momo.Named("match", o.Match)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := writeOutbound(ctx, tx, id, o); err != nil {
@@ -728,12 +748,13 @@ func (s *Store) UpdateOutboundRoute(ctx context.Context, actor string, id int64,
 // DeleteOutboundRoute removes an outbound route.
 func (s *Store) DeleteOutboundRoute(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "outbound_route", check,
-		deleteByID(ctx, `DELETE FROM outbound_routes WHERE id = $1`, id))
+		deleteByID(ctx, `DELETE FROM outbound_routes WHERE id = @id`, id))
 }
 
+// deleteByID runs query, which binds @id, with id.
 func deleteByID(ctx context.Context, query string, id int64) func(*dbTx) (int64, error) {
 	return func(tx *dbTx) (int64, error) {
-		res, err := tx.ExecContext(ctx, query, id)
+		res, err := tx.ExecContext(ctx, query, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -815,7 +836,7 @@ func (s *Store) GetInboundRoute(ctx context.Context, id int64) (InboundRoute, er
 }
 
 func getInbound(ctx context.Context, q querier, id int64, suffix string) (InboundRoute, error) {
-	rs, err := listInbound(ctx, q, "WHERE id = $1", suffix, id)
+	rs, err := listInbound(ctx, q, "WHERE id = @id", suffix, momo.Named("id", id))
 	if err != nil {
 		return InboundRoute{}, err
 	}
@@ -846,11 +867,15 @@ func writeInbound(ctx context.Context, tx *dbTx, id int64, in InboundRoute) erro
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE inbound_routes SET name = $2, did_kind = $3, did = $4, trunk_id = $5,
-			sip_domain = $6, header_name = $7, header_regex = $8, schedule = $9::jsonb, callerid_transform = $10::jsonb,
-			destination_kind = $11, destination = $12, enabled = $13, moh_class_id = $14, moh_ringback = $15
-		WHERE id = $1`, id, in.Name, in.DIDKind, in.DID, in.TrunkID, in.SIPDomain, in.HeaderName, in.HeaderRegex,
-		sched, cid, in.DestinationKind, in.Destination, in.Enabled, in.MOHClassID, in.MOHRingback)
+	_, err = tx.ExecContext(ctx, `UPDATE inbound_routes SET name = @name, did_kind = @did_kind, did = @did, trunk_id = @trunk_id,
+			sip_domain = @sip_domain, header_name = @header_name, header_regex = @header_regex, schedule = @schedule::jsonb,
+			callerid_transform = @callerid_transform::jsonb, destination_kind = @destination_kind, destination = @destination,
+			enabled = @enabled, moh_class_id = @moh_class_id, moh_ringback = @moh_ringback
+		WHERE id = @id`,
+		momo.Named("id", id), momo.Named("name", in.Name), momo.Named("did_kind", in.DIDKind), momo.Named("did", in.DID),
+		momo.Named("trunk_id", in.TrunkID), momo.Named("sip_domain", in.SIPDomain), momo.Named("header_name", in.HeaderName), momo.Named("header_regex", in.HeaderRegex),
+		momo.Named("schedule", sched), momo.Named("callerid_transform", cid), momo.Named("destination_kind", in.DestinationKind), momo.Named("destination", in.Destination),
+		momo.Named("enabled", in.Enabled), momo.Named("moh_class_id", in.MOHClassID), momo.Named("moh_ringback", in.MOHRingback))
 	return err
 }
 
@@ -860,8 +885,8 @@ func (s *Store) CreateInboundRoute(ctx context.Context, actor string, in Inbound
 	err := s.configChange(ctx, actor, "create", "inbound_route", check, func(tx *dbTx) (int64, error) {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO inbound_routes (position, name, did_kind, destination_kind, destination)
-			VALUES ((SELECT COALESCE(max(position), 0) + 1 FROM inbound_routes), $1, $2, $3, $4) RETURNING id`,
-			in.Name, in.DIDKind, in.DestinationKind, in.Destination).Scan(&id); err != nil {
+			VALUES ((SELECT COALESCE(max(position), 0) + 1 FROM inbound_routes), @name, @did_kind, @destination_kind, @destination) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("did_kind", in.DIDKind), momo.Named("destination_kind", in.DestinationKind), momo.Named("destination", in.Destination)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := writeInbound(ctx, tx, id, in); err != nil {
@@ -899,7 +924,7 @@ func (s *Store) UpdateInboundRoute(ctx context.Context, actor string, id int64,
 // DeleteInboundRoute removes an inbound route.
 func (s *Store) DeleteInboundRoute(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "inbound_route", check,
-		deleteByID(ctx, `DELETE FROM inbound_routes WHERE id = $1`, id))
+		deleteByID(ctx, `DELETE FROM inbound_routes WHERE id = @id`, id))
 }
 
 // Route kinds for ReorderRoutes.
@@ -908,9 +933,11 @@ const (
 	Inbound  = "inbound"
 )
 
+// routeTables names each route kind's tables; setPosition binds @position
+// and @id.
 var routeTables = map[string]struct{ resource, lockIDs, setPosition string }{
-	Outbound: {"outbound_route", `SELECT id FROM outbound_routes FOR UPDATE`, `UPDATE outbound_routes SET position = $1 WHERE id = $2`},
-	Inbound:  {"inbound_route", `SELECT id FROM inbound_routes FOR UPDATE`, `UPDATE inbound_routes SET position = $1 WHERE id = $2`},
+	Outbound: {"outbound_route", `SELECT id FROM outbound_routes FOR UPDATE`, `UPDATE outbound_routes SET position = @position WHERE id = @id`},
+	Inbound:  {"inbound_route", `SELECT id FROM inbound_routes FOR UPDATE`, `UPDATE inbound_routes SET position = @position WHERE id = @id`},
 }
 
 // ReorderRoutes gives the routes of kind positions 1..n in the order of
@@ -951,7 +978,7 @@ func (s *Store) ReorderRoutes(ctx context.Context, actor, kind string, ids []int
 			return "", fieldError("ids", fmt.Sprintf("must list all %d routes", len(have)))
 		}
 		for i, id := range ids {
-			if _, err := tx.ExecContext(ctx, t.setPosition, i+1, id); err != nil {
+			if _, err := tx.ExecContext(ctx, t.setPosition, momo.Named("position", i+1), momo.Named("id", id)); err != nil {
 				return "", err
 			}
 		}

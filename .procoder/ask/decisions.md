@@ -6382,6 +6382,191 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
 - **SchemaVersion stays raw** (`s.db.raw`): goose owns `goose_db_version`
   until the migration engine moves (Phase 5).
 
+## momo Phase 3, domain 2: internal/store users and authentication on @name (2026-11-16, momo/store-users)
+
+- **Scope.** `users.go`, `totp.go`, `oauth.go`, `ldap.go`, `onboarding.go` and `sidekey.go` in `internal/store` (130 calls) bind by name, following the recipe in `docs/database.md`. Call sites, Scan code, error mapping (`mapErr`, `oauthErr`, the `sql.ErrNoRows` checks), `FOR UPDATE` locks and the SQL text are otherwise unchanged. No schema change, no migration; `go.mod` and `internal/db` unchanged.
+- **Authentication paths kept as they were.** Token, code and secret hashes are bound as before (the same `[]byte` values); the last-admin, last-break-glass and last-enrolled-admin checks, the MFA throttling (5 attempts per challenge, 10 failures per user per 10 minutes) and every audit write stay in the same transaction as the change they record.
+- **Casts added for reused binds.** UpdateAccount `@password_hash::text` on its COALESCE use (the other use was already cast; `password_hash` is TEXT). CaptureCandidate's refresh `@vendor::text` on both uses (`vendor` is TEXT; the `<> 'generic'` use alone would type it from a literal). Reused binds that already had a cast (`@before::bigint`, `@user_id::bigint`, `@ttl::float8`) keep it on every use. Reused binds compared with columns of one type on each side need none: revokeClientDevices `@user_id`, CaptureCandidate `@mac` (TEXT in phones, onboarding_candidates and onboarding_ignored), PruneOAuth `@cutoff` (timestamptz columns).
+- **revokeGrants takes a caller's fragment that binds by name.** Its callers pass the fragment's `momo.Named` values with it (`id = @id`; `id = @id AND (@user_id::bigint = 0 OR ...)`; the reused-code fragment binds `@user_id`, `@client_id` and `@created_at`). The token update it runs binds `@ids`, so a fragment must not use that name.
+- **The onboarding advisory lock is unchanged.** `SELECT pg_advisory_xact_lock(@key)` with `onboardLockKey` (`0x68656c6c6f6f6e62`) reaches PostgreSQL as before.
+- **Hermetic test for the statements assembled at run time.** `TestUsersDynamicStatements` runs UserExtensions, UserExtension, UserVoicemailMessage, UserCDRs, PruneOAuth and revokeGrants (with each caller's fragment) on the recording fake driver, so a misspelled name in them fails on the pull request tier too. TestStatementsBuild builds 1,323 constant statements, 169 of them with `@name` binds.
+
+## momo Phase 3, domain 7: internal/store call features on @name (2026-11-16, momo/store-callfeatures)
+
+- **Scope.** `ivr.go`, `queues.go`, `queue_callbacks.go`, `followme.go`,
+  `pickup.go`, `park.go`, `paging.go`, `ringmap.go`, `ringtag.go`,
+  `conference.go` and `multicast.go` in `internal/store` bind by name:
+  every `$n` became `@name` with `momo.Named`, through the seam, with the
+  Scan code, locks, error handling and SQL text otherwise unchanged. No
+  schema change, no migration, `go.mod` and `internal/db` unchanged.
+  `prov_multicast.go` belongs to the provisioning domain and is not part of
+  this change.
+- **hello-sip's queue callback claims unchanged.** `queue_callbacks.go`
+  keeps `SELECT 1 FROM queues WHERE id = @id FOR UPDATE` (Request) and the
+  Claim's `FOR UPDATE SKIP LOCKED LIMIT 1` sub-select. Its statements on
+  the call path (settle's two UPDATEs, Request, Head, Claim, Renew, Fail,
+  Connect, Due, Dialling, Purge) keep their parameter types: every bind is
+  typed by its column or by `make_interval(secs => ...)` as before.
+  `callbackDue` binds `@queue_id`. Fail's `@max_attempts` is used twice,
+  each against `attempts` (INTEGER), so needs no cast.
+- **One cast added.** `catalogChannels` (multicast.go) uses `@kind` twice:
+  `@kind::text = '' OR kind = @kind::text`, the type the old `$1` got from
+  `$1 = ''`. Every other reused bind compares with columns of one type on
+  each use (`@name` in queueReferences and ivrReferences, `@target` in
+  queueTextReferences and refuseIfIVRPoints, `@kind`/`@kind2` there, `@id`
+  in channelUsers); ringmap's `@group_id::bigint` was cast already.
+- **Run-time statements.** `listQueues`, `listIVRMenus`, `listPagingGroups`
+  and `listPickupGroups` take a WHERE fragment with its `momo.Named`
+  (`WHERE ... id = @id` with `momo.Named("id", id)`). The queue INSERT and
+  UPDATE build their placeholder and SET lists from `queueWriteCols`, each
+  column binding as `@<column>`, and `QueueInput.args` returns one
+  `momo.Named` per column. The IVR destination check, the follow-me target
+  check, the paging list deletes, ring tag usage reads and
+  `channelUsers` pick a statement at run time; each candidate binds the
+  same name (`@target`, `@group_id`, `@name`, `@id`).
+  `setConferencePIN`'s `UPDATE ... SET <col>` binds `@sealed` and `@id`.
+
+## momo Phase 3, domain 8: internal/store provisioning on @name (2026-11-16, momo/store-prov)
+
+- **Scope.** `prov.go`, `prov_admin.go`, `prov_handler.go`, `prov_lines.go`,
+  `prov_push.go`, `prov_overrides.go`, `prov_books.go`, `prov_multicast.go`,
+  `syslog.go`, `rtcpxr.go`, `clientquality.go` and `clients.go` in
+  `internal/store` bind by name: every `$n` became `@name` with
+  `momo.Named`, through the seam, with the Scan code, locks (`FOR UPDATE`,
+  `FOR UPDATE OF p`, `FOR UPDATE SKIP LOCKED`), error handling and SQL text
+  otherwise unchanged. No schema change, no migration, `go.mod` and
+  `internal/db` unchanged. `boundPhone` keeps the `@id` binding it got in
+  the core domain.
+- **Configuration lock and NOTIFY through the core helpers.** `provChange`
+  takes the configuration lock with `lockConfig` and `bumpRevision`
+  notifies with `notifyConfig`: the same statements, key
+  (`0x68656c6c6f636667`) and channel as the inline `$1` calls they replace.
+- **Push lock key and channel unchanged.** `ClaimPushes` still sends
+  `SELECT pg_advisory_xact_lock(@key)` with `int64(pushLockKey)`, and
+  `queuePush` still notifies `PushChannel` with the push id as text.
+- **DeviceSecret unchanged for hello-sip.** Its lookup binds `@username`
+  once against `devices.sip_username` (TEXT), so PostgreSQL receives the
+  same statement with one text parameter; a recording test pins it.
+- **Casts added for reused binds.** `UpdatePhone`'s `@serial::text` on its
+  `NULLIF` use (the `IS NULL` use was already cast). `RotatePhoneToken`'s
+  `@immediate::boolean` and `@rearm::boolean`, each used in two
+  `CASE WHEN`s. `MarkFetched`'s `@at::timestamptz` on its three uses and
+  `@file::text` on its two (one of them a `NOT LIKE` with no column).
+  `PutRedirectAccount`'s `@enabled::boolean` on both `COALESCE`s and
+  `@credentials_enc::bytea` on its `COALESCE` with the column (its `VALUES`
+  use is typed by the column). Every cast names the type PostgreSQL had
+  inferred for the old `$n`.
+- **Reused binds left uncast** because every use compares with, or is
+  assigned to, a column of one type: `PhoneByToken` and `MarkFetched`'s
+  `@hash` (BYTEA), `checkPhoneRefs`' `ANY(@numbers)` and `blfKeys`'
+  `@number` (TEXT, extensions and conference rooms), `attachLines`'
+  `ANY(@ids)` and `SetPhoneLine`'s `@phone_id` (BIGINT),
+  `PhoneFetchStates`' `@stale_before` (TIMESTAMPTZ),
+  `RecordRedirectCheck`'s `@result` (TEXT), and the already-cast
+  `@ip::inet`, `@before::bigint`, `@kind::text` and `@settings::jsonb`.
+- **Run-time statements.** `upsertJob` takes its caller's VALUES or SELECT
+  with the `Named` arguments that source binds. `jobDone` passes `@vendor`,
+  `@mac` and `@seq` and its caller's update binds those plus its own
+  names. `QueuePushGroup` adds `momo.Named("group_id", ...)` only together
+  with its `WHERE group_id = @group_id` query. `ownerIs` documents that it
+  binds `@group_id` and `@phone_id`. `prov_offline_test.go` builds these on
+  a recording driver (a batch context, so no database), as
+  `TestStatementsBuild` cannot see them.
+
+## momo Phase 3, domain 6: internal/store routing and time on @name (2026-11-16, momo/store-routing)
+
+- **Scope.** `routing.go`, `timecond.go`, `blocklist.go`, `originate.go`,
+  `boss.go` and `calendar_dnd.go` in `internal/store` bind by name: every
+  `$n` became `@name` with `momo.Named`, through the seam, with the Scan
+  code, `FOR UPDATE` / `FOR UPDATE OF b`, the configuration lock, error
+  handling and SQL text otherwise unchanged. No schema change, no migration,
+  `go.mod` and `internal/db` unchanged.
+- **hello-sip's call path keeps its plans.** hello-sip reaches these files
+  during a call only through the *28 day/night feature code
+  (`ApplyTimeConditionToggle`): `listTimeConditions` with
+  `WHERE t.toggle_number = @toggle_number` and `WHERE t.id = @id`,
+  `loadTimeConditionSet` (`listSchedules`, `listCalendars` and their
+  `ANY(@ids)` reads, `listTimeConditions`) and `setOverride`'s UPDATE. Each
+  uses every bind once, so PostgreSQL gets the same statement with the same
+  parameter types; only `setOverride` numbers its four binds in the order
+  they appear instead of `id` first. `TestTimeConditionToggleStatements`
+  pins the SQL and arguments they send. The snapshot hello-sip routes with
+  (time conditions, blocklist, routes) is read by `internal/snapshot`, not
+  by these files.
+- **Casts on reused binds**, each to the type PostgreSQL inferred for the
+  old `$n`: `ListBlocklist`'s `@q`, `@action`, `@scope` (`::text`, typed by
+  `$n = ''`); `SetOriginateState`'s `@cdr_correlation_id` (`::text`);
+  `tcReferences`' `@name` in the IVR menu, time condition and queue lookups
+  (`::text`, the TEXT target columns); `extensionRoutes`' `@number`
+  (`::text`, `destination` and `source_extensions` TEXT[]); `DeleteTrunk`'s
+  `@trunk_id` (`::bigint`).
+- **Run-time statements.** The WHERE fragments of `listTrunks`,
+  `listOutbound`, `listInbound`, `listSchedules`, `listCalendars` and
+  `listTimeConditions` each carry their `@name`, and the caller passes the
+  matching `Named` with the fragment. `deleteByID` binds `@id`;
+  `routeTables`' `setPosition` binds `@position` and `@id`; `ListBlocklist`
+  builds its three filter `Named` once for the count and the page.
+  `TestRoutingRuntimeStatements` runs these on a recording driver so a
+  misspelled name fails on the pull request tier.
+
+## momo Phase 3, domain 9: internal/store voicemail and media on @name (2026-11-16, momo/store-pbx)
+
+- **Scope.** `pbx.go`, `voicemail_groups.go`, `media.go`, `moh.go`,
+  `ringtones.go`, `tts.go`, `recording_links.go`, `video_recording.go` and
+  `cdr.go` in `internal/store` bind by name: every `$n` became `@name` with
+  `momo.Named`, through the seam, with the Scan code, `FOR UPDATE` and
+  `FOR UPDATE SKIP LOCKED`, error handling and SQL text otherwise
+  unchanged. The wide statements (UpdateVoicemailBox, ApplyFeatureUpdate,
+  the ring group INSERT and UPDATE, OpenVideoStream, UpdateVideoStream,
+  ListCDRs) keep their columns and expressions; each passes its values
+  inline as `momo.Named`, so the sweep checks every name. `internal/cdr`
+  (on momo since #372) is untouched. No schema change, no migration,
+  `go.mod` and `internal/db` unchanged.
+- **Parameter types unchanged for hello-sip's reads.** The call-plane
+  statements (VoicemailBoxByNumber, VerifyVoicemailPassword,
+  InsertVoicemailMessage, InsertVoicemailGroupMessage, SetVoicemailGreeting,
+  RemoveVoicemailMessage, SetVoicemailMessageHeard, InsertRecording,
+  OpenVideoStream, UpdateVideoStream) pass the same Go values as before, and
+  each bind is typed as PostgreSQL typed the old `$n`.
+- **Casts added for reused binds**, each to the type the old `$n` had:
+  UpdateVoicemailBox `@greeting::text`, `@unreachable::text`, `@busy::text`
+  (both uses; the columns are TEXT); ApplyFeatureUpdate `@dnd::boolean`
+  (both uses, as UpdateExtension); PutTTSSettings `@api_key_enc::bytea`
+  (both uses; the column is BYTEA); ListRecordings `@extension::text` (three
+  uses) and `@before::integer` (two uses); ListCDRs `@before::integer` (two
+  uses); CDRConcurrency `@from::timestamptz` and `@to::timestamptz` (two
+  uses each; the CTE's comparison with the TIMESTAMPTZ columns typed them
+  first); OpenVideoStream and UpdateVideoStream `@state::text` (two uses
+  each; the column is TEXT). Binds that were already cast on every use
+  (ListCDRs' direction, disposition and prefix, lookupWhere's conditions,
+  InsertVoicemailGroupMessage) keep their casts. Reused binds compared only
+  with columns of one type need none: refuseIfVoicemailGroupUsed's
+  `@number` (all TEXT), the follow-me UPDATE's `@id` (BIGINT).
+- **The cursor stays integer.** `($1 = 0 OR id < $1)` in ListCDRs and
+  ListRecordings typed `$1` as integer (from `= 0`), so those two now cast
+  `@before::integer`: the same plan, and the same out-of-range error for
+  a cursor above 2^31-1 as before. LookupCalls and LookupRecordings already
+  cast theirs to bigint and still do.
+- **Run-time statements.** lookupWhere takes the caller's
+  `momo.Named("before")` and `momo.Named("limit")` and appends one Named per
+  condition it adds (`@allowed`, `@extension`, `@digits`, `@suffix`,
+  `@from`, `@to`, `@call_id`), and none for a condition it leaves out.
+  listRingGroups, listVoicemailGroups and listMOH get `WHERE ... = @id` with
+  `momo.Named("id", ...)` together; ListVoicemailMessages' fragment binds
+  `@box_id`, SetVoicemailGreeting's SET binds `@object`, and
+  refuseIfVoicemailGroupUsed's four statements bind `@number`.
+  `TestMediaRuntimeStatements` (`media_offline_test.go`) runs each of them on
+  a recording driver, so a misspelled name fails on the pull request tier,
+  and `TestMailboxNotify` pins the mailbox NOTIFY
+  (`SELECT pg_notify($1, $2::text)` with `hello_mwi` and the box id).
+
+## CDR and recording list cursor type (ListCDRs, ListRecordings)
+
+The old `($1 = 0 OR id < $1)` typed the paging cursor as integer, so a cursor id above 2^31-1 is an out-of-range error. The momo conversion keeps that with `@before::integer`. Options:
+
+- Keep `::integer` (current behaviour, same plan).
+- Switch to `::bigint`, as LookupCalls and LookupRecordings already use: no cursor limit, a behaviour change.
+
 ## momo Phase 3, domain 13: internal/store AI on @name (2026-11-17, momo/store-ai)
 
 - **Scope.** `messaging_ai.go`, `ai_core.go`, `ai_sessions.go` and

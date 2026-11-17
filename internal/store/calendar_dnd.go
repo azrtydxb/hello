@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+
+	"github.com/azrtydxb/momo"
 )
 
 // SetCalendarDND is the calendar poller's way to set DND (spec integrations
@@ -15,18 +17,18 @@ import (
 func (s *Store) SetCalendarDND(ctx context.Context, userID int64, on bool) (int, error) {
 	const (
 		onSQL = `UPDATE extensions e SET dnd = TRUE, dnd_source = 'calendar', updated_at = now()
-			FROM user_extensions ue WHERE ue.extension_id = e.id AND ue.user_id = $1 AND e.kind = 'user' AND NOT e.dnd`
+			FROM user_extensions ue WHERE ue.extension_id = e.id AND ue.user_id = @user_id AND e.kind = 'user' AND NOT e.dnd`
 		offSQL = `UPDATE extensions e SET dnd = FALSE, dnd_source = 'manual', updated_at = now()
-			FROM user_extensions ue WHERE ue.extension_id = e.id AND ue.user_id = $1 AND e.dnd AND e.dnd_source = 'calendar'`
-		wouldOn  = `SELECT count(*) FROM extensions e JOIN user_extensions ue ON ue.extension_id = e.id WHERE ue.user_id = $1 AND e.kind = 'user' AND NOT e.dnd`
-		wouldOff = `SELECT count(*) FROM extensions e JOIN user_extensions ue ON ue.extension_id = e.id WHERE ue.user_id = $1 AND e.dnd AND e.dnd_source = 'calendar'`
+			FROM user_extensions ue WHERE ue.extension_id = e.id AND ue.user_id = @user_id AND e.dnd AND e.dnd_source = 'calendar'`
+		wouldOn  = `SELECT count(*) FROM extensions e JOIN user_extensions ue ON ue.extension_id = e.id WHERE ue.user_id = @user_id AND e.kind = 'user' AND NOT e.dnd`
+		wouldOff = `SELECT count(*) FROM extensions e JOIN user_extensions ue ON ue.extension_id = e.id WHERE ue.user_id = @user_id AND e.dnd AND e.dnd_source = 'calendar'`
 	)
 	q, upd := wouldOff, offSQL
 	if on {
 		q, upd = wouldOn, onSQL
 	}
 	var n int
-	if err := s.q(ctx).QueryRowContext(ctx, q, userID).Scan(&n); err != nil {
+	if err := s.q(ctx).QueryRowContext(ctx, q, momo.Named("user_id", userID)).Scan(&n); err != nil {
 		return 0, err
 	}
 	if n == 0 {
@@ -34,7 +36,7 @@ func (s *Store) SetCalendarDND(ctx context.Context, userID int64, on bool) (int,
 	}
 	changed := 0
 	err := s.configChangeID(ctx, "calendar", "update", "extension", nil, func(tx *dbTx) (string, error) {
-		res, err := tx.ExecContext(ctx, upd, userID)
+		res, err := tx.ExecContext(ctx, upd, momo.Named("user_id", userID))
 		if err != nil {
 			return "", err
 		}
