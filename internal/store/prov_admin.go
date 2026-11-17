@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
 )
@@ -62,14 +64,14 @@ func (s *Store) ListProvTemplates(ctx context.Context) ([]ProvTemplate, error) {
 
 // GetProvTemplate returns one stored template.
 func (s *Store) GetProvTemplate(ctx context.Context, id int64) (ProvTemplate, error) {
-	t, err := scanTemplate(s.db.QueryRowContext(ctx, `SELECT `+templateCols+` FROM prov_templates WHERE id = $1`, id))
+	t, err := scanTemplate(s.db.QueryRowContext(ctx, `SELECT `+templateCols+` FROM prov_templates WHERE id = @id`, momo.Named("id", id)))
 	return t, mapErr(err)
 }
 
 func saveVersion(ctx context.Context, tx *dbTx, actor string, t ProvTemplate) error {
 	files, _ := json.Marshal(t.Files)
-	_, err := tx.ExecContext(ctx, `INSERT INTO prov_template_versions (template_id, version, files, actor) VALUES ($1, $2, $3, $4)`,
-		t.ID, t.Version, string(files), actor)
+	_, err := tx.ExecContext(ctx, `INSERT INTO prov_template_versions (template_id, version, files, actor) VALUES (@template_id, @version, @files, @actor)`,
+		momo.Named("template_id", t.ID), momo.Named("version", t.Version), momo.Named("files", string(files)), momo.Named("actor", actor))
 	return err
 }
 
@@ -81,8 +83,9 @@ func (s *Store) CreateProvTemplate(ctx context.Context, actor string, t prov.Tem
 		var err error
 		out, err = scanTemplate(tx.QueryRowContext(ctx, `
 			INSERT INTO prov_templates (vendor, model_glob, priority, name, files, builtin_ref)
-			VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')) RETURNING `+templateCols,
-			t.Vendor, t.ModelGlob, t.Priority, t.Name, string(files), t.BuiltinRef))
+			VALUES (@vendor, @model_glob, @priority, @name, @files, NULLIF(@builtin_ref, '')) RETURNING `+templateCols,
+			momo.Named("vendor", t.Vendor), momo.Named("model_glob", t.ModelGlob), momo.Named("priority", t.Priority), momo.Named("name", t.Name),
+			momo.Named("files", string(files)), momo.Named("builtin_ref", t.BuiltinRef)))
 		if err != nil {
 			return "", false, err
 		}
@@ -98,7 +101,7 @@ func (s *Store) UpdateProvTemplate(ctx context.Context, actor string, id int64, 
 	var out ProvTemplate
 	err := s.provChange(ctx, actor, "update", "prov_template", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(id, 10)
-		cur, err := scanTemplate(tx.QueryRowContext(ctx, `SELECT `+templateCols+` FROM prov_templates WHERE id = $1 FOR UPDATE`, id))
+		cur, err := scanTemplate(tx.QueryRowContext(ctx, `SELECT `+templateCols+` FROM prov_templates WHERE id = @id FOR UPDATE`, momo.Named("id", id)))
 		if err != nil {
 			return sid, false, err
 		}
@@ -108,9 +111,10 @@ func (s *Store) UpdateProvTemplate(ctx context.Context, actor string, id int64, 
 		}
 		files, _ := json.Marshal(t.Files)
 		out, err = scanTemplate(tx.QueryRowContext(ctx, `
-			UPDATE prov_templates SET vendor = $2, model_glob = $3, priority = $4, name = $5, files = $6,
+			UPDATE prov_templates SET vendor = @vendor, model_glob = @model_glob, priority = @priority, name = @name, files = @files,
 			       version = version + 1, updated_at = now()
-			WHERE id = $1 RETURNING `+templateCols, id, t.Vendor, t.ModelGlob, t.Priority, t.Name, string(files)))
+			WHERE id = @id RETURNING `+templateCols, momo.Named("id", id), momo.Named("vendor", t.Vendor), momo.Named("model_glob", t.ModelGlob),
+			momo.Named("priority", t.Priority), momo.Named("name", t.Name), momo.Named("files", string(files))))
 		if err != nil {
 			return sid, false, err
 		}
@@ -128,13 +132,13 @@ func (s *Store) DeleteProvTemplate(ctx context.Context, actor string, id int64) 
 			phone int64
 			mac   string
 		)
-		switch err := tx.QueryRowContext(ctx, `SELECT id, mac FROM phones WHERE template_id = $1 ORDER BY id LIMIT 1`, id).Scan(&phone, &mac); {
+		switch err := tx.QueryRowContext(ctx, `SELECT id, mac FROM phones WHERE template_id = @id ORDER BY id LIMIT 1`, momo.Named("id", id)).Scan(&phone, &mac); {
 		case err == nil:
 			return sid, false, conflict("phone %d (%s) uses this template as its override; change the phone first", phone, FormatMAC(mac))
 		case !errors.Is(err, sql.ErrNoRows):
 			return sid, false, err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM prov_templates WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM prov_templates WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return sid, false, err
 		}
@@ -191,7 +195,7 @@ func (s *Store) CreateFirmware(ctx context.Context, actor string, f prov.Firmwar
 	var out FirmwareFile
 	err := s.provChange(ctx, actor, "create", "prov_firmware", func(tx *dbTx) (string, bool, error) {
 		var id int64
-		switch err := tx.QueryRowContext(ctx, `SELECT id FROM prov_firmware WHERE vendor = $1 AND filename = $2`, f.Vendor, f.Filename).Scan(&id); {
+		switch err := tx.QueryRowContext(ctx, `SELECT id FROM prov_firmware WHERE vendor = @vendor AND filename = @filename`, momo.Named("vendor", f.Vendor), momo.Named("filename", f.Filename)).Scan(&id); {
 		case err == nil:
 			return "", false, conflict("%s firmware %s already exists (id %d); delete it first", f.Vendor, f.Filename, id)
 		case !errors.Is(err, sql.ErrNoRows):
@@ -199,12 +203,13 @@ func (s *Store) CreateFirmware(ctx context.Context, actor string, f prov.Firmwar
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO prov_firmware (vendor, model_glob, version, filename, object_key, size, sha256)
-			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-			f.Vendor, f.ModelGlob, f.Version, f.Filename, f.ObjectKey, f.Size, f.SHA256).Scan(&id); err != nil {
+			VALUES (@vendor, @model_glob, @version, @filename, @object_key, @size, @sha256) RETURNING id`,
+			momo.Named("vendor", f.Vendor), momo.Named("model_glob", f.ModelGlob), momo.Named("version", f.Version), momo.Named("filename", f.Filename),
+			momo.Named("object_key", f.ObjectKey), momo.Named("size", f.Size), momo.Named("sha256", f.SHA256)).Scan(&id); err != nil {
 			return "", false, err
 		}
 		var err error
-		out, err = scanFirmware(tx.QueryRowContext(ctx, `SELECT `+firmwareCols+` FROM prov_firmware f WHERE f.id = $1`, id))
+		out, err = scanFirmware(tx.QueryRowContext(ctx, `SELECT `+firmwareCols+` FROM prov_firmware f WHERE f.id = @id`, momo.Named("id", id)))
 		return strconv.FormatInt(id, 10), false, err
 	})
 	return out, err
@@ -218,13 +223,13 @@ func (s *Store) DeleteFirmware(ctx context.Context, actor string, id int64) (str
 	err := s.provChange(ctx, actor, "delete", "prov_firmware", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(id, 10)
 		var vendor, glob string
-		switch err := tx.QueryRowContext(ctx, `SELECT vendor, model_glob FROM prov_firmware_pins WHERE firmware_id = $1 LIMIT 1`, id).Scan(&vendor, &glob); {
+		switch err := tx.QueryRowContext(ctx, `SELECT vendor, model_glob FROM prov_firmware_pins WHERE firmware_id = @id LIMIT 1`, momo.Named("id", id)).Scan(&vendor, &glob); {
 		case err == nil:
 			return sid, false, conflict("the firmware is pinned for %s %q; unpin it first", vendor, glob)
 		case !errors.Is(err, sql.ErrNoRows):
 			return sid, false, err
 		}
-		return sid, false, tx.QueryRowContext(ctx, `DELETE FROM prov_firmware WHERE id = $1 RETURNING object_key`, id).Scan(&key)
+		return sid, false, tx.QueryRowContext(ctx, `DELETE FROM prov_firmware WHERE id = @id RETURNING object_key`, momo.Named("id", id)).Scan(&key)
 	})
 	return key, err
 }
@@ -298,8 +303,8 @@ func (s *Store) PutFirmwareMinimums(ctx context.Context, actor string, rules []p
 			return "", false, err
 		}
 		for i, m := range rules {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO prov_firmware_minimums (vendor, model_glob, min_version, recommended) VALUES ($1, $2, $3, $4)`,
-				m.Vendor, m.ModelGlob, m.MinVersion, m.Recommended); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO prov_firmware_minimums (vendor, model_glob, min_version, recommended) VALUES (@vendor, @model_glob, @min_version, @recommended)`,
+				momo.Named("vendor", m.Vendor), momo.Named("model_glob", m.ModelGlob), momo.Named("min_version", m.MinVersion), momo.Named("recommended", m.Recommended)); err != nil {
 				if errors.Is(mapErr(err), ErrConflict) {
 					return "", false, fieldError(fmt.Sprintf("[%d].modelGlob", i), "listed twice")
 				}
@@ -331,7 +336,7 @@ func (s *Store) PutFirmwarePins(ctx context.Context, actor string, pins []Firmwa
 				v       prov.Vendor
 				version string
 			)
-			err := tx.QueryRowContext(ctx, `SELECT vendor, version FROM prov_firmware WHERE id = $1`, p.FirmwareID).Scan(&v, &version)
+			err := tx.QueryRowContext(ctx, `SELECT vendor, version FROM prov_firmware WHERE id = @id`, momo.Named("id", p.FirmwareID)).Scan(&v, &version)
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
 				return "", false, fieldError(fmt.Sprintf("[%d].firmwareId", i), "no such firmware")
@@ -344,8 +349,8 @@ func (s *Store) PutFirmwarePins(ctx context.Context, actor string, pins []Firmwa
 				return "", false, fieldError(fmt.Sprintf("[%d].firmwareId", i),
 					fmt.Sprintf("version %s is below the minimum %s for %s %s", version, floor, p.Vendor, p.ModelGlob))
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO prov_firmware_pins (vendor, model_glob, firmware_id, upgrade_hour) VALUES ($1, $2, $3, $4)`,
-				p.Vendor, p.ModelGlob, p.FirmwareID, p.UpgradeHour); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO prov_firmware_pins (vendor, model_glob, firmware_id, upgrade_hour) VALUES (@vendor, @model_glob, @firmware_id, @upgrade_hour)`,
+				momo.Named("vendor", p.Vendor), momo.Named("model_glob", p.ModelGlob), momo.Named("firmware_id", p.FirmwareID), momo.Named("upgrade_hour", p.UpgradeHour)); err != nil {
 				if errors.Is(mapErr(err), ErrConflict) {
 					return "", false, fieldError(fmt.Sprintf("[%d].modelGlob", i), "pinned twice")
 				}
@@ -424,18 +429,19 @@ func (s *Store) PutRedirectAccount(ctx context.Context, actor string, v prov.Ven
 			settings = string(c.Settings)
 		}
 		var before bool
-		err := tx.QueryRowContext(ctx, `SELECT enabled AND credentials_enc IS NOT NULL FROM prov_redirect_accounts WHERE vendor = $1 FOR UPDATE`, v).Scan(&before)
+		err := tx.QueryRowContext(ctx, `SELECT enabled AND credentials_enc IS NOT NULL FROM prov_redirect_accounts WHERE vendor = @vendor FOR UPDATE`, momo.Named("vendor", v)).Scan(&before)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return string(v), false, err
 		}
 		var after bool
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO prov_redirect_accounts (vendor, enabled, credentials_enc, settings)
-			VALUES ($1, COALESCE($2, FALSE), $3, COALESCE($4::jsonb, '{}'))
-			ON CONFLICT (vendor) DO UPDATE SET enabled = COALESCE($2, prov_redirect_accounts.enabled),
-			       credentials_enc = COALESCE($3, prov_redirect_accounts.credentials_enc),
-			       settings = COALESCE($4::jsonb, prov_redirect_accounts.settings)
-			RETURNING enabled AND credentials_enc IS NOT NULL`, v, c.Enabled, enc, settings).Scan(&after); err != nil {
+			VALUES (@vendor, COALESCE(@enabled::boolean, FALSE), @credentials_enc, COALESCE(@settings::jsonb, '{}'))
+			ON CONFLICT (vendor) DO UPDATE SET enabled = COALESCE(@enabled::boolean, prov_redirect_accounts.enabled),
+			       credentials_enc = COALESCE(@credentials_enc::bytea, prov_redirect_accounts.credentials_enc),
+			       settings = COALESCE(@settings::jsonb, prov_redirect_accounts.settings)
+			RETURNING enabled AND credentials_enc IS NOT NULL`, momo.Named("vendor", v), momo.Named("enabled", c.Enabled),
+			momo.Named("credentials_enc", enc), momo.Named("settings", settings)).Scan(&after); err != nil {
 			return string(v), false, err
 		}
 		if after && !before && !s.prov.Deployment[v] {
@@ -449,18 +455,18 @@ func (s *Store) PutRedirectAccount(ctx context.Context, actor string, v prov.Ven
 
 // queueVendor queues every phone of v for registration.
 func (s *Store) queueVendor(ctx context.Context, tx *dbTx, v prov.Vendor) error {
-	if err := upsertJob(ctx, tx, `SELECT vendor, mac, 'register' FROM phones WHERE vendor = $1`, v); err != nil {
+	if err := upsertJob(ctx, tx, `SELECT vendor, mac, 'register' FROM phones WHERE vendor = @vendor`, momo.Named("vendor", v)); err != nil {
 		return err
 	}
 	b, _ := json.Marshal(redirect.Status{State: redirect.StatePending, At: time.Now().UTC()})
-	_, err := tx.ExecContext(ctx, `UPDATE phones SET redirect_status = $2 WHERE vendor = $1`, v, string(b))
+	_, err := tx.ExecContext(ctx, `UPDATE phones SET redirect_status = @redirect_status WHERE vendor = @vendor`, momo.Named("vendor", v), momo.Named("redirect_status", string(b)))
 	return err
 }
 
 // DeleteRedirectAccount removes a vendor's stored account and credentials.
 func (s *Store) DeleteRedirectAccount(ctx context.Context, actor string, v prov.Vendor) error {
 	return s.provChange(ctx, actor, "delete", "prov_redirect_account", func(tx *dbTx) (string, bool, error) {
-		res, err := tx.ExecContext(ctx, `DELETE FROM prov_redirect_accounts WHERE vendor = $1`, v)
+		res, err := tx.ExecContext(ctx, `DELETE FROM prov_redirect_accounts WHERE vendor = @vendor`, momo.Named("vendor", v))
 		if err != nil {
 			return string(v), false, err
 		}
@@ -471,8 +477,8 @@ func (s *Store) DeleteRedirectAccount(ctx context.Context, actor string, v prov.
 // RecordRedirectCheck stores the outcome of a credential check.
 func (s *Store) RecordRedirectCheck(ctx context.Context, v prov.Vendor, result string) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO prov_redirect_accounts (vendor, last_check_at, last_check_result) VALUES ($1, now(), $2)
-		ON CONFLICT (vendor) DO UPDATE SET last_check_at = now(), last_check_result = $2`, v, result)
+		INSERT INTO prov_redirect_accounts (vendor, last_check_at, last_check_result) VALUES (@vendor, now(), @result)
+		ON CONFLICT (vendor) DO UPDATE SET last_check_at = now(), last_check_result = @result`, momo.Named("vendor", v), momo.Named("result", result))
 	return err
 }
 
@@ -481,7 +487,7 @@ func (s *Store) RecordRedirectCheck(ctx context.Context, v prov.Vendor, result s
 func (s *Store) RedirectAccountCredentials(ctx context.Context, v prov.Vendor) (redirect.Account, error) {
 	a := redirect.Account{Vendor: v}
 	var enc []byte
-	err := s.db.QueryRowContext(ctx, `SELECT enabled, credentials_enc, settings FROM prov_redirect_accounts WHERE vendor = $1`, v).
+	err := s.db.QueryRowContext(ctx, `SELECT enabled, credentials_enc, settings FROM prov_redirect_accounts WHERE vendor = @vendor`, momo.Named("vendor", v)).
 		Scan(&a.Enabled, &enc, &a.Settings)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, prov.ErrNotFound

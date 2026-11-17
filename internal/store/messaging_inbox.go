@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/provider"
 )
@@ -35,14 +37,36 @@ type InboxAccess struct {
 	Name string
 }
 
-// visible is the SQL condition for a conversation c the caller reaches; it
-// uses $1 (the user) and $2 (All).
+// visibleTo is the SQL condition for a conversation c the caller reaches; it
+// binds @user_id (the user) and @all (All). The caller passes both with
+// inboxAccessArgs.
 //
 // An unassigned conversation waiting in a text queue or ring group is also
 // reachable by the members of that queue or group (spec M-32).
+const visibleTo = `(@all::boolean OR c.assignee_user_id = @user_id OR EXISTS (
+	SELECT 1 FROM conversation_messages vx WHERE vx.conversation_id = c.id AND vx.sender_user_id = @user_id AND vx.kind = 'message')
+	OR (c.assignee_user_id IS NULL AND ` + poolMemberNamed + `))`
+
+// poolMemberNamed is poolMemberParam (messaging_route.go) binding the caller
+// as @user_id. TestVisibleToMatchesVisible keeps the two the same.
+const poolMemberNamed = `(EXISTS (SELECT 1 FROM queues pq JOIN queue_members pm ON pm.queue_id = pq.id
+			JOIN user_extensions pe ON pe.extension_id = pm.extension_id
+			WHERE pq.id = c.queue_id AND pq.enabled AND pq.text_enabled AND pe.user_id = @user_id::bigint)
+		OR EXISTS (SELECT 1 FROM ring_group_members pg JOIN user_extensions pge ON pge.extension_id = pg.extension_id
+			WHERE pg.group_id = c.ring_group_id AND pge.user_id = @user_id::bigint))`
+
+// visible is visibleTo for the files whose statements still bind with $n
+// (messaging_calls.go): $1 is the user and $2 All. It goes when they move
+// to @name.
 const visible = `($2::boolean OR c.assignee_user_id = $1 OR EXISTS (
 	SELECT 1 FROM conversation_messages vx WHERE vx.conversation_id = c.id AND vx.sender_user_id = $1 AND vx.kind = 'message')
 	OR (c.assignee_user_id IS NULL AND ` + poolMemberParam + `))`
+
+// inboxAccessArgs are the arguments of visibleTo (and of convSelect, which
+// binds @user_id too) for a reader: @user_id and @all.
+func inboxAccessArgs(userID int64, all bool) []any {
+	return []any{momo.Named("user_id", userID), momo.Named("all", all)}
+}
 
 // Conversation is one customer on one of our numbers.
 type Conversation struct {
@@ -124,7 +148,7 @@ const convSelect = `SELECT c.id, c.channel_id, ch.kind, ch.name, c.address_id, a
 	JOIN msg_addresses a ON a.id = c.address_id
 	LEFT JOIN users u ON u.id = c.assignee_user_id
 	LEFT JOIN conversation_messages m ON m.id = c.last_message_id
-	LEFT JOIN conversation_reads r ON r.conversation_id = c.id AND r.user_id = $1`
+	LEFT JOIN conversation_reads r ON r.conversation_id = c.id AND r.user_id = @user_id`
 
 func scanConversation(r interface{ Scan(...any) error }) (Conversation, error) {
 	var (
@@ -206,15 +230,17 @@ type ConvFilter struct {
 // ListConversations returns a page of conversations, most recently active
 // first, and the cursor of the next page ("" when this is the last).
 func (s *Store) ListConversations(ctx context.Context, acc InboxAccess, f ConvFilter, limit int) ([]Conversation, string, error) {
-	args := []any{acc.UserID, acc.All}
-	arg := func(v any) string {
-		args = append(args, v)
-		return "$" + strconv.Itoa(len(args))
+	// Each fragment binds its own @name, added to args with it; visibleTo
+	// and convSelect bind @user_id and @all.
+	args := inboxAccessArgs(acc.UserID, acc.All)
+	cond := func(frag, name string, v any) string {
+		args = append(args, momo.Named(name, v))
+		return frag
 	}
-	where := []string{visible}
+	where := []string{visibleTo}
 	switch f.View {
 	case "mine":
-		where = append(where, "c.assignee_user_id = $1")
+		where = append(where, "c.assignee_user_id = @user_id")
 	case "unassigned":
 		where = append(where, "c.assignee_user_id IS NULL")
 	}
@@ -223,25 +249,27 @@ func (s *Store) ListConversations(ctx context.Context, acc InboxAccess, f ConvFi
 		where = append(where, "c.status IN ('open', 'pending', 'snoozed')")
 	case "any":
 	default:
-		where = append(where, "c.status = "+arg(f.Status))
+		where = append(where, cond("c.status = @status", "status", f.Status))
 	}
 	if f.ChannelID > 0 {
-		where = append(where, "c.channel_id = "+arg(f.ChannelID))
+		where = append(where, cond("c.channel_id = @channel_id", "channel_id", f.ChannelID))
 	}
 	if f.QueueID > 0 {
-		where = append(where, "c.queue_id = "+arg(f.QueueID))
+		where = append(where, cond("c.queue_id = @queue_id", "queue_id", f.QueueID))
 	}
 	if q := strings.TrimSpace(f.Q); q != "" {
-		like, text := arg(escapeLike(q)), arg(q)
-		where = append(where, `(c.peer_key LIKE '%' || `+like+` OR c.peer_name ILIKE '%' || `+like+` || '%'
+		args = append(args, momo.Named("like", escapeLike(q)), momo.Named("query", q))
+		where = append(where, `(c.peer_key LIKE '%' || @like::text OR c.peer_name ILIKE '%' || @like::text || '%'
 			OR EXISTS (SELECT 1 FROM conversation_messages sx WHERE sx.conversation_id = c.id
-				AND to_tsvector('simple', sx.body) @@ plainto_tsquery('simple', `+text+`)))`)
+				AND to_tsvector('simple', sx.body) @@ plainto_tsquery('simple', @query)))`)
 	}
 	if f.After != nil {
-		where = append(where, "(c.last_message_at, c.id) < ("+arg(f.After.At)+"::timestamptz, "+arg(f.After.ID)+"::bigint)")
+		args = append(args, momo.Named("after_at", f.After.At), momo.Named("after_id", f.After.ID))
+		where = append(where, "(c.last_message_at, c.id) < (@after_at::timestamptz, @after_id::bigint)")
 	}
+	args = append(args, momo.Named("limit", limit+1))
 	rows, err := s.db.QueryContext(ctx, convSelect+` WHERE `+strings.Join(where, " AND ")+
-		` ORDER BY c.last_message_at DESC, c.id DESC LIMIT `+arg(limit+1), args...)
+		` ORDER BY c.last_message_at DESC, c.id DESC LIMIT @limit`, args...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -272,7 +300,8 @@ func (s *Store) ListConversations(ctx context.Context, acc InboxAccess, f ConvFi
 // not is not found. A supervisor opening one that is not theirs leaves an
 // audit row (once an hour per conversation).
 func (s *Store) GetConversation(ctx context.Context, acc InboxAccess, id int64) (Conversation, error) {
-	c, err := scanConversation(s.db.QueryRowContext(ctx, convSelect+` WHERE c.id = $3 AND `+visible, acc.UserID, acc.All, id))
+	c, err := scanConversation(s.db.QueryRowContext(ctx, convSelect+` WHERE c.id = @id AND `+visibleTo,
+		append(inboxAccessArgs(acc.UserID, acc.All), momo.Named("id", id))...))
 	if err != nil {
 		return c, mapErr(err)
 	}
@@ -305,10 +334,10 @@ func (s *Store) auditSupervisorView(ctx context.Context, acc InboxAccess, c Conv
 	}
 	_, _ = s.db.ExecContext(ctx, `
 		INSERT INTO audit_events (actor, action, resource, resource_id, via)
-		SELECT $1, 'supervisor_view', 'conversation', $2, $3
-		WHERE NOT EXISTS (SELECT 1 FROM audit_events WHERE actor = $1 AND action = 'supervisor_view'
-			AND resource = 'conversation' AND resource_id = $2 AND at > now() - interval '1 hour')`,
-		acc.Actor, strconv.FormatInt(c.ID, 10), auditVia(ctx))
+		SELECT @actor::text, 'supervisor_view', 'conversation', @resource_id::text, @via
+		WHERE NOT EXISTS (SELECT 1 FROM audit_events WHERE actor = @actor::text AND action = 'supervisor_view'
+			AND resource = 'conversation' AND resource_id = @resource_id::text AND at > now() - interval '1 hour')`,
+		momo.Named("actor", acc.Actor), momo.Named("resource_id", strconv.FormatInt(c.ID, 10)), momo.Named("via", auditVia(ctx)))
 }
 
 const convMessageCols = `id, conversation_id, direction, kind, sender_kind, sender_user_id, sender_name, body, status, error_code,
@@ -343,7 +372,8 @@ func (s *Store) ListConversationMessages(ctx context.Context, acc InboxAccess, c
 		return nil, 0, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages
-		WHERE conversation_id = $1 AND ($2 = 0 OR id < $2) ORDER BY id DESC LIMIT $3`, c.ID, before, limit+1)
+		WHERE conversation_id = @conversation_id AND (@before::bigint = 0 OR id < @before::bigint) ORDER BY id DESC LIMIT @limit`,
+		momo.Named("conversation_id", c.ID), momo.Named("before", before), momo.Named("limit", limit+1))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -385,8 +415,8 @@ func lockConversation(ctx context.Context, tx *dbTx, acc InboxAccess, id int64) 
 	var c convRow
 	err := tx.QueryRowContext(ctx, `
 		SELECT c.id, c.channel_id, c.address_id, c.peer_key, c.status, c.assignee_user_id
-		FROM conversations c WHERE c.id = $3 AND `+visible+` FOR UPDATE OF c`,
-		acc.UserID, acc.All, id).Scan(&c.ID, &c.ChannelID, &c.AddressID, &c.PeerKey, &c.Status, &c.Assignee)
+		FROM conversations c WHERE c.id = @id AND `+visibleTo+` FOR UPDATE OF c`,
+		append(inboxAccessArgs(acc.UserID, acc.All), momo.Named("id", id))...).Scan(&c.ID, &c.ChannelID, &c.AddressID, &c.PeerKey, &c.Status, &c.Assignee)
 	return c, mapErr(err)
 }
 
@@ -398,7 +428,7 @@ const inboxEventLock = 0x68656c6c6f696e62 // "helloinb"
 // emitConversationEvent tells everyone the conversation concerns: its
 // assignee, or every supervisor while it is unassigned, plus extra users.
 func emitConversationEvent(ctx context.Context, tx *dbTx, convID, msgID int64, typ string, extra []int64) error {
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(inboxEventLock)); err != nil {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(inboxEventLock))); err != nil {
 		return err
 	}
 	var msg any
@@ -410,11 +440,11 @@ func emitConversationEvent(ctx context.Context, tx *dbTx, convID, msgID int64, t
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO conversation_events (user_id, type, conversation_id, message_id)
-		SELECT u.id, $2, $1, $3::bigint FROM users u,
-			(SELECT assignee_user_id AS a, queue_id, ring_group_id FROM conversations WHERE id = $1) c
+		SELECT u.id, @type, @conversation_id::bigint, @message_id::bigint FROM users u,
+			(SELECT assignee_user_id AS a, queue_id, ring_group_id FROM conversations WHERE id = @conversation_id::bigint) c
 		WHERE u.enabled AND (u.id = c.a OR (c.a IS NULL AND (u.role IN ('operator', 'admin') OR `+poolMemberUser+`))
-			OR u.id = ANY($4::bigint[]))`,
-		convID, typ, msg, extra)
+			OR u.id = ANY(@extra::bigint[]))`,
+		momo.Named("conversation_id", convID), momo.Named("type", typ), momo.Named("message_id", msg), momo.Named("extra", extra))
 	return err
 }
 
@@ -428,8 +458,9 @@ func addLine(ctx context.Context, tx *dbTx, c convRow, kind, senderKind string, 
 	var id int64
 	err := tx.QueryRowContext(ctx, `
 		INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_user_id, sender_name, body, status)
-		VALUES ($1, $2, 'out', $3, $4, $5, $6, $7, 'delivered') RETURNING id`,
-		c.ID, c.ChannelID, kind, senderKind, user, name, body).Scan(&id)
+		VALUES (@conversation_id, @channel_id, 'out', @kind, @sender_kind, @sender_user_id, @sender_name, @body, 'delivered') RETURNING id`,
+		momo.Named("conversation_id", c.ID), momo.Named("channel_id", c.ChannelID), momo.Named("kind", kind), momo.Named("sender_kind", senderKind),
+		momo.Named("sender_user_id", user), momo.Named("sender_name", name), momo.Named("body", body)).Scan(&id)
 	return id, err
 }
 
@@ -449,7 +480,7 @@ func (s *Store) AddNote(ctx context.Context, acc InboxAccess, convID int64, body
 		if err := emitConversationEvent(ctx, tx, c.ID, id, "conversation.updated", nil); err != nil {
 			return err
 		}
-		out, err = scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = $1`, id))
+		out, err = scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = @id`, momo.Named("id", id)))
 		return err
 	})
 	return out, err
@@ -489,7 +520,8 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 		}
 		if in.ClientMsgID != "" {
 			m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+`
-				FROM conversation_messages WHERE conversation_id = $1 AND client_msg_id = $2`, c.ID, in.ClientMsgID))
+				FROM conversation_messages WHERE conversation_id = @conversation_id AND client_msg_id = @client_msg_id`,
+				momo.Named("conversation_id", c.ID), momo.Named("client_msg_id", in.ClientMsgID)))
 			if err == nil {
 				ms := []ConvMessage{m}
 				if err := loadMedia(ctx, tx, ms); err != nil {
@@ -515,8 +547,8 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 		)
 		if err := tx.QueryRowContext(ctx, `
 			SELECT ch.provider, ch.kind, ch.enabled, ch.trunk_id, a.address, a.enabled, ch.status
-			FROM msg_channels ch JOIN msg_addresses a ON a.channel_id = ch.id WHERE ch.id = $1 AND a.id = $2`,
-			c.ChannelID, c.AddressID).Scan(&prov, &kind, &chEnabled, &trunk, &address, &adEnabled, &chStatus); err != nil {
+			FROM msg_channels ch JOIN msg_addresses a ON a.channel_id = ch.id WHERE ch.id = @channel_id AND a.id = @address_id`,
+			momo.Named("channel_id", c.ChannelID), momo.Named("address_id", c.AddressID)).Scan(&prov, &kind, &chEnabled, &trunk, &address, &adEnabled, &chStatus); err != nil {
 			return err
 		}
 		if prov == messaging.ProviderChat {
@@ -565,8 +597,9 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_user_id,
 				sender_name, body, status, client_msg_id)
-			VALUES ($1, $2, 'out', 'message', 'user', $3, $4, $5, $7, $6) RETURNING id`,
-			c.ID, c.ChannelID, acc.UserID, acc.Name, in.Body, clientID, initialStatus(carrier)).Scan(&id); err != nil {
+			VALUES (@conversation_id, @channel_id, 'out', 'message', 'user', @sender_user_id, @sender_name, @body, @status, @client_msg_id) RETURNING id`,
+			momo.Named("conversation_id", c.ID), momo.Named("channel_id", c.ChannelID), momo.Named("sender_user_id", acc.UserID),
+			momo.Named("sender_name", acc.Name), momo.Named("body", in.Body), momo.Named("client_msg_id", clientID), momo.Named("status", initialStatus(carrier))).Scan(&id); err != nil {
 			return err
 		}
 		// A carrier text waits for the send worker; a SIP text is queued
@@ -590,26 +623,26 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 		// or snoozed one; the first reply stamps the first response.
 		claimed := !c.Assignee.Valid
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE conversations SET last_message_id = $2, last_message_at = now(),
-				assignee_user_id = coalesce(assignee_user_id, $3),
+			UPDATE conversations SET last_message_id = @last_message_id, last_message_at = now(),
+				assignee_user_id = coalesce(assignee_user_id, @user_id),
 				first_response_at = coalesce(first_response_at, now()),
 				status = CASE WHEN status IN ('resolved', 'snoozed') THEN 'open' ELSE status END,
 				resolved_at = CASE WHEN status = 'resolved' THEN NULL ELSE resolved_at END,
 				snoozed_until = NULL
-			WHERE id = $1`, c.ID, id, acc.UserID); err != nil {
+			WHERE id = @id`, momo.Named("id", c.ID), momo.Named("last_message_id", id), momo.Named("user_id", acc.UserID)); err != nil {
 			return err
 		}
 		if claimed {
 			claimedBy = acc.UserID
-			if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES ($1, $2, 'reply')`,
-				c.ID, acc.UserID); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES (@conversation_id, @to_user_id, 'reply')`,
+				momo.Named("conversation_id", c.ID), momo.Named("to_user_id", acc.UserID)); err != nil {
 				return err
 			}
 		}
 		if err := emitConversationEvent(ctx, tx, c.ID, id, "message.sent", []int64{acc.UserID}); err != nil {
 			return err
 		}
-		m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = $1`, id))
+		m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = @id`, momo.Named("id", id)))
 		if err != nil {
 			return err
 		}
@@ -634,8 +667,8 @@ func optedOut(ctx context.Context, tx *dbTx, s *Store, addressID int64, peerKey 
 		return false, err
 	}
 	var out bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM sms_opt_outs WHERE address_id = $1 AND peer_hash = $2 AND state = 'out')`,
-		addressID, h).Scan(&out)
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM sms_opt_outs WHERE address_id = @address_id AND peer_hash = @peer_hash AND state = 'out')`,
+		momo.Named("address_id", addressID), momo.Named("peer_hash", h)).Scan(&out)
 	return out, err
 }
 
@@ -662,7 +695,7 @@ func eligibleAgent(ctx context.Context, tx rowQuerier, userID int64) (string, er
 	var name string
 	err := tx.QueryRowContext(ctx, `
 		SELECT coalesce(NULLIF(display_name, ''), username) FROM users
-		WHERE id = $1 AND enabled AND role IN ('user', 'operator', 'admin')`, userID).Scan(&name)
+		WHERE id = @id AND enabled AND role IN ('user', 'operator', 'admin')`, momo.Named("id", userID)).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotAgent
 	}
@@ -681,14 +714,16 @@ func (s *Store) ClaimConversation(ctx context.Context, acc InboxAccess, convID i
 		if c.Assignee.Valid || c.Status == messaging.StatusResolved || c.Status == messaging.StatusSpam {
 			return ErrConversationState
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE conversations SET assignee_user_id = $2 WHERE id = $1 AND assignee_user_id IS NULL`, c.ID, acc.UserID)
+		res, err := tx.ExecContext(ctx, `UPDATE conversations SET assignee_user_id = @assignee_user_id WHERE id = @id AND assignee_user_id IS NULL`,
+			momo.Named("id", c.ID), momo.Named("assignee_user_id", acc.UserID))
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrConversationState
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES ($1, $2, 'claim')`, c.ID, acc.UserID); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES (@conversation_id, @to_user_id, 'claim')`,
+			momo.Named("conversation_id", c.ID), momo.Named("to_user_id", acc.UserID)); err != nil {
 			return err
 		}
 		if _, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", acc.Name+" took the conversation"); err != nil {
@@ -710,13 +745,13 @@ func (s *Store) ClaimConversation(ctx context.Context, acc InboxAccess, convID i
 // emitPoolEvent tells the supervisors and the new assignee that a
 // conversation left the pool or moved.
 func emitPoolEvent(ctx context.Context, tx *dbTx, convID int64, typ string, toUser int64) error {
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(inboxEventLock)); err != nil {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(inboxEventLock))); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO conversation_events (user_id, type, conversation_id)
-		SELECT u.id, $2, $1 FROM users u WHERE u.enabled AND (u.role IN ('operator', 'admin') OR u.id = $3)`,
-		convID, typ, toUser)
+		SELECT u.id, @type, @conversation_id FROM users u WHERE u.enabled AND (u.role IN ('operator', 'admin') OR u.id = @to_user_id)`,
+		momo.Named("conversation_id", convID), momo.Named("type", typ), momo.Named("to_user_id", toUser))
 	return err
 }
 
@@ -749,7 +784,8 @@ func (s *Store) AssignConversation(ctx context.Context, acc InboxAccess, convID,
 		if toUser > 0 {
 			to = toUser
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET assignee_user_id = $2 WHERE id = $1`, c.ID, to); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET assignee_user_id = @assignee_user_id WHERE id = @id`,
+			momo.Named("id", c.ID), momo.Named("assignee_user_id", to)); err != nil {
 			return err
 		}
 		var from any
@@ -757,8 +793,8 @@ func (s *Store) AssignConversation(ctx context.Context, acc InboxAccess, convID,
 			from = c.Assignee.Int64
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO conversation_assignments (conversation_id, from_user_id, to_user_id, reason) VALUES ($1, $2, $3, 'manual')`,
-			c.ID, from, to); err != nil {
+			INSERT INTO conversation_assignments (conversation_id, from_user_id, to_user_id, reason) VALUES (@conversation_id, @from_user_id, @to_user_id, 'manual')`,
+			momo.Named("conversation_id", c.ID), momo.Named("from_user_id", from), momo.Named("to_user_id", to)); err != nil {
 			return err
 		}
 		if _, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", acc.Name+" assigned the conversation to "+name); err != nil {
@@ -793,7 +829,8 @@ func (s *Store) AssignConversation(ctx context.Context, acc InboxAccess, convID,
 // conversationByID reads a conversation the caller has just changed, with no
 // access check beyond the change's own and no audit row.
 func (s *Store) conversationByID(ctx context.Context, userID int64, all bool, id int64) (Conversation, error) {
-	c, err := scanConversation(s.db.QueryRowContext(ctx, convSelect+` WHERE c.id = $3 AND `+visible, userID, all, id))
+	c, err := scanConversation(s.db.QueryRowContext(ctx, convSelect+` WHERE c.id = @id AND `+visibleTo,
+		append(inboxAccessArgs(userID, all), momo.Named("id", id))...))
 	if err != nil {
 		return c, mapErr(err)
 	}
@@ -818,9 +855,9 @@ func (s *Store) SetConversationStatus(ctx context.Context, acc InboxAccess, conv
 			snooze = *until
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE conversations SET status = $2, snoozed_until = $3::timestamptz,
-				resolved_at = CASE WHEN $2 = 'resolved' THEN now() ELSE NULL END
-			WHERE id = $1`, c.ID, status, snooze); err != nil {
+			UPDATE conversations SET status = @status::text, snoozed_until = @snoozed_until::timestamptz,
+				resolved_at = CASE WHEN @status::text = 'resolved' THEN now() ELSE NULL END
+			WHERE id = @id`, momo.Named("id", c.ID), momo.Named("status", status), momo.Named("snoozed_until", snooze)); err != nil {
 			return err
 		}
 		line := map[string]string{
@@ -860,7 +897,7 @@ func (s *Store) SetConversationTags(ctx context.Context, acc InboxAccess, convID
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET tags = $2::text[] WHERE id = $1`, c.ID, tags); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET tags = @tags::text[] WHERE id = @id`, momo.Named("id", c.ID), momo.Named("tags", tags)); err != nil {
 			return err
 		}
 		return emitConversationEvent(ctx, tx, c.ID, 0, "conversation.updated", []int64{acc.UserID})
@@ -881,10 +918,10 @@ func (s *Store) MarkConversationRead(ctx context.Context, acc InboxAccess, convI
 		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO conversation_reads (user_id, conversation_id, last_read_message_id)
-			SELECT $1, c.id, coalesce(c.last_message_id, 0) FROM conversations c WHERE c.id = $2
+			SELECT @user_id, c.id, coalesce(c.last_message_id, 0) FROM conversations c WHERE c.id = @id
 			ON CONFLICT (user_id, conversation_id) DO UPDATE
 				SET last_read_message_id = GREATEST(conversation_reads.last_read_message_id, EXCLUDED.last_read_message_id), at = now()`,
-			acc.UserID, c.ID)
+			momo.Named("user_id", acc.UserID), momo.Named("id", c.ID))
 		if err != nil {
 			return err
 		}
@@ -988,10 +1025,10 @@ func (s *Store) GetInboxStatus(ctx context.Context, acc InboxAccess) (InboxStatu
 		}
 	}
 	err = s.db.QueryRowContext(ctx, `
-		SELECT count(*) FROM conversations c LEFT JOIN conversation_reads r ON r.conversation_id = c.id AND r.user_id = $1
-		WHERE c.assignee_user_id = $1 AND c.status IN ('open', 'pending', 'snoozed')
+		SELECT count(*) FROM conversations c LEFT JOIN conversation_reads r ON r.conversation_id = c.id AND r.user_id = @user_id
+		WHERE c.assignee_user_id = @user_id AND c.status IN ('open', 'pending', 'snoozed')
 		  AND EXISTS (SELECT 1 FROM conversation_messages x WHERE x.conversation_id = c.id AND x.direction = 'in'
-			AND x.kind = 'message' AND x.id > coalesce(r.last_read_message_id, 0))`, acc.UserID).Scan(&st.Unread)
+			AND x.kind = 'message' AND x.id > coalesce(r.last_read_message_id, 0))`, momo.Named("user_id", acc.UserID)).Scan(&st.Unread)
 	if err != nil || !acc.All {
 		return st, err
 	}
@@ -1144,10 +1181,10 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *dbTx, in TrunkText, res
 	err := tx.QueryRowContext(ctx, `
 		SELECT ch.id, ch.kind, a.id, a.address, a.label, to_json(a.optout_keywords)::text, a.help_text, a.optout_text
 		FROM msg_channels ch JOIN msg_addresses a ON a.channel_id = ch.id
-		WHERE ch.provider = 'sip_trunk' AND ch.trunk_id = $1 AND ch.enabled AND a.enabled
-		  AND (a.address_key = $2 OR ($3 <> '' AND a.address_suffix = $3))
-		ORDER BY (a.address_key = $2) DESC, a.id LIMIT 1`,
-		in.TrunkID, in.ToKey, in.ToSuffix).Scan(&channelID, &kind, &addressID, &address, &label, &keywordsJSON, &helpText, &optOutText)
+		WHERE ch.provider = 'sip_trunk' AND ch.trunk_id = @trunk_id AND ch.enabled AND a.enabled
+		  AND (a.address_key = @address_key OR (@address_suffix::text <> '' AND a.address_suffix = @address_suffix::text))
+		ORDER BY (a.address_key = @address_key) DESC, a.id LIMIT 1`,
+		momo.Named("trunk_id", in.TrunkID), momo.Named("address_key", in.ToKey), momo.Named("address_suffix", in.ToSuffix)).Scan(&channelID, &kind, &addressID, &address, &label, &keywordsJSON, &helpText, &optOutText)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil // not a channel address
 	}
@@ -1164,8 +1201,8 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *dbTx, in TrunkText, res
 	}
 	// The ledger: a key seen before ends the ingest here, whichever pod or
 	// retry brought it.
-	r, err := tx.ExecContext(ctx, `INSERT INTO messaging_events (channel_id, event_key) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-		channelID, in.EventKey)
+	r, err := tx.ExecContext(ctx, `INSERT INTO messaging_events (channel_id, event_key) VALUES (@channel_id, @event_key) ON CONFLICT DO NOTHING`,
+		momo.Named("channel_id", channelID), momo.Named("event_key", in.EventKey))
 	if err != nil {
 		return err
 	}
@@ -1191,18 +1228,18 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *dbTx, in TrunkText, res
 	// The open conversation of this peer on this number, if any.
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, status, assignee_user_id FROM conversations
-		WHERE address_id = $1 AND peer_key = $2 AND status NOT IN ('resolved', 'spam') FOR UPDATE`,
-		addressID, in.FromKey).Scan(&conv, &convStatus, &convAssignee)
+		WHERE address_id = @address_id AND peer_key = @peer_key AND status NOT IN ('resolved', 'spam') FOR UPDATE`,
+		momo.Named("address_id", addressID), momo.Named("peer_key", in.FromKey)).Scan(&conv, &convStatus, &convAssignee)
 	if errors.Is(err, sql.ErrNoRows) {
 		// A resolved one within reopen_days is reopened; otherwise a new one starts.
 		err = tx.QueryRowContext(ctx, `
 			SELECT id, status, assignee_user_id FROM conversations
-			WHERE address_id = $1 AND peer_key = $2 AND status = 'resolved'
-			  AND last_message_at > now() - make_interval(days => $3)
+			WHERE address_id = @address_id AND peer_key = @peer_key AND status = 'resolved'
+			  AND last_message_at > now() - make_interval(days => @reopen_days)
 			ORDER BY last_message_at DESC, id DESC LIMIT 1 FOR UPDATE`,
-			addressID, in.FromKey, reopenDays).Scan(&conv, &convStatus, &convAssignee)
+			momo.Named("address_id", addressID), momo.Named("peer_key", in.FromKey), momo.Named("reopen_days", reopenDays)).Scan(&conv, &convStatus, &convAssignee)
 		if err == nil {
-			if _, err := tx.ExecContext(ctx, `UPDATE conversations SET status = 'open', resolved_at = NULL WHERE id = $1`, conv); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE conversations SET status = 'open', resolved_at = NULL WHERE id = @id`, momo.Named("id", conv)); err != nil {
 				return err
 			}
 			convStatus = messaging.StatusOpen
@@ -1211,15 +1248,16 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *dbTx, in TrunkText, res
 	if errors.Is(err, sql.ErrNoRows) {
 		err = tx.QueryRowContext(ctx, `
 			INSERT INTO conversations (channel_id, address_id, peer_key, peer_name, peer_name_source)
-			VALUES ($1, $2, $3, $4, $5)
+			VALUES (@channel_id, @address_id, @peer_key, @peer_name, @peer_name_source)
 			ON CONFLICT (address_id, peer_key) WHERE status NOT IN ('resolved', 'spam') DO NOTHING
-			RETURNING id, status`, channelID, addressID, in.FromKey, peerName, peerNameSrc).Scan(&conv, &convStatus)
+			RETURNING id, status`, momo.Named("channel_id", channelID), momo.Named("address_id", addressID), momo.Named("peer_key", in.FromKey),
+			momo.Named("peer_name", peerName), momo.Named("peer_name_source", peerNameSrc)).Scan(&conv, &convStatus)
 		if errors.Is(err, sql.ErrNoRows) {
 			// Another pod made it a moment ago: attach to it.
 			err = tx.QueryRowContext(ctx, `
 				SELECT id, status, assignee_user_id FROM conversations
-				WHERE address_id = $1 AND peer_key = $2 AND status NOT IN ('resolved', 'spam') FOR UPDATE`,
-				addressID, in.FromKey).Scan(&conv, &convStatus, &convAssignee)
+				WHERE address_id = @address_id AND peer_key = @peer_key AND status NOT IN ('resolved', 'spam') FOR UPDATE`,
+				momo.Named("address_id", addressID), momo.Named("peer_key", in.FromKey)).Scan(&conv, &convStatus, &convAssignee)
 		} else if err == nil {
 			newConversation = true
 		}
@@ -1228,17 +1266,17 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *dbTx, in TrunkText, res
 		return err
 	}
 	if peerName != "" {
-		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET peer_name = $2, peer_name_source = $3 WHERE id = $1 AND peer_name = ''`,
-			conv, peerName, peerNameSrc); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET peer_name = @peer_name, peer_name_source = @peer_name_source WHERE id = @id AND peer_name = ''`,
+			momo.Named("id", conv), momo.Named("peer_name", peerName), momo.Named("peer_name_source", peerNameSrc)); err != nil {
 			return err
 		}
 	}
 	var msgID int64
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, body, status, provider_message_id)
-		VALUES ($1, $2, 'in', 'message', 'customer', $3, 'delivered', $4)
+		VALUES (@conversation_id, @channel_id, 'in', 'message', 'customer', @body, 'delivered', @provider_message_id)
 		ON CONFLICT (channel_id, provider_message_id) DO NOTHING RETURNING id`,
-		conv, channelID, in.Body, in.EventKey).Scan(&msgID)
+		momo.Named("conversation_id", conv), momo.Named("channel_id", channelID), momo.Named("body", in.Body), momo.Named("provider_message_id", in.EventKey)).Scan(&msgID)
 	if errors.Is(err, sql.ErrNoRows) {
 		res.Duplicate = true
 		return nil
@@ -1247,13 +1285,13 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *dbTx, in TrunkText, res
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE conversations SET last_message_id = $2, last_message_at = now(), last_inbound_at = now(),
+		UPDATE conversations SET last_message_id = @last_message_id, last_message_at = now(), last_inbound_at = now(),
 			status = CASE WHEN status IN ('pending', 'snoozed') THEN 'open' ELSE status END,
 			snoozed_until = NULL
-		WHERE id = $1`, conv, msgID); err != nil {
+		WHERE id = @id`, momo.Named("id", conv), momo.Named("last_message_id", msgID)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE msg_channels SET last_event_at = now() WHERE id = $1`, channelID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE msg_channels SET last_event_at = now() WHERE id = @id`, momo.Named("id", channelID)); err != nil {
 		return err
 	}
 	res.ConversationID, res.MessageID = conv, msgID
@@ -1279,14 +1317,14 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *dbTx, in TrunkText, res
 			return err
 		}
 		var was string
-		if err := tx.QueryRowContext(ctx, `SELECT state FROM sms_opt_outs WHERE address_id = $1 AND peer_hash = $2`,
-			addressID, h).Scan(&was); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(ctx, `SELECT state FROM sms_opt_outs WHERE address_id = @address_id AND peer_hash = @peer_hash`,
+			momo.Named("address_id", addressID), momo.Named("peer_hash", h)).Scan(&was); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO sms_opt_outs (address_id, peer_key, peer_hash, state, source) VALUES ($1, $2, $3, 'out', 'keyword')
+			INSERT INTO sms_opt_outs (address_id, peer_key, peer_hash, state, source) VALUES (@address_id, @peer_key, @peer_hash, 'out', 'keyword')
 			ON CONFLICT (address_id, peer_hash) DO UPDATE SET state = 'out', source = 'keyword', note = '', at = now(),
-				peer_key = $2`, addressID, in.FromKey, h); err != nil {
+				peer_key = @peer_key`, momo.Named("address_id", addressID), momo.Named("peer_key", in.FromKey), momo.Named("peer_hash", h)); err != nil {
 			return err
 		}
 		if _, err := addLine(ctx, tx, row, messaging.KindSystem, messaging.SenderSystem, 0, "", "The customer opted out"); err != nil {
@@ -1309,9 +1347,9 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *dbTx, in TrunkText, res
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO sms_opt_outs (address_id, peer_key, peer_hash, state, source) VALUES ($1, $2, $3, 'in', 'customer')
+			INSERT INTO sms_opt_outs (address_id, peer_key, peer_hash, state, source) VALUES (@address_id, @peer_key, @peer_hash, 'in', 'customer')
 			ON CONFLICT (address_id, peer_hash) DO UPDATE SET state = 'in', source = 'customer', note = '', at = now(),
-				peer_key = $2`, addressID, in.FromKey, h); err != nil {
+				peer_key = @peer_key`, momo.Named("address_id", addressID), momo.Named("peer_key", in.FromKey), momo.Named("peer_hash", h)); err != nil {
 			return err
 		}
 		if _, err := addLine(ctx, tx, row, messaging.KindSystem, messaging.SenderSystem, 0, "", "The customer opted back in"); err != nil {
@@ -1347,7 +1385,8 @@ type InboxEvent struct {
 func (s *Store) ListInboxEvents(ctx context.Context, userID, after int64, limit int) ([]InboxEvent, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, type, conversation_id, coalesce(message_id, 0), at FROM conversation_events
-		WHERE user_id = $1 AND id > $2 ORDER BY id LIMIT $3`, userID, after, limit)
+		WHERE user_id = @user_id AND id > @after ORDER BY id LIMIT @limit`,
+		momo.Named("user_id", userID), momo.Named("after", after), momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
@@ -1367,7 +1406,7 @@ func (s *Store) ListInboxEvents(ctx context.Context, userID, after int64, limit 
 // nothing.
 func (s *Store) LatestInboxEventID(ctx context.Context, userID int64) (int64, error) {
 	var id int64
-	err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM conversation_events WHERE user_id = $1`, userID).Scan(&id)
+	err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM conversation_events WHERE user_id = @user_id`, momo.Named("user_id", userID)).Scan(&id)
 	return id, err
 }
 
@@ -1375,8 +1414,8 @@ func (s *Store) LatestInboxEventID(ctx context.Context, userID int64) (int64, er
 // email fallback.
 func (s *Store) TouchInboxPresence(ctx context.Context, userID int64) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO inbox_presence (user_id, seen_at) VALUES ($1, now())
-		ON CONFLICT (user_id) DO UPDATE SET seen_at = now()`, userID)
+		INSERT INTO inbox_presence (user_id, seen_at) VALUES (@user_id, now())
+		ON CONFLICT (user_id) DO UPDATE SET seen_at = now()`, momo.Named("user_id", userID))
 	return err
 }
 
@@ -1412,7 +1451,7 @@ func (s *Store) ClaimInboxNotices(ctx context.Context, limit int) ([]InboxNotice
 			JOIN conversations c ON c.id = e.conversation_id
 			JOIN msg_channels ch ON ch.id = c.channel_id
 			WHERE NOT e.notified AND e.type IN ('message.in', 'conversation.new') AND e.at < now() - interval '2 minutes'
-			ORDER BY e.id LIMIT $1 FOR UPDATE OF e SKIP LOCKED`, limit)
+			ORDER BY e.id LIMIT @limit FOR UPDATE OF e SKIP LOCKED`, momo.Named("limit", limit))
 		if err != nil {
 			return err
 		}
@@ -1439,7 +1478,7 @@ func (s *Store) ClaimInboxNotices(ctx context.Context, limit int) ([]InboxNotice
 			return err
 		}
 		for _, c := range cands {
-			if _, err := tx.ExecContext(ctx, `UPDATE conversation_events SET notified = TRUE WHERE id = $1`, c.id); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE conversation_events SET notified = TRUE WHERE id = @id`, momo.Named("id", c.id)); err != nil {
 				return err
 			}
 			if !set.EmailNotify || !c.recent || !c.away || c.email == "" {
@@ -1447,10 +1486,10 @@ func (s *Store) ClaimInboxNotices(ctx context.Context, limit int) ([]InboxNotice
 			}
 			var sent int
 			err := tx.QueryRowContext(ctx, `
-				INSERT INTO conversation_notify (user_id, conversation_id, last_email_at) VALUES ($1, $2, now())
+				INSERT INTO conversation_notify (user_id, conversation_id, last_email_at) VALUES (@user_id, @conversation_id, now())
 				ON CONFLICT (user_id, conversation_id) DO UPDATE SET last_email_at = now()
 				WHERE conversation_notify.last_email_at < now() - interval '15 minutes'
-				RETURNING 1`, c.user, c.conv).Scan(&sent)
+				RETURNING 1`, momo.Named("user_id", c.user), momo.Named("conversation_id", c.conv)).Scan(&sent)
 			if errors.Is(err, sql.ErrNoRows) {
 				continue // throttled
 			}
@@ -1468,7 +1507,7 @@ func (s *Store) ClaimInboxNotices(ctx context.Context, limit int) ([]InboxNotice
 // queue row on the inbox message it carries.
 func (s *Store) syncOneConversationMessage(ctx context.Context, queueID int64) error {
 	var cm sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `SELECT conversation_message_id FROM messages WHERE id = $1`, queueID).Scan(&cm); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT conversation_message_id FROM messages WHERE id = @id`, momo.Named("id", queueID)).Scan(&cm); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -1511,12 +1550,12 @@ func (s *Store) syncConversationMessages(ctx context.Context, ids []int64) error
 				       coalesce(left(max(m.detail) FILTER (WHERE m.status = 'failed'), 200), '') AS err
 				FROM messages m
 				WHERE m.conversation_message_id IN (
-					SELECT id FROM conversation_messages WHERE status IN ('queued', 'sending') AND ($1::bigint[] IS NULL OR id = ANY($1::bigint[])))
+					SELECT id FROM conversation_messages WHERE status IN ('queued', 'sending') AND (@ids::bigint[] IS NULL OR id = ANY(@ids::bigint[])))
 				GROUP BY m.conversation_message_id)
 			UPDATE conversation_messages cm SET status = r.st, error_code = r.err,
 				sent_at = CASE WHEN r.st = 'sent' THEN now() ELSE cm.sent_at END
 			FROM r WHERE cm.id = r.id AND r.st <> 'sending'
-			RETURNING cm.id, cm.conversation_id`, ids)
+			RETURNING cm.id, cm.conversation_id`, momo.Named("ids", ids))
 		if err != nil {
 			return err
 		}

@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/ringtag"
 )
 
@@ -87,14 +89,14 @@ func (s *Store) CreateRingTag(ctx context.Context, actor string, in RingTagInput
 			return in.Name, &InUseError{Msg: fmt.Sprintf("at most %d custom ring tags", ringtag.MaxCustomTags)}
 		}
 		var dup int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ring_tags WHERE name = $1`, in.Name).Scan(&dup); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ring_tags WHERE name = @name`, momo.Named("name", in.Name)).Scan(&dup); err != nil {
 			return in.Name, err
 		}
 		if dup > 0 {
 			return in.Name, ErrConflict
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO ring_tags (name, builtin, bellcore_slot, description) VALUES ($1, FALSE, $2, $3)`,
-			in.Name, in.BellcoreSlot, in.Description)
+		_, err := tx.ExecContext(ctx, `INSERT INTO ring_tags (name, builtin, bellcore_slot, description) VALUES (@name, FALSE, @bellcore_slot, @description)`,
+			momo.Named("name", in.Name), momo.Named("bellcore_slot", in.BellcoreSlot), momo.Named("description", in.Description))
 		return in.Name, err
 	})
 	if err != nil {
@@ -107,8 +109,8 @@ func (s *Store) CreateRingTag(ctx context.Context, actor string, in RingTagInput
 // changes.
 func (s *Store) UpdateRingTag(ctx context.Context, actor, name string, in RingTagInput) (RingTag, error) {
 	err := s.configChangeID(ctx, actor, "update", "ring_tag", nil, func(tx *dbTx) (string, error) {
-		res, err := tx.ExecContext(ctx, `UPDATE ring_tags SET bellcore_slot = $2, description = $3, updated_at = now() WHERE name = $1`,
-			name, in.BellcoreSlot, in.Description)
+		res, err := tx.ExecContext(ctx, `UPDATE ring_tags SET bellcore_slot = @bellcore_slot, description = @description, updated_at = now() WHERE name = @name`,
+			momo.Named("name", name), momo.Named("bellcore_slot", in.BellcoreSlot), momo.Named("description", in.Description))
 		if err != nil {
 			return name, err
 		}
@@ -124,7 +126,7 @@ func (s *Store) UpdateRingTag(ctx context.Context, actor, name string, in RingTa
 func (s *Store) DeleteRingTag(ctx context.Context, actor, name string) error {
 	return s.configChangeID(ctx, actor, "delete", "ring_tag", nil, func(tx *dbTx) (string, error) {
 		var builtin bool
-		if err := tx.QueryRowContext(ctx, `SELECT builtin FROM ring_tags WHERE name = $1`, name).Scan(&builtin); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT builtin FROM ring_tags WHERE name = @name`, momo.Named("name", name)).Scan(&builtin); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return name, ErrNotFound
 			}
@@ -138,11 +140,11 @@ func (s *Store) DeleteRingTag(ctx context.Context, actor, name string) error {
 			sql string
 			dst *[]string
 		}{
-			{`SELECT 'rule ' || position FROM ring_rules WHERE tag = $1 ORDER BY position`, &rules},
-			{`SELECT 'ring group ' || name FROM ring_groups WHERE ring_tag = $1 ORDER BY name`, &groups},
-			{`SELECT DISTINCT 'the ring map (' || vendor || ')' FROM ring_map WHERE tag = $1 ORDER BY 1`, &maps},
+			{`SELECT 'rule ' || position FROM ring_rules WHERE tag = @name ORDER BY position`, &rules},
+			{`SELECT 'ring group ' || name FROM ring_groups WHERE ring_tag = @name ORDER BY name`, &groups},
+			{`SELECT DISTINCT 'the ring map (' || vendor || ')' FROM ring_map WHERE tag = @name ORDER BY 1`, &maps},
 		} {
-			rows, err := tx.QueryContext(ctx, q.sql, name)
+			rows, err := tx.QueryContext(ctx, q.sql, momo.Named("name", name))
 			if err != nil {
 				return name, err
 			}
@@ -165,7 +167,7 @@ func (s *Store) DeleteRingTag(ctx context.Context, actor, name string) error {
 			}
 			return name, &InUseError{Msg: "ring tag " + name + " is used by " + strings.Join(used, ", ")}
 		}
-		_, err := tx.ExecContext(ctx, `DELETE FROM ring_tags WHERE name = $1`, name)
+		_, err := tx.ExecContext(ctx, `DELETE FROM ring_tags WHERE name = @name`, momo.Named("name", name))
 		return name, err
 	})
 }
@@ -237,8 +239,8 @@ func (s *Store) ReplaceRingRules(ctx context.Context, actor string, in []RingRul
 			if err != nil {
 				return 0, err
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO ring_rules (position, name, match, tag) VALUES ($1, $2, $3, $4)`,
-				i+1, r.Name, string(raw), r.Tag); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO ring_rules (position, name, match, tag) VALUES (@position, @name, @match, @tag)`,
+				momo.Named("position", i+1), momo.Named("name", r.Name), momo.Named("match", string(raw)), momo.Named("tag", r.Tag)); err != nil {
 				return 0, err
 			}
 		}
@@ -254,7 +256,7 @@ func checkRingTag(ctx context.Context, q querier, path, tag string) error {
 		return nil
 	}
 	var n int
-	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM ring_tags WHERE name = $1`, tag).Scan(&n); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM ring_tags WHERE name = @name`, momo.Named("name", tag)).Scan(&n); err != nil {
 		return err
 	}
 	if n == 0 {

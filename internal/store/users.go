@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/auth"
 )
 
@@ -137,7 +139,7 @@ func (s *Store) CreateUser(ctx context.Context, actor, username, passwordHash st
 	var id int64
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var managed bool
-		switch err := tx.QueryRowContext(ctx, `SELECT source_connector_id IS NOT NULL FROM users WHERE username = $1`, username).Scan(&managed); {
+		switch err := tx.QueryRowContext(ctx, `SELECT source_connector_id IS NOT NULL FROM users WHERE username = @username`, momo.Named("username", username)).Scan(&managed); {
 		case err == nil && managed:
 			return ErrManagedByDirectory
 		case err != nil && !errors.Is(err, sql.ErrNoRows):
@@ -145,9 +147,9 @@ func (s *Store) CreateUser(ctx context.Context, actor, username, passwordHash st
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO users (username, password_hash, role)
-			VALUES ($1, $2, CASE WHEN EXISTS (SELECT 1 FROM users) THEN $3 ELSE 'admin' END)
+			VALUES (@username, @password_hash, CASE WHEN EXISTS (SELECT 1 FROM users) THEN @role ELSE 'admin' END)
 			RETURNING id`,
-			username, passwordHash, string(role)).Scan(&id); err != nil {
+			momo.Named("username", username), momo.Named("password_hash", passwordHash), momo.Named("role", string(role))).Scan(&id); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "user", strconv.FormatInt(id, 10))
@@ -181,9 +183,12 @@ func (s *Store) CreateAccount(ctx context.Context, actor string, in NewAccount) 
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO users (username, password_hash, role, display_name, email, must_change_password,
 				vm_email_notify, vm_email_attach, vm_email_after)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-			in.Username, in.PasswordHash, string(in.Role), in.DisplayName, in.Email, in.MustChange,
-			in.Voicemail.Notify, in.Voicemail.Attach, in.Voicemail.After).Scan(&id); err != nil {
+			VALUES (@username, @password_hash, @role, @display_name, @email, @must_change_password,
+				@vm_email_notify, @vm_email_attach, @vm_email_after) RETURNING id`,
+			momo.Named("username", in.Username), momo.Named("password_hash", in.PasswordHash), momo.Named("role", string(in.Role)),
+			momo.Named("display_name", in.DisplayName), momo.Named("email", in.Email), momo.Named("must_change_password", in.MustChange),
+			momo.Named("vm_email_notify", in.Voicemail.Notify), momo.Named("vm_email_attach", in.Voicemail.Attach),
+			momo.Named("vm_email_after", in.Voicemail.After)).Scan(&id); err != nil {
 			return err
 		}
 		if err := setUserExtensions(ctx, tx, id, in.ExtensionIDs); err != nil {
@@ -193,7 +198,7 @@ func (s *Store) CreateAccount(ctx context.Context, actor string, in NewAccount) 
 			return err
 		}
 		var err error
-		u, err = scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = $1`, id))
+		u, err = scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = @id`, momo.Named("id", id)))
 		return err
 	})
 	return u, err
@@ -201,7 +206,7 @@ func (s *Store) CreateAccount(ctx context.Context, actor string, in NewAccount) 
 
 // GetUser returns one user.
 func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
-	u, err := scanUser(s.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = $1`, id))
+	u, err := scanUser(s.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = @id`, momo.Named("id", id)))
 	return u, mapErr(err)
 }
 
@@ -253,7 +258,7 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 		if err != nil {
 			return err
 		}
-		cur, err := scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = $1 FOR UPDATE`, id))
+		cur, err := scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = @id FOR UPDATE`, momo.Named("id", id)))
 		if err != nil {
 			return mapErr(err)
 		}
@@ -293,20 +298,23 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE users SET
-				display_name = COALESCE($2, display_name),
-				email = COALESCE($3, email),
-				role = $4,
-				enabled = $5,
-				password_hash = COALESCE($6, password_hash),
-				must_change_password = CASE WHEN $6::text IS NULL THEN must_change_password ELSE $7 END,
-				vm_email_notify = COALESCE($8, vm_email_notify),
-				vm_email_attach = COALESCE($9, vm_email_attach),
-				vm_email_after = COALESCE($10, vm_email_after),
-				totp_required = COALESCE($11, totp_required),
-				break_glass = $12
-			WHERE id = $1`,
-			id, c.DisplayName, c.Email, string(role), enabled, c.PasswordHash, c.MustChange,
-			prefNotify(c.Voicemail), prefAttach(c.Voicemail), prefAfter(c.Voicemail), c.TOTPRequired, breakGlass); err != nil {
+				display_name = COALESCE(@display_name, display_name),
+				email = COALESCE(@email, email),
+				role = @role,
+				enabled = @enabled,
+				password_hash = COALESCE(@password_hash::text, password_hash),
+				must_change_password = CASE WHEN @password_hash::text IS NULL THEN must_change_password ELSE @must_change END,
+				vm_email_notify = COALESCE(@vm_email_notify, vm_email_notify),
+				vm_email_attach = COALESCE(@vm_email_attach, vm_email_attach),
+				vm_email_after = COALESCE(@vm_email_after, vm_email_after),
+				totp_required = COALESCE(@totp_required, totp_required),
+				break_glass = @break_glass
+			WHERE id = @id`,
+			momo.Named("id", id), momo.Named("display_name", c.DisplayName), momo.Named("email", c.Email),
+			momo.Named("role", string(role)), momo.Named("enabled", enabled), momo.Named("password_hash", c.PasswordHash),
+			momo.Named("must_change", c.MustChange), momo.Named("vm_email_notify", prefNotify(c.Voicemail)),
+			momo.Named("vm_email_attach", prefAttach(c.Voicemail)), momo.Named("vm_email_after", prefAfter(c.Voicemail)),
+			momo.Named("totp_required", c.TOTPRequired), momo.Named("break_glass", breakGlass)); err != nil {
 			return err
 		}
 		if c.TOTPRequired != nil && *c.TOTPRequired && role == auth.RoleAdmin {
@@ -325,7 +333,7 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 			return err
 		}
 		if !enabled || c.PasswordHash != nil {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = $1`, id); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = @user_id`, momo.Named("user_id", id)); err != nil {
 				return err
 			}
 		}
@@ -367,7 +375,7 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 				return err
 			}
 		}
-		u, err = scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = $1`, id))
+		u, err = scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = @id`, momo.Named("id", id)))
 		return err
 	})
 	return u, err
@@ -381,8 +389,9 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 func revokeClientDevices(ctx context.Context, tx *dbTx, id int64, keepLinked bool) error {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE devices SET enabled = FALSE, updated_at = now()
-		WHERE user_id = $1 AND kind <> 'desk' AND enabled
-		  AND (NOT $2 OR extension_id NOT IN (SELECT extension_id FROM user_extensions WHERE user_id = $1))`, id, keepLinked)
+		WHERE user_id = @user_id AND kind <> 'desk' AND enabled
+		  AND (NOT @keep_linked OR extension_id NOT IN (SELECT extension_id FROM user_extensions WHERE user_id = @user_id))`,
+		momo.Named("user_id", id), momo.Named("keep_linked", keepLinked))
 	if err != nil {
 		return err
 	}
@@ -423,7 +432,7 @@ func (s *Store) DeleteUser(ctx context.Context, actor string, id int64) error {
 		}
 		var role auth.Role
 		var enabled, breakGlass bool
-		if err := tx.QueryRowContext(ctx, `SELECT role, enabled, break_glass FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&role, &enabled, &breakGlass); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT role, enabled, break_glass FROM users WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&role, &enabled, &breakGlass); err != nil {
 			return mapErr(err)
 		}
 		if role == auth.RoleAdmin && enabled && admins <= 1 {
@@ -443,7 +452,7 @@ func (s *Store) DeleteUser(ctx context.Context, actor string, id int64) error {
 		if err := revokeClientDevices(ctx, tx, id, false); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = @id`, momo.Named("id", id)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "delete", "user", strconv.FormatInt(id, 10))
@@ -503,7 +512,7 @@ func setUserExtensions(ctx context.Context, tx *dbTx, id int64, ids []int64) err
 	}
 	for _, e := range clean {
 		var number string
-		switch err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1 FOR SHARE`, e).Scan(&number); {
+		switch err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = @id FOR SHARE`, momo.Named("id", e)).Scan(&number); {
 		case errors.Is(err, sql.ErrNoRows):
 			return fieldError("extensionIds", "no such extension")
 		case err != nil:
@@ -511,20 +520,21 @@ func setUserExtensions(ctx context.Context, tx *dbTx, id int64, ids []int64) err
 		}
 		var other string
 		switch err := tx.QueryRowContext(ctx,
-			`SELECT u.username FROM user_extensions ue JOIN users u ON u.id = ue.user_id WHERE ue.extension_id = $1 AND ue.user_id <> $2`,
-			e, id).Scan(&other); {
+			`SELECT u.username FROM user_extensions ue JOIN users u ON u.id = ue.user_id WHERE ue.extension_id = @extension_id AND ue.user_id <> @user_id`,
+			momo.Named("extension_id", e), momo.Named("user_id", id)).Scan(&other); {
 		case err == nil:
 			return conflict("extension %s is already linked to user %q", number, other)
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM user_extensions WHERE user_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_extensions WHERE user_id = @user_id`, momo.Named("user_id", id)); err != nil {
 		return err
 	}
 	for i, e := range clean {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO user_extensions (user_id, extension_id, position) VALUES ($1, $2, $3)`, id, e, i); err != nil {
+			`INSERT INTO user_extensions (user_id, extension_id, position) VALUES (@user_id, @extension_id, @position)`,
+			momo.Named("user_id", id), momo.Named("extension_id", e), momo.Named("position", i)); err != nil {
 			return err
 		}
 	}
@@ -532,7 +542,7 @@ func setUserExtensions(ctx context.Context, tx *dbTx, id int64, ids []int64) err
 	if len(clean) > 0 {
 		primary = &clean[0]
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE users SET extension_id = $2 WHERE id = $1`, id, primary)
+	_, err := tx.ExecContext(ctx, `UPDATE users SET extension_id = @extension_id WHERE id = @id`, momo.Named("id", id), momo.Named("extension_id", primary))
 	return err
 }
 
@@ -558,7 +568,7 @@ func (s *Store) UserForLogin(ctx context.Context, username string) (Login, error
 	var l Login
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, password_hash, enabled, role, totp_enabled_at IS NOT NULL, coalesce(source_connector_id, 0), coalesce(external_id, ''), break_glass
-		 FROM users WHERE username = $1 AND auth_method = 'local'`, username).
+		 FROM users WHERE username = @username AND auth_method = 'local'`, momo.Named("username", username)).
 		Scan(&l.ID, &l.Hash, &l.Enabled, &l.Role, &l.TOTPEnabled, &l.ConnectorID, &l.ExternalID, &l.BreakGlass)
 	return l, mapErr(err)
 }
@@ -574,7 +584,7 @@ func (s *Store) SSORequired(ctx context.Context) (bool, error) {
 // UserManagedByDirectory reports whether user id is directory-synced.
 func (s *Store) UserManagedByDirectory(ctx context.Context, id int64) (bool, error) {
 	var managed bool
-	err := s.db.QueryRowContext(ctx, `SELECT source_connector_id IS NOT NULL FROM users WHERE id = $1`, id).Scan(&managed)
+	err := s.db.QueryRowContext(ctx, `SELECT source_connector_id IS NOT NULL FROM users WHERE id = @id`, momo.Named("id", id)).Scan(&managed)
 	return managed, mapErr(err)
 }
 
@@ -582,14 +592,15 @@ func (s *Store) UserManagedByDirectory(ctx context.Context, id int64) (bool, err
 // password change.
 func (s *Store) UserPasswordHash(ctx context.Context, id int64) (string, error) {
 	var h string
-	err := s.db.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = $1`, id).Scan(&h)
+	err := s.db.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = @id`, momo.Named("id", id)).Scan(&h)
 	return h, mapErr(err)
 }
 
 // UpgradePasswordHash replaces a verified legacy hash with a stronger one;
 // it does nothing if the password changed meanwhile.
 func (s *Store) UpgradePasswordHash(ctx context.Context, id int64, oldHash, newHash string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = $3 WHERE id = $1 AND password_hash = $2`, id, oldHash, newHash)
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = @new_hash WHERE id = @id AND password_hash = @old_hash`,
+		momo.Named("id", id), momo.Named("old_hash", oldHash), momo.Named("new_hash", newHash))
 	return err
 }
 
@@ -598,10 +609,12 @@ func (s *Store) UpgradePasswordHash(ctx context.Context, id int64, oldHash, newH
 func (s *Store) ChangeOwnPassword(ctx context.Context, id int64, newHash string, keep []byte) error {
 	return s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE users SET password_hash = $2, must_change_password = FALSE WHERE id = $1`, id, newHash); err != nil {
+			`UPDATE users SET password_hash = @password_hash, must_change_password = FALSE WHERE id = @id`,
+			momo.Named("id", id), momo.Named("password_hash", newHash)); err != nil {
 			return mapErr(err)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2`, id, keep); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = @user_id AND token_hash <> @keep`,
+			momo.Named("user_id", id), momo.Named("keep", keep)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, "user:"+strconv.FormatInt(id, 10), "change-password", "user", strconv.FormatInt(id, 10))
@@ -628,16 +641,18 @@ func (s *Store) UpdateProfile(ctx context.Context, actor string, id int64, c Pro
 	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `
 			UPDATE users SET
-				display_name = COALESCE($2, display_name),
-				email = COALESCE($3, email),
-				vm_email_notify = COALESCE($4, vm_email_notify),
-				vm_email_attach = COALESCE($5, vm_email_attach),
-				vm_email_after = COALESCE($6, vm_email_after),
-				ring_web = COALESCE($7, ring_web),
-				ring_mobile = COALESCE($8, ring_mobile),
-				deskphone_delivery = COALESCE($9, deskphone_delivery)
-			WHERE id = $1`, id, c.DisplayName, c.Email, prefNotify(c.Voicemail), prefAttach(c.Voicemail), prefAfter(c.Voicemail),
-			c.RingWeb, c.RingMobile, c.DeskphoneDelivery)
+				display_name = COALESCE(@display_name, display_name),
+				email = COALESCE(@email, email),
+				vm_email_notify = COALESCE(@vm_email_notify, vm_email_notify),
+				vm_email_attach = COALESCE(@vm_email_attach, vm_email_attach),
+				vm_email_after = COALESCE(@vm_email_after, vm_email_after),
+				ring_web = COALESCE(@ring_web, ring_web),
+				ring_mobile = COALESCE(@ring_mobile, ring_mobile),
+				deskphone_delivery = COALESCE(@deskphone_delivery, deskphone_delivery)
+			WHERE id = @id`, momo.Named("id", id), momo.Named("display_name", c.DisplayName), momo.Named("email", c.Email),
+			momo.Named("vm_email_notify", prefNotify(c.Voicemail)), momo.Named("vm_email_attach", prefAttach(c.Voicemail)),
+			momo.Named("vm_email_after", prefAfter(c.Voicemail)), momo.Named("ring_web", c.RingWeb),
+			momo.Named("ring_mobile", c.RingMobile), momo.Named("deskphone_delivery", c.DeskphoneDelivery))
 		if err != nil {
 			return err
 		}
@@ -653,7 +668,7 @@ func (s *Store) UpdateProfile(ctx context.Context, actor string, id int64, c Pro
 		if err := insertAudit(ctx, tx, actor, "update-profile", "user", strconv.FormatInt(id, 10)); err != nil {
 			return err
 		}
-		u, err = scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = $1`, id))
+		u, err = scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = @id`, momo.Named("id", id)))
 		return err
 	})
 	return u, err
@@ -668,7 +683,7 @@ func (s *Store) UserExtensions(ctx context.Context, userID int64) ([]Extension, 
 	//nolint:gosec // G202: the prefix is a constant column list
 	rows, err := s.db.QueryContext(ctx, extQuery+`
 		FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id
-		WHERE ue.user_id = $1 ORDER BY ue.position, e.number`, userID)
+		WHERE ue.user_id = @user_id ORDER BY ue.position, e.number`, momo.Named("user_id", userID))
 	if err != nil {
 		return nil, err
 	}
@@ -690,7 +705,7 @@ func (s *Store) UserExtension(ctx context.Context, userID, id int64) (Extension,
 	//nolint:gosec // G202: the prefix is a constant column list
 	e, err := scanExtension(s.db.QueryRowContext(ctx, extQuery+`
 		FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id
-		WHERE ue.user_id = $1 AND e.id = $2`, userID, id))
+		WHERE ue.user_id = @user_id AND e.id = @id`, momo.Named("user_id", userID), momo.Named("id", id)))
 	return e, mapErr(err)
 }
 
@@ -702,7 +717,7 @@ func (s *Store) UserVoicemailMessage(ctx context.Context, userID, id int64) (Voi
 		FROM voicemail_messages m
 		JOIN voicemail_boxes b ON b.id = m.box_id
 		JOIN user_extensions ue ON ue.extension_id = b.extension_id
-		WHERE ue.user_id = $1 AND m.id = $2`, userID, id))
+		WHERE ue.user_id = @user_id AND m.id = @id`, momo.Named("user_id", userID), momo.Named("id", id)))
 	return m, mapErr(err)
 }
 
@@ -713,10 +728,10 @@ func (s *Store) UserCDRs(ctx context.Context, userID, before int64, limit int) (
 	//nolint:gosec // G202: the prefix is a constant column list
 	rows, err := s.db.QueryContext(ctx, cdrQuery+`
 		FROM cdrs c
-		WHERE ($2::bigint = 0 OR c.id < $2::bigint) AND EXISTS (
+		WHERE (@before::bigint = 0 OR c.id < @before::bigint) AND EXISTS (
 			SELECT 1 FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id
-			WHERE ue.user_id = $1 AND (c.source = e.number OR c.destination = e.number OR c.original_destination = e.number))
-		ORDER BY c.id DESC LIMIT $3`, userID, before, limit+1)
+			WHERE ue.user_id = @user_id AND (c.source = e.number OR c.destination = e.number OR c.original_destination = e.number))
+		ORDER BY c.id DESC LIMIT @limit`, momo.Named("user_id", userID), momo.Named("before", before), momo.Named("limit", limit+1))
 	if err != nil {
 		return nil, "", err
 	}

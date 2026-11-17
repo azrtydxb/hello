@@ -3,11 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/azrtydxb/momo"
 
 	"github.com/azrtydxb/hello/internal/ai"
 )
@@ -20,13 +21,14 @@ var _ ai.Store = (*Store)(nil)
 func (s *Store) AddAIUsage(ctx context.Context, day time.Time, u ai.Usage) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO ai_usage (day, input_tokens, output_tokens, reasoning_tokens, calls)
-		VALUES ($1::date, $2, $3, $4, $5)
+		VALUES (@day::date, @input_tokens, @output_tokens, @reasoning_tokens, @calls)
 		ON CONFLICT (day) DO UPDATE SET
 			input_tokens = ai_usage.input_tokens + EXCLUDED.input_tokens,
 			output_tokens = ai_usage.output_tokens + EXCLUDED.output_tokens,
 			reasoning_tokens = ai_usage.reasoning_tokens + EXCLUDED.reasoning_tokens,
 			calls = ai_usage.calls + EXCLUDED.calls`,
-		day.UTC().Format(time.DateOnly), u.InputTokens, u.OutputTokens, u.ReasoningTokens, u.Calls)
+		momo.Named("day", day.UTC().Format(time.DateOnly)), momo.Named("input_tokens", u.InputTokens),
+		momo.Named("output_tokens", u.OutputTokens), momo.Named("reasoning_tokens", u.ReasoningTokens), momo.Named("calls", u.Calls))
 	return err
 }
 
@@ -34,8 +36,8 @@ func (s *Store) AddAIUsage(ctx context.Context, day time.Time, u ai.Usage) error
 func (s *Store) AIUsage(ctx context.Context, day time.Time) (ai.Usage, error) {
 	var u ai.Usage
 	err := s.db.QueryRowContext(ctx, `
-		SELECT input_tokens, output_tokens, reasoning_tokens, calls FROM ai_usage WHERE day = $1::date`,
-		day.UTC().Format(time.DateOnly)).Scan(&u.InputTokens, &u.OutputTokens, &u.ReasoningTokens, &u.Calls)
+		SELECT input_tokens, output_tokens, reasoning_tokens, calls FROM ai_usage WHERE day = @day::date`,
+		momo.Named("day", day.UTC().Format(time.DateOnly))).Scan(&u.InputTokens, &u.OutputTokens, &u.ReasoningTokens, &u.Calls)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ai.Usage{}, nil
 	}
@@ -59,14 +61,14 @@ func (s *Store) CreateAITask(ctx context.Context, t ai.Task) error {
 	session := sql.NullString{String: t.SessionID, Valid: t.SessionID != ""}
 	if session.Valid {
 		if held, _ := ctx.Value(sessionLocked{}).(string); held != t.SessionID {
-			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('hello:ai:session:' || $1::text))`, t.SessionID); err != nil {
+			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('hello:ai:session:' || @session_id::text))`, momo.Named("session_id", t.SessionID)); err != nil {
 				return err
 			}
 		}
 		var busy bool
 		if err := tx.QueryRowContext(ctx, `
-			SELECT EXISTS (SELECT 1 FROM ai_tasks WHERE session_id = $1 AND status IN ('queued', 'running'))`,
-			t.SessionID).Scan(&busy); err != nil {
+			SELECT EXISTS (SELECT 1 FROM ai_tasks WHERE session_id = @session_id AND status IN ('queued', 'running'))`,
+			momo.Named("session_id", t.SessionID)).Scan(&busy); err != nil {
 			return err
 		}
 		if busy {
@@ -75,8 +77,9 @@ func (s *Store) CreateAITask(ctx context.Context, t ai.Task) error {
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO ai_tasks (id, kind, requested_by, session_id, replica, status, created_at)
-		VALUES ($1, $2, $3, $4, $5, 'queued', $6)`,
-		t.ID, t.Kind, t.RequestedBy, session, t.Replica, t.CreatedAt); err != nil {
+		VALUES (@id, @kind, @requested_by, @session_id, @replica, 'queued', @created_at)`,
+		momo.Named("id", t.ID), momo.Named("kind", t.Kind), momo.Named("requested_by", t.RequestedBy),
+		momo.Named("session_id", session), momo.Named("replica", t.Replica), momo.Named("created_at", t.CreatedAt)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -84,7 +87,8 @@ func (s *Store) CreateAITask(ctx context.Context, t ai.Task) error {
 
 // StartAITask marks a queued task running.
 func (s *Store) StartAITask(ctx context.Context, id string, at time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE ai_tasks SET status = 'running', started_at = $2 WHERE id = $1 AND status = 'queued'`, id, at)
+	_, err := s.db.ExecContext(ctx, `UPDATE ai_tasks SET status = 'running', started_at = @at WHERE id = @id AND status = 'queued'`,
+		momo.Named("id", id), momo.Named("at", at))
 	return err
 }
 
@@ -92,9 +96,10 @@ func (s *Store) StartAITask(ctx context.Context, id string, at time.Time) error 
 // check of another replica).
 func (s *Store) FinishAITask(ctx context.Context, id string, status ai.TaskStatus, code, message string, result json.RawMessage, at time.Time) error {
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE ai_tasks SET status = $2, error_code = NULLIF($3, ''), error_message = NULLIF($4, ''), result = $5, finished_at = $6
-		WHERE id = $1 AND status IN ('queued', 'running')`,
-		id, string(status), code, message, nullJSON(result), at)
+		UPDATE ai_tasks SET status = @status, error_code = NULLIF(@code, ''), error_message = NULLIF(@message, ''), result = @result, finished_at = @at
+		WHERE id = @id AND status IN ('queued', 'running')`,
+		momo.Named("id", id), momo.Named("status", string(status)), momo.Named("code", code), momo.Named("message", message),
+		momo.Named("result", nullJSON(result)), momo.Named("at", at))
 	return err
 }
 
@@ -117,7 +122,7 @@ func (s *Store) AITask(ctx context.Context, id string) (ai.Task, error) {
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, kind, requested_by, session_id, replica, status, error_code, error_message, result, created_at, started_at, finished_at
-		FROM ai_tasks WHERE id = $1`, id).
+		FROM ai_tasks WHERE id = @id`, momo.Named("id", id)).
 		Scan(&t.ID, &t.Kind, &t.RequestedBy, &session, &t.Replica, &status, &code, &msg, &result, &t.CreatedAt, &started, &finishedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ai.Task{}, ai.ErrNotFound
@@ -139,7 +144,7 @@ func (s *Store) AITask(ctx context.Context, id string) (ai.Task, error) {
 // AITaskReplicas lists the replicas with unfinished tasks created before.
 func (s *Store) AITaskReplicas(ctx context.Context, before time.Time) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT DISTINCT replica FROM ai_tasks WHERE status IN ('queued', 'running') AND created_at < $1`, before)
+		SELECT DISTINCT replica FROM ai_tasks WHERE status IN ('queued', 'running') AND created_at < @before`, momo.Named("before", before))
 	if err != nil {
 		return nil, err
 	}
@@ -158,45 +163,13 @@ func (s *Store) AITaskReplicas(ctx context.Context, before time.Time) ([]string,
 // FailAITasks fails replica's unfinished tasks with code.
 func (s *Store) FailAITasks(ctx context.Context, replica, code, message string, at time.Time) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE ai_tasks SET status = 'failed', error_code = $2, error_message = $3, finished_at = $4
-		WHERE replica = $1 AND status IN ('queued', 'running')`, replica, code, message, at)
+		UPDATE ai_tasks SET status = 'failed', error_code = @code, error_message = @message, finished_at = @at
+		WHERE replica = @replica AND status IN ('queued', 'running')`,
+		momo.Named("replica", replica), momo.Named("code", code), momo.Named("message", message), momo.Named("at", at))
 	if err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
-}
-
-// TryLock takes pg_try_advisory_lock(hashtext(key)) on a connection of
-// its own, held until unlock (or until the process dies and PostgreSQL
-// drops the connection). Any "one replica does this" task uses it with a
-// key of its own: the AI scheduler and, with the integrations spec, the
-// directory sync, webhook sweeper and CRM refresher. Keys are namespaced
-// hello:<area>:<task> and must not collide with the configuration lock.
-// The lock is the pinned connection's session, so it stays on raw
-// database/sql (see dbq.go).
-func (s *Store) TryLock(ctx context.Context, key string) (func(), bool, error) {
-	conn, err := s.db.raw.Conn(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-	var ok bool
-	if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1::text))`, key).Scan(&ok); err != nil {
-		_ = conn.Close()
-		return nil, false, err
-	}
-	if !ok {
-		_ = conn.Close()
-		return nil, false, nil
-	}
-	return func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1::text))`, key); err != nil {
-			// The lock is the session's: discard the connection so it goes.
-			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-		}
-		_ = conn.Close()
-	}, true, nil
 }
 
 // LastAgentRun is agent's latest run, nil when it never ran.
@@ -210,7 +183,7 @@ func (s *Store) LastAgentRun(ctx context.Context, agent string) (*ai.AgentRun, e
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, agent, replica, started_at, finished_at, outcome, tokens, detail, error
-		FROM ai_agent_runs WHERE agent = $1 ORDER BY started_at DESC, id DESC LIMIT 1`, agent).
+		FROM ai_agent_runs WHERE agent = @agent ORDER BY started_at DESC, id DESC LIMIT 1`, momo.Named("agent", agent)).
 		Scan(&r.ID, &r.Agent, &r.Replica, &r.StartedAt, &finished, &outcome, &r.Tokens, &detail, &errText)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -231,7 +204,7 @@ func (s *Store) LastAgentRun(ctx context.Context, agent string) (*ai.AgentRun, e
 // AgentRunRequested reports a waiting run-now request.
 func (s *Store) AgentRunRequested(ctx context.Context, agent string) (bool, error) {
 	var ok bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM ai_agent_requests WHERE agent = $1)`, agent).Scan(&ok)
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM ai_agent_requests WHERE agent = @agent)`, momo.Named("agent", agent)).Scan(&ok)
 	return ok, err
 }
 
@@ -239,15 +212,15 @@ func (s *Store) AgentRunRequested(ctx context.Context, agent string) (bool, erro
 func (s *Store) RequestAgentRun(ctx context.Context, agent string, userID int64, at time.Time) (time.Time, error) {
 	var when time.Time
 	err := s.db.QueryRowContext(ctx, `
-		INSERT INTO ai_agent_requests (agent, requested_by, requested_at) VALUES ($1, NULLIF($2::bigint, 0), $3)
+		INSERT INTO ai_agent_requests (agent, requested_by, requested_at) VALUES (@agent, NULLIF(@requested_by::bigint, 0), @at)
 		ON CONFLICT (agent) DO UPDATE SET requested_by = EXCLUDED.requested_by
-		RETURNING requested_at`, agent, userID, at).Scan(&when)
+		RETURNING requested_at`, momo.Named("agent", agent), momo.Named("requested_by", userID), momo.Named("at", at)).Scan(&when)
 	return when, err
 }
 
 // TakeAgentRequest deletes agent's run-now request.
 func (s *Store) TakeAgentRequest(ctx context.Context, agent string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM ai_agent_requests WHERE agent = $1`, agent)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM ai_agent_requests WHERE agent = @agent`, momo.Named("agent", agent))
 	if err != nil {
 		return false, err
 	}
@@ -259,7 +232,8 @@ func (s *Store) TakeAgentRequest(ctx context.Context, agent string) (bool, error
 func (s *Store) StartAgentRun(ctx context.Context, agent, replica string, at time.Time) (int64, error) {
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
-		INSERT INTO ai_agent_runs (agent, replica, started_at) VALUES ($1, $2, $3) RETURNING id`, agent, replica, at).Scan(&id)
+		INSERT INTO ai_agent_runs (agent, replica, started_at) VALUES (@agent, @replica, @at) RETURNING id`,
+		momo.Named("agent", agent), momo.Named("replica", replica), momo.Named("at", at)).Scan(&id)
 	return id, err
 }
 
@@ -274,16 +248,17 @@ func (s *Store) FinishAgentRun(ctx context.Context, id int64, r ai.AgentRun) err
 		detail = b
 	}
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE ai_agent_runs SET finished_at = $2, outcome = $3, tokens = $4, detail = $5, error = NULLIF($6, '')
-		WHERE id = $1`, id, r.FinishedAt, string(r.Outcome), r.Tokens, detail, r.Error)
+		UPDATE ai_agent_runs SET finished_at = @finished_at, outcome = @outcome, tokens = @tokens, detail = @detail, error = NULLIF(@error, '')
+		WHERE id = @id`, momo.Named("id", id), momo.Named("finished_at", r.FinishedAt), momo.Named("outcome", string(r.Outcome)),
+		momo.Named("tokens", r.Tokens), momo.Named("detail", detail), momo.Named("error", r.Error))
 	return err
 }
 
 // CloseOrphanRuns fails agent's runs that never finished.
 func (s *Store) CloseOrphanRuns(ctx context.Context, agent string, at time.Time) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE ai_agent_runs SET finished_at = $2, outcome = 'failed', error = 'instance_stopped'
-		WHERE agent = $1 AND finished_at IS NULL`, agent, at)
+		UPDATE ai_agent_runs SET finished_at = @at, outcome = 'failed', error = 'instance_stopped'
+		WHERE agent = @agent AND finished_at IS NULL`, momo.Named("agent", agent), momo.Named("at", at))
 	if err != nil {
 		return 0, err
 	}
@@ -293,22 +268,22 @@ func (s *Store) CloseOrphanRuns(ctx context.Context, agent string, at time.Time)
 // PruneAI deletes the AI rows past their S-26 retention.
 func (s *Store) PruneAI(ctx context.Context, now time.Time) (map[string]int64, error) {
 	steps := []struct {
-		name, sql string
+		name, sql string // binds @cutoff
 		arg       any
 	}{
-		{"tasks", `DELETE FROM ai_tasks WHERE created_at < $1`, now.Add(-ai.RetainTasks)},
-		{"agent_runs", `DELETE FROM ai_agent_runs WHERE started_at < $1`, now.Add(-ai.RetainRuns)},
-		{"samples", `DELETE FROM ai_samples WHERE at < $1`, now.Add(-ai.RetainSamples)},
+		{"tasks", `DELETE FROM ai_tasks WHERE created_at < @cutoff`, now.Add(-ai.RetainTasks)},
+		{"agent_runs", `DELETE FROM ai_agent_runs WHERE started_at < @cutoff`, now.Add(-ai.RetainRuns)},
+		{"samples", `DELETE FROM ai_samples WHERE at < @cutoff`, now.Add(-ai.RetainSamples)},
 		{"findings", `DELETE FROM ai_findings WHERE status IN ('resolved', 'dismissed')
-			AND COALESCE(resolved_at, dismissed_at, last_seen) < $1`, now.Add(-ai.RetainFindings)},
+			AND COALESCE(resolved_at, dismissed_at, last_seen) < @cutoff`, now.Add(-ai.RetainFindings)},
 		{"proposals", `DELETE FROM ai_proposals WHERE status IN ('applied', 'failed', 'stale', 'dismissed', 'superseded')
-			AND updated_at < $1`, now.Add(-ai.RetainProposals)},
-		{"sessions", `DELETE FROM ai_sessions WHERE last_active_at < $1`, now.Add(-ai.RetainSessions)},
-		{"usage", `DELETE FROM ai_usage WHERE day < $1::date`, now.Add(-ai.RetainUsage).UTC().Format(time.DateOnly)},
+			AND updated_at < @cutoff`, now.Add(-ai.RetainProposals)},
+		{"sessions", `DELETE FROM ai_sessions WHERE last_active_at < @cutoff`, now.Add(-ai.RetainSessions)},
+		{"usage", `DELETE FROM ai_usage WHERE day < @cutoff::date`, now.Add(-ai.RetainUsage).UTC().Format(time.DateOnly)},
 	}
 	out := map[string]int64{}
 	for _, st := range steps {
-		res, err := s.db.ExecContext(ctx, st.sql, st.arg)
+		res, err := s.db.ExecContext(ctx, st.sql, momo.Named("cutoff", st.arg))
 		if err != nil {
 			return out, fmt.Errorf("prune %s: %w", st.name, err)
 		}

@@ -6,6 +6,8 @@ package store
 
 import (
 	"context"
+
+	"github.com/azrtydxb/momo"
 )
 
 // TextWaiting is a conversation waiting in a text queue.
@@ -74,14 +76,14 @@ func (s *Store) GetTextQueueStatus(ctx context.Context) ([]TextQueueStatus, erro
 		if err := s.db.QueryRowContext(ctx, `
 			SELECT count(*) FILTER (WHERE assignee_user_id IS NULL AND status IN ('open', 'pending')),
 			       count(*) FILTER (WHERE assignee_user_id IS NOT NULL AND status IN ('open', 'pending'))
-			FROM conversations WHERE queue_id = $1`, q.ID).Scan(&q.WaitingTotal, &q.Assigned); err != nil {
+			FROM conversations WHERE queue_id = @queue_id`, momo.Named("queue_id", q.ID)).Scan(&q.WaitingTotal, &q.Assigned); err != nil {
 			return nil, err
 		}
 		wrows, err := s.db.QueryContext(ctx, `
 			SELECT c.id, ch.kind, greatest(extract(epoch FROM now() - coalesce(c.routed_at, c.created_at)), 0)::bigint
 			FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id
-			WHERE c.queue_id = $1 AND c.assignee_user_id IS NULL AND c.status IN ('open', 'pending')
-			ORDER BY c.routed_at, c.id LIMIT 200`, q.ID)
+			WHERE c.queue_id = @queue_id AND c.assignee_user_id IS NULL AND c.status IN ('open', 'pending')
+			ORDER BY c.routed_at, c.id LIMIT 200`, momo.Named("queue_id", q.ID))
 		if err != nil {
 			return nil, err
 		}
@@ -109,7 +111,7 @@ func (s *Store) GetTextQueueStatus(ctx context.Context) ([]TextQueueStatus, erro
 			JOIN user_extensions ue ON ue.extension_id = m.extension_id
 			JOIN users u ON u.id = ue.user_id AND u.enabled AND u.role IN ('user', 'operator', 'admin')
 			LEFT JOIN msg_agent_stats st ON st.user_id = ue.user_id AND st.queue_id = m.queue_id
-			WHERE m.queue_id = $1 ORDER BY m.position, ue.user_id`, q.ID)
+			WHERE m.queue_id = @queue_id ORDER BY m.position, ue.user_id`, momo.Named("queue_id", q.ID))
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +150,8 @@ func (s *Store) UserTextAgent(ctx context.Context, userID int64) ([]TextAgentExt
 		JOIN extensions e ON e.id = ue.extension_id
 		JOIN queue_members m ON m.extension_id = e.id
 		JOIN queues q ON q.id = m.queue_id AND q.enabled AND q.text_enabled
-		WHERE ue.user_id = $1 ORDER BY e.number, q.name`, userID)
+		WHERE ue.user_id = @user_id ORDER BY e.number, q.name`, momo.Named("user_id", userID))
+
 	if err != nil {
 		return nil, err
 	}

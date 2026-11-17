@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/prov"
 )
 
@@ -53,10 +55,10 @@ func attachLines(ctx context.Context, q querier, ps []Phone) error {
 	}
 	rows, err := q.QueryContext(ctx, `
 		SELECT l.phone_id, l.line, d.id, e.id, e.number, e.name, d.sip_username
-		FROM (SELECT id AS phone_id, 1 AS line, device_id FROM phones WHERE id = ANY($1) AND device_id IS NOT NULL
-		      UNION ALL SELECT phone_id, line, device_id FROM phone_lines WHERE phone_id = ANY($1)) l
+		FROM (SELECT id AS phone_id, 1 AS line, device_id FROM phones WHERE id = ANY(@ids) AND device_id IS NOT NULL
+		      UNION ALL SELECT phone_id, line, device_id FROM phone_lines WHERE phone_id = ANY(@ids)) l
 		JOIN devices d ON d.id = l.device_id JOIN extensions e ON e.id = d.extension_id
-		ORDER BY l.phone_id, l.line`, ids)
+		ORDER BY l.phone_id, l.line`, momo.Named("ids", ids))
 	if err != nil {
 		return err
 	}
@@ -81,15 +83,15 @@ func attachLines(ctx context.Context, q querier, ps []Phone) error {
 // any phone. phone 0 is a phone being created.
 func boundElsewhere(ctx context.Context, tx *dbTx, deviceID, phone int64, line int) error {
 	var other int64
-	switch err := tx.QueryRowContext(ctx, `SELECT id FROM phones WHERE device_id = $1 AND NOT (id = $2 AND $3 = 1)`,
-		deviceID, phone, line).Scan(&other); {
+	switch err := tx.QueryRowContext(ctx, `SELECT id FROM phones WHERE device_id = @device_id AND NOT (id = @phone_id AND @line = 1)`,
+		momo.Named("device_id", deviceID), momo.Named("phone_id", phone), momo.Named("line", line)).Scan(&other); {
 	case err == nil:
 		return conflict("device %d is already line 1 of phone %d", deviceID, other)
 	case !errors.Is(err, sql.ErrNoRows):
 		return err
 	}
-	switch err := tx.QueryRowContext(ctx, `SELECT phone_id FROM phone_lines WHERE device_id = $1 AND NOT (phone_id = $2 AND line = $3)`,
-		deviceID, phone, line).Scan(&other); {
+	switch err := tx.QueryRowContext(ctx, `SELECT phone_id FROM phone_lines WHERE device_id = @device_id AND NOT (phone_id = @phone_id AND line = @line)`,
+		momo.Named("device_id", deviceID), momo.Named("phone_id", phone), momo.Named("line", line)).Scan(&other); {
 	case err == nil:
 		return conflict("device %d is already a line of phone %d", deviceID, other)
 	case !errors.Is(err, sql.ErrNoRows):
@@ -112,7 +114,7 @@ func (s *Store) SetPhoneLine(ctx context.Context, actor string, phoneID int64, l
 			vendor     prov.Vendor
 			dev        sql.NullInt64
 		)
-		if err := tx.QueryRowContext(ctx, `SELECT mac, vendor, model, device_id FROM phones WHERE id = $1 FOR UPDATE`, phoneID).
+		if err := tx.QueryRowContext(ctx, `SELECT mac, vendor, model, device_id FROM phones WHERE id = @id FOR UPDATE`, momo.Named("id", phoneID)).
 			Scan(&mac, &vendor, &model, &dev); err != nil {
 			return sid, false, err
 		}
@@ -126,21 +128,21 @@ func (s *Store) SetPhoneLine(ctx context.Context, actor string, phoneID int64, l
 		// second account of the same number.
 		var same int
 		switch err := tx.QueryRowContext(ctx, `
-			SELECT l.line FROM (SELECT 1 AS line, device_id FROM phones WHERE id = $1
-			                    UNION ALL SELECT line, device_id FROM phone_lines WHERE phone_id = $1 AND line <> $3) l
-			JOIN devices d ON d.id = l.device_id WHERE d.extension_id = $2`, phoneID, b.ExtensionID, line).Scan(&same); {
+			SELECT l.line FROM (SELECT 1 AS line, device_id FROM phones WHERE id = @phone_id
+			                    UNION ALL SELECT line, device_id FROM phone_lines WHERE phone_id = @phone_id AND line <> @line) l
+			JOIN devices d ON d.id = l.device_id WHERE d.extension_id = @extension_id`, momo.Named("phone_id", phoneID), momo.Named("extension_id", b.ExtensionID), momo.Named("line", line)).Scan(&same); {
 		case err == nil:
 			return sid, false, fieldError("extensionId", fmt.Sprintf("line %d of this phone is already on this extension", same))
 		case !errors.Is(err, sql.ErrNoRows):
 			return sid, false, err
 		}
 		var cur sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT device_id FROM phone_lines WHERE phone_id = $1 AND line = $2 FOR UPDATE`, phoneID, line).Scan(&cur); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(ctx, `SELECT device_id FROM phone_lines WHERE phone_id = @phone_id AND line = @line FOR UPDATE`, momo.Named("phone_id", phoneID), momo.Named("line", line)).Scan(&cur); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return sid, false, err
 		}
 		if cur.Valid {
 			// The old device may be the one rebound by name below.
-			if _, err := tx.ExecContext(ctx, `DELETE FROM phone_lines WHERE phone_id = $1 AND line = $2`, phoneID, line); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM phone_lines WHERE phone_id = @phone_id AND line = @line`, momo.Named("phone_id", phoneID), momo.Named("line", line)); err != nil {
 				return sid, false, err
 			}
 			if err := unbindDevice(ctx, tx, cur.Int64); err != nil {
@@ -151,10 +153,10 @@ func (s *Store) SetPhoneLine(ctx context.Context, actor string, phoneID int64, l
 		if err != nil {
 			return sid, false, err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO phone_lines (phone_id, line, device_id) VALUES ($1, $2, $3)`, phoneID, line, d); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO phone_lines (phone_id, line, device_id) VALUES (@phone_id, @line, @device_id)`, momo.Named("phone_id", phoneID), momo.Named("line", line), momo.Named("device_id", d)); err != nil {
 			return sid, false, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE phones SET updated_at = now() WHERE id = $1`, phoneID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE phones SET updated_at = now() WHERE id = @id`, momo.Named("id", phoneID)); err != nil {
 			return sid, false, err
 		}
 		secretRotated = rotated
@@ -174,17 +176,17 @@ func (s *Store) ClearPhoneLine(ctx context.Context, actor string, phoneID int64,
 	err := s.provChange(ctx, actor, "clear-line", "phone", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(phoneID, 10)
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = $1 FOR UPDATE`, phoneID).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = @id FOR UPDATE`, momo.Named("id", phoneID)).Scan(&one); err != nil {
 			return sid, false, err
 		}
 		var dev int64
-		if err := tx.QueryRowContext(ctx, `DELETE FROM phone_lines WHERE phone_id = $1 AND line = $2 RETURNING device_id`, phoneID, line).Scan(&dev); err != nil {
+		if err := tx.QueryRowContext(ctx, `DELETE FROM phone_lines WHERE phone_id = @phone_id AND line = @line RETURNING device_id`, momo.Named("phone_id", phoneID), momo.Named("line", line)).Scan(&dev); err != nil {
 			return sid, false, err
 		}
 		if err := unbindDevice(ctx, tx, dev); err != nil {
 			return sid, false, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE phones SET updated_at = now() WHERE id = $1`, phoneID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE phones SET updated_at = now() WHERE id = @id`, momo.Named("id", phoneID)); err != nil {
 			return sid, false, err
 		}
 		return sid, true, nil
@@ -197,7 +199,7 @@ func (s *Store) ClearPhoneLine(ctx context.Context, actor string, phoneID int64,
 
 // lineDeviceIDs lists the devices of a phone's lines 2 and up.
 func lineDeviceIDs(ctx context.Context, tx *dbTx, phoneID int64) ([]int64, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT device_id FROM phone_lines WHERE phone_id = $1 ORDER BY line`, phoneID)
+	rows, err := tx.QueryContext(ctx, `SELECT device_id FROM phone_lines WHERE phone_id = @phone_id ORDER BY line`, momo.Named("phone_id", phoneID))
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +221,7 @@ func (s *Store) renderLines(ctx context.Context, phoneID int64) ([]prov.Line, er
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT d.id, d.sip_username, d.secret_enc, e.name, e.number, COALESCE(e.call_waiting, TRUE), NOT COALESCE(e.voicemail_enabled, TRUE)
 		FROM phone_lines l JOIN devices d ON d.id = l.device_id JOIN extensions e ON e.id = d.extension_id
-		WHERE l.phone_id = $1 ORDER BY l.line`, phoneID)
+		WHERE l.phone_id = @phone_id ORDER BY l.line`, momo.Named("phone_id", phoneID))
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +259,7 @@ func (s *Store) phoneSharing(ctx context.Context, phoneID int64, v prov.Vendor, 
 		role    string
 	)
 	err := s.db.QueryRowContext(ctx, `SELECT g.account_sharing, g.id, g.account_sharing_secret_enc, p.sharing_role FROM phones p
-		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).Scan(&on, &groupID, &enc, &role)
+		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = @id`, momo.Named("id", phoneID)).Scan(&on, &groupID, &enc, &role)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +275,7 @@ func (s *Store) phoneSharing(ctx context.Context, phoneID int64, v prov.Vendor, 
 		if err := s.ensureSharingSecret(ctx, s.db, groupID.Int64); err != nil {
 			return nil, err
 		}
-		if err := s.db.QueryRowContext(ctx, `SELECT account_sharing_secret_enc FROM phone_groups WHERE id = $1`, groupID.Int64).Scan(&enc); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT account_sharing_secret_enc FROM phone_groups WHERE id = @id`, momo.Named("id", groupID.Int64)).Scan(&enc); err != nil {
 			return nil, err
 		}
 	}
@@ -293,7 +295,7 @@ func (s *Store) ensureSharingSecret(ctx context.Context, q execer, id int64) err
 	if err != nil {
 		return err
 	}
-	_, err = q.ExecContext(ctx, `UPDATE phone_groups SET account_sharing_secret_enc = $2
-		WHERE id = $1 AND account_sharing_secret_enc IS NULL`, id, sealed)
+	_, err = q.ExecContext(ctx, `UPDATE phone_groups SET account_sharing_secret_enc = @secret_enc
+		WHERE id = @id AND account_sharing_secret_enc IS NULL`, momo.Named("id", id), momo.Named("secret_enc", sealed))
 	return err
 }

@@ -10,6 +10,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // MaxBossLinks bounds the link list.
@@ -94,16 +96,18 @@ func (s *Store) PutBossLinks(ctx context.Context, actor string, in []BossLinkInp
 			kept[i] = l.BossExtensionID
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO boss_links (boss_extension_id, assistant_extension_id, ring_mode, screening, enabled, divert_on, outbound_as_boss)
-				VALUES ($1, $2, $3, $4, $5, $6, $7)
+				VALUES (@boss_extension_id, @assistant_extension_id, @ring_mode, @screening, @enabled, @divert_on, @outbound_as_boss)
 				ON CONFLICT (boss_extension_id) DO UPDATE SET
 					assistant_extension_id = EXCLUDED.assistant_extension_id, ring_mode = EXCLUDED.ring_mode,
 					screening = EXCLUDED.screening, enabled = EXCLUDED.enabled, divert_on = EXCLUDED.divert_on,
 					outbound_as_boss = EXCLUDED.outbound_as_boss, updated_at = now()`,
-				l.BossExtensionID, l.AssistantExtensionID, l.RingMode, l.Screening, l.Enabled, l.DivertOn, l.OutboundAsBoss); err != nil {
+				momo.Named("boss_extension_id", l.BossExtensionID), momo.Named("assistant_extension_id", l.AssistantExtensionID),
+				momo.Named("ring_mode", l.RingMode), momo.Named("screening", l.Screening), momo.Named("enabled", l.Enabled),
+				momo.Named("divert_on", l.DivertOn), momo.Named("outbound_as_boss", l.OutboundAsBoss)); err != nil {
 				return "", pagingFK(err, fmt.Sprintf("items[%d]", i))
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM boss_links WHERE boss_extension_id <> ALL($1)`, kept); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM boss_links WHERE boss_extension_id <> ALL(@kept)`, momo.Named("kept", kept)); err != nil {
 			return "", err
 		}
 		return "list", nil

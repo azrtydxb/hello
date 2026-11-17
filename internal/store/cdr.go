@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/routing"
 )
 
@@ -155,10 +157,11 @@ const blockedReasonPrefix = "blocked: "
 // ("" at the end).
 func (s *Store) ListCDRs(ctx context.Context, f CDRFilter, before int64, limit int) ([]CDR, string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+cdrCols+`
-		FROM cdrs WHERE ($1 = 0 OR id < $1) AND ($3::text = '' OR direction = $3::text)
-			AND (NOT $4::boolean OR final_status NOT BETWEEN 200 AND 299)
-			AND ($5::text = '' OR ($5::text = 'blocked' AND left(failure_reason, length($6::text)) = $6::text))
-		ORDER BY id DESC LIMIT $2`, before, limit+1, f.Direction, f.Failed, f.Disposition, blockedReasonPrefix)
+		FROM cdrs WHERE (@before::integer = 0 OR id < @before::integer) AND (@direction::text = '' OR direction = @direction::text)
+			AND (NOT @failed::boolean OR final_status NOT BETWEEN 200 AND 299)
+			AND (@disposition::text = '' OR (@disposition::text = 'blocked' AND left(failure_reason, length(@blocked_prefix::text)) = @blocked_prefix::text))
+		ORDER BY id DESC LIMIT @limit`, momo.Named("before", before), momo.Named("limit", limit+1), momo.Named("direction", f.Direction),
+		momo.Named("failed", f.Failed), momo.Named("disposition", f.Disposition), momo.Named("blocked_prefix", blockedReasonPrefix))
 	if err != nil {
 		return nil, "", err
 	}
@@ -210,15 +213,15 @@ type ConcurrencyPoint struct {
 // progress have no CDR yet and are not counted.
 func (s *Store) CDRConcurrency(ctx context.Context, from, to time.Time, step time.Duration) ([]ConcurrencyPoint, error) {
 	rows, err := s.db.QueryContext(ctx, `WITH c AS (
-			SELECT start_time, end_time, direction FROM cdrs WHERE end_time > $1 AND start_time <= $2
+			SELECT start_time, end_time, direction FROM cdrs WHERE end_time > @from::timestamptz AND start_time <= @to::timestamptz
 		)
 		SELECT g.t,
 			count(c.direction) FILTER (WHERE c.direction = 'inbound'),
 			count(c.direction) FILTER (WHERE c.direction = 'outbound'),
 			count(c.direction) FILTER (WHERE c.direction = 'internal')
-		FROM generate_series($1::timestamptz, $2::timestamptz, $3::bigint * interval '1 millisecond') AS g(t)
+		FROM generate_series(@from::timestamptz, @to::timestamptz, @step_ms::bigint * interval '1 millisecond') AS g(t)
 		LEFT JOIN c ON c.start_time <= g.t AND c.end_time > g.t
-		GROUP BY g.t ORDER BY g.t`, from, to, step.Milliseconds())
+		GROUP BY g.t ORDER BY g.t`, momo.Named("from", from), momo.Named("to", to), momo.Named("step_ms", step.Milliseconds()))
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +241,7 @@ func (s *Store) CDRConcurrency(ctx context.Context, from, to time.Time, step tim
 // GetCDR returns one CDR and its routing trace.
 func (s *Store) GetCDR(ctx context.Context, id int64) (CDR, routing.Trace, error) {
 	var raw []byte
-	c, err := scanCDR(s.db.QueryRowContext(ctx, `SELECT `+cdrCols+`, trace FROM cdrs WHERE id = $1`, id), &raw)
+	c, err := scanCDR(s.db.QueryRowContext(ctx, `SELECT `+cdrCols+`, trace FROM cdrs WHERE id = @id`, momo.Named("id", id)), &raw)
 	if err != nil {
 		return c, nil, mapErr(err)
 	}
@@ -247,14 +250,14 @@ func (s *Store) GetCDR(ctx context.Context, id int64) (CDR, routing.Trace, error
 		return c, nil, fmt.Errorf("store: decode trace of cdr %d: %w", id, err)
 	}
 	var rec int64
-	switch err := s.db.QueryRowContext(ctx, `SELECT id FROM recordings WHERE correlation_id = $1`, c.CorrelationID).Scan(&rec); {
+	switch err := s.db.QueryRowContext(ctx, `SELECT id FROM recordings WHERE correlation_id = @correlation_id`, momo.Named("correlation_id", c.CorrelationID)).Scan(&rec); {
 	case err == nil:
 		c.RecordingID = &rec
 	case !errors.Is(err, sql.ErrNoRows):
 		return c, trace, fmt.Errorf("store: recording of cdr %d: %w", id, err)
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT event, queue, extension, wait_ms, result, at
-		FROM cdr_queue_legs WHERE cdr_id = $1 ORDER BY position`, id)
+		FROM cdr_queue_legs WHERE cdr_id = @cdr_id ORDER BY position`, momo.Named("cdr_id", id))
 	if err != nil {
 		return c, trace, fmt.Errorf("store: queue legs of cdr %d: %w", id, err)
 	}
@@ -278,7 +281,7 @@ func (s *Store) GetCDR(ctx context.Context, id int64) (CDR, routing.Trace, error
 		return c, trace, err
 	}
 	frows, err := s.db.QueryContext(ctx, `SELECT target_kind, extension, trunk, result
-		FROM cdr_legs WHERE cdr_id = $1 AND role = 'follow_me' ORDER BY position`, id)
+		FROM cdr_legs WHERE cdr_id = @cdr_id AND role = 'follow_me' ORDER BY position`, momo.Named("cdr_id", id))
 	if err != nil {
 		return c, trace, fmt.Errorf("store: follow-me legs of cdr %d: %w", id, err)
 	}
