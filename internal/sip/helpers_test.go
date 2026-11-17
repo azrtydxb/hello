@@ -530,7 +530,11 @@ type phone struct {
 	challenged  chan *sip.Request
 	byeAt       time.Time
 	servers     map[string]*sipgo.DialogServerSession
-	clients     map[string]*sipgo.DialogClientSession
+	// handled is closed, per Call-ID, once the callee function has
+	// returned: its responses are written and the dialog is safe to use
+	// from the test.
+	handled map[string]chan struct{}
+	clients map[string]*sipgo.DialogClientSession
 	// pending holds a dialing INVITE's Call-ID until its answer is
 	// confirmed (closed then), so onBye never reads a session WaitAnswer
 	// is still writing.
@@ -612,7 +616,7 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 		sdp: "v=0\r\no=" + user + " 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n" +
 			"m=audio " + strconv.Itoa(rtpPort) + " RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\n",
 		contact: sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: user, Host: host, Port: port}},
-		servers: map[string]*sipgo.DialogServerSession{}, clients: map[string]*sipgo.DialogClientSession{}, pending: map[string]chan struct{}{},
+		servers: map[string]*sipgo.DialogServerSession{}, handled: map[string]chan struct{}{}, clients: map[string]*sipgo.DialogClientSession{}, pending: map[string]chan struct{}{},
 		invites: make(chan *sip.Request, 16), reinvites: make(chan *sip.Request, 16), cancels: make(chan *sip.Request, 16),
 		acks: make(chan *sip.Request, 16), byes: make(chan *sip.Request, 16), rings: make(chan int, 16),
 		infos: make(chan *sip.Request, 16), messages: make(chan *sip.Request, 16),
@@ -694,10 +698,32 @@ func (p *phone) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	p.mu.Lock()
 	p.servers[req.CallID().Value()] = dss
+	handled := make(chan struct{})
+	p.handled[req.CallID().Value()] = handled
 	f := p.callee
 	p.mu.Unlock()
 	push(p.invites, req)
+	defer close(handled)
 	f(p, req, tx, dss)
+}
+
+// answeredDialog returns the server dialog of callID once the callee
+// function has finished answering it, so the test can send in-dialog
+// requests without racing the handler's writes to the dialog.
+func (p *phone) answeredDialog(t *testing.T, callID string) *sipgo.DialogServerSession {
+	t.Helper()
+	p.mu.Lock()
+	dss, handled := p.servers[callID], p.handled[callID]
+	p.mu.Unlock()
+	if handled == nil {
+		t.Fatalf("%s: no INVITE for %s", p.user, callID)
+	}
+	select {
+	case <-handled:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s: the answer to %s did not finish", p.user, callID)
+	}
+	return dss
 }
 
 // challengeInvite answers an INVITE without the phone's credentials with a

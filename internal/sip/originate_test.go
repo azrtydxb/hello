@@ -396,9 +396,7 @@ func TestOriginateHoldRelayed(t *testing.T) {
 	binv := waitReq(t, e.b.invites, "destination INVITE")
 	e.orig.waitState(t, "o1", livestate.OriginateConnected)
 	waitReq(t, e.a.acks, "phone ACK")
-	e.b.mu.Lock()
-	dss := e.b.servers[binv.CallID().Value()]
-	e.b.mu.Unlock()
+	dss := e.b.answeredDialog(t, binv.CallID().Value())
 	hold := strings.Replace(e.b.sdp, "m=audio", "a=sendonly\r\nm=audio", 1)
 	req := sip.NewRequest(sip.INVITE, *binv.Contact().Address.Clone())
 	req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
