@@ -397,8 +397,26 @@ func (c *call) parkRun(pk *parkState, relay *media.Relay, partyLeg, parkerLeg st
 	} else {
 		w.bye()
 	}
-	relay.SetTarget(parkerLeg, nil)
+	if h := s.parkerGoneHook.Load(); h != nil {
+		(*h)()
+	}
 	cancel()
+	// The parker's BYE is out, but a retrieve may already have taken the
+	// call: the retriever is attached to the parker's relay leg as soon as
+	// the parker's phone has the BYE, which is before byeA returns. The
+	// parker's leg is released only while the call is still parked, under
+	// the lock parkRetrieved takes to leave that phase, so a retrieve
+	// either finds the leg released and attaches over it, or has already
+	// attached and the leg is left alone.
+	c.mu.Lock()
+	parked := c.park == pk && pk.phase == phaseParked
+	if parked {
+		relay.SetTarget(parkerLeg, nil)
+	}
+	c.mu.Unlock()
+	if !parked {
+		return
+	}
 	c.parkHold(pk, relay, partyLeg, parkerLeg, pk.returnAt)
 }
 
@@ -425,9 +443,16 @@ func (c *call) parkHold(pk *parkState, relay *media.Relay, partyLeg, parkerLeg s
 	if snap := s.deps.Snapshots.Current(); snap != nil {
 		classID = c.holdClassID(snap, parkerLeg == legCaller)
 	}
-	player := c.runMOH(relay, partyLeg, "", classID)
+	// The music starts only while the call is still parked, decided under
+	// the lock parkRetrieved takes to leave that phase: a retrieve that won
+	// before this point must not get the music played over the retrieved
+	// call, and one that comes after stops the music it finds.
 	c.mu.Lock()
-	pk.music = player
+	if c.park != pk || pk.phase != phaseParked || c.ended || c.hungUp {
+		c.mu.Unlock()
+		return
+	}
+	pk.music = c.runMOH(relay, partyLeg, "", classID)
 	c.mu.Unlock()
 	defer c.stopParkMusic(pk)
 

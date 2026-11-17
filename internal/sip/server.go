@@ -367,6 +367,11 @@ type Server struct {
 	// WriteResponse returns without an ACK, before the dialog is checked
 	// for the caller's BYE, so a test can land a late ACK in between.
 	unackedHook atomic.Pointer[func()]
+	// parkerGoneHook, when set (tests only), runs in a parked call's park
+	// goroutine once the parker's dialog has ended, before the parker's
+	// relay leg is released and the music on hold starts, so a test can
+	// land a retrieve in between.
+	parkerGoneHook atomic.Pointer[func()]
 	// abortHook, when set (tests only), runs inside abort after it has
 	// taken the setup's ownership before it signals the setup goroutine, so
 	// a test can inject the fork failure that races the abort.
