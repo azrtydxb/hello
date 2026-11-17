@@ -4,10 +4,24 @@
 -- If the SQL changes the schema, change the models too and run momo migrate diff.
 -- After editing this file, run: momo migrate hash
 
--- The rows the frozen goose migrations (migrations/legacy) inserted, and the
+-- What the frozen goose migrations (migrations/legacy) built beyond init: the
+-- deferrable unique constraints below, the rows they inserted, and the
 -- position of every sequence, from pg_dump --data-only of a database goose
 -- built (CI job momo-bootstrap). A database taken over from goose records
 -- this migration as applied without running it (internal/migrate).
+
+-- The deferrable unique constraints the goose migrations made (00003, 00004,
+-- 00040): a reorder swaps positions inside one transaction. momo v0.16.0
+-- does not model deferrability, so init created them plain; drift and
+-- baseline do not compare it. TestMigrateInitParity compares the catalog.
+ALTER TABLE outbound_routes DROP CONSTRAINT outbound_routes_position,
+  ADD CONSTRAINT outbound_routes_position UNIQUE (position) DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE inbound_routes DROP CONSTRAINT inbound_routes_position,
+  ADD CONSTRAINT inbound_routes_position UNIQUE (position) DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE ring_group_members DROP CONSTRAINT ring_group_members_group_id_position_key,
+  ADD CONSTRAINT ring_group_members_group_id_position_key UNIQUE (group_id, position) DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE queue_members DROP CONSTRAINT queue_members_queue_id_position_key,
+  ADD CONSTRAINT queue_members_queue_id_position_key UNIQUE (queue_id, position) DEFERRABLE INITIALLY DEFERRED;
 
 
 INSERT INTO ring_tags (name, builtin, bellcore_slot, description, created_at, updated_at) VALUES ('internal', true, 1, 'A call from another extension', now(), now());

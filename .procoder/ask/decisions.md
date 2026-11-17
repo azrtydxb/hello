@@ -6848,6 +6848,15 @@ made while building it, one PR:
   `TestMomoModelsDeclareSchema` go: the models are the source now, checked
   offline in the `go` job (`generate --check`, `migrate validate`,
   `migrate diff ci_probe`) and against a live database by strict drift.
+- **Deferrable unique constraints.** momo v0.16.0 does not model
+  `DEFERRABLE` (from-db drops it, drift and baseline ignore it), so init
+  made the four `position` uniques plain and the reorder tests failed.
+  `legacy_seed` drops and re-adds them `DEFERRABLE INITIALLY DEFERRED` (fresh
+  installs only; goose databases have them). `TestMigrateInitParity`
+  compares the PostgreSQL catalog (`pg_get_constraintdef`,
+  `pg_get_indexdef`, columns, triggers, functions, sequences, comments) of a
+  goose-built and a momo-built database, value-list order aside. Reported
+  as a momo gap, not fixed there.
 - **`c.Sequence("prov_redirect_jobs_seq")`** is on `ProvRedirectJob`, not
   the first model where `--from-db` put it.
 - **`momo-bootstrap`** stays as a dispatch-only CI job (input

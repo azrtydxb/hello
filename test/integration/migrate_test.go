@@ -7,10 +7,11 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"hash/fnv"
 	"io/fs"
+	"maps"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -327,15 +328,20 @@ func TestMigrateInitParity(t *testing.T) {
 			len(g.Tables), len(g.Sequences), len(g.Functions), len(g.Triggers),
 			len(f.Tables), len(f.Sequences), len(f.Functions), len(f.Triggers))
 	}
-	changes, _, err := momomigrate.Diff(g, f, momomigrate.DiffOptions{AllowDestructive: true})
-	if err != nil {
-		t.Fatalf("diff the goose-built and the momo-built schema: %v", err)
+	// The catalog as PostgreSQL itself renders it, which also covers what
+	// momo's schema model leaves out (a constraint's deferrability, say).
+	gc, fc := catalog(t, ctx, gooseDB), catalog(t, ctx, freshDB)
+	for _, k := range slices.Sorted(maps.Keys(gc)) {
+		if fc[k] != gc[k] {
+			t.Errorf("%s:\n  goose-built %q\n  momo-built  %q", k, gc[k], fc[k])
+		}
 	}
-	for _, c := range changes {
-		before, _ := json.Marshal(c.Before)
-		after, _ := json.Marshal(c.After)
-		t.Errorf("%s %s.%s: goose-built %s, momo-built %s", c.Kind, c.Table, c.Name, before, after)
+	for _, k := range slices.Sorted(maps.Keys(fc)) {
+		if _, ok := gc[k]; !ok {
+			t.Errorf("%s: only momo-built: %q", k, fc[k])
+		}
 	}
+	t.Logf("compared %d catalog objects", len(gc))
 
 	gr, fr := tableRows(t, ctx, gooseDB, g), tableRows(t, ctx, freshDB, f)
 	for _, tb := range g.Tables {
@@ -352,6 +358,75 @@ func TestMigrateInitParity(t *testing.T) {
 	if len(gseq) != len(fseq) {
 		t.Errorf("%d sequences goose-built, %d momo-built", len(gseq), len(fseq))
 	}
+}
+
+// catalog describes every object of db's current schema the way
+// PostgreSQL renders it: columns (position among the live ones, type,
+// nullability, default, identity, generated, collation), constraints and
+// indexes (pg_get_constraintdef, pg_get_indexdef), triggers, functions,
+// sequence options, table kinds and options, and comments. The two migration
+// histories are left out. A value list's order is not significant (momo
+// renders a c.CheckIn's values sorted), so ARRAY[...] in a check is sorted.
+func catalog(t *testing.T, ctx context.Context, db *sql.DB) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	const ns = `(SELECT oid FROM pg_namespace WHERE nspname = current_schema())`
+	const notHistory = ` NOT IN ('goose_db_version', 'goose_db_version_id_seq', 'momo_migrations')`
+	for _, q := range []string{
+		`SELECT 'table ' || c.relname, c.relkind || ' ' || c.relpersistence || ' ' || coalesce(array_to_string(c.reloptions, ','), '') || ' ' || coalesce(obj_description(c.oid, 'pg_class'), '')
+		   FROM pg_class c WHERE c.relnamespace = ` + ns + ` AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND c.relname` + notHistory,
+		`SELECT 'column ' || c.relname || '.' || a.attname,
+		        row_number() OVER (PARTITION BY c.oid ORDER BY a.attnum) || ' ' || format_type(a.atttypid, a.atttypmod) || ' ' || a.attnotnull || ' ' ||
+		        coalesce(pg_get_expr(d.adbin, d.adrelid), '') || ' ' || a.attidentity || ' ' || a.attgenerated || ' ' || coalesce(co.collname, '') || ' ' ||
+		        coalesce(col_description(c.oid, a.attnum), '')
+		   FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+		   LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+		   LEFT JOIN pg_collation co ON co.oid = a.attcollation AND a.attcollation <> 0 AND co.collname <> 'default'
+		  WHERE c.relnamespace = ` + ns + ` AND c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped AND c.relname` + notHistory,
+		`SELECT 'constraint ' || c.conrelid::regclass::text || '.' || c.conname, pg_get_constraintdef(c.oid)
+		   FROM pg_constraint c WHERE c.connamespace = ` + ns + ` AND c.conrelid::regclass::text` + notHistory,
+		`SELECT 'index ' || i.indexrelid::regclass::text, pg_get_indexdef(i.indexrelid)
+		   FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid WHERE c.relnamespace = ` + ns + ` AND c.relname` + notHistory,
+		`SELECT 'trigger ' || tg.tgrelid::regclass::text || '.' || tg.tgname, pg_get_triggerdef(tg.oid)
+		   FROM pg_trigger tg JOIN pg_class c ON c.oid = tg.tgrelid WHERE c.relnamespace = ` + ns + ` AND NOT tg.tgisinternal`,
+		`SELECT 'function ' || p.oid::regprocedure::text, pg_get_functiondef(p.oid)
+		   FROM pg_proc p WHERE p.pronamespace = ` + ns,
+		`SELECT 'sequence ' || s.sequencename, s.data_type || ' ' || s.start_value || ' ' || s.min_value || ' ' || s.max_value || ' ' ||
+		        s.increment_by || ' ' || s.cycle || ' ' || s.cache_size
+		   FROM pg_sequences s WHERE s.schemaname = current_schema() AND s.sequencename` + notHistory,
+	} {
+		rows, err := db.QueryContext(ctx, q)
+		if err != nil {
+			t.Fatalf("catalog: %v\n%s", err, q)
+		}
+		for rows.Next() {
+			var k, v string
+			if err := rows.Scan(&k, &v); err != nil {
+				t.Fatal(err)
+			}
+			if strings.HasPrefix(k, "constraint ") && strings.HasPrefix(v, "CHECK ") {
+				v = sortArrays(v)
+			}
+			out[k] = v
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		_ = rows.Close()
+	}
+	return out
+}
+
+// arrayLit is an ARRAY[...] literal of a check: its elements hold no "]".
+var arrayLit = regexp.MustCompile(`ARRAY\[([^\]]*)\]`)
+
+// sortArrays sorts the elements of every ARRAY[...] literal in def.
+func sortArrays(def string) string {
+	return arrayLit.ReplaceAllStringFunc(def, func(m string) string {
+		el := strings.Split(m[len("ARRAY["):len(m)-1], ", ")
+		slices.Sort(el)
+		return "ARRAY[" + strings.Join(el, ", ") + "]"
+	})
 }
 
 // tableRows returns each table's rows as sorted JSON, without the
@@ -489,10 +564,10 @@ func toyMigration(t *testing.T) fs.FS {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b.Reset()
-	if err := sum.Write(&b); err != nil {
+	var sb bytes.Buffer // not b: the snapshot's MapFile holds b's bytes
+	if err := sum.Write(&sb); err != nil {
 		t.Fatal(err)
 	}
-	dir[momomigrate.SumFileName] = &fstest.MapFile{Data: b.Bytes()}
+	dir[momomigrate.SumFileName] = &fstest.MapFile{Data: sb.Bytes()}
 	return dir
 }
