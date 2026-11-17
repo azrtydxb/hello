@@ -31,7 +31,7 @@ func scratchStore(t *testing.T) *Store {
 }
 
 // scratchDB returns a throwaway, unmigrated database.
-func scratchDB(t *testing.T) *sql.DB {
+func scratchDB(t testing.TB) *sql.DB {
 	t.Helper()
 	dsn := os.Getenv("HELLO_TEST_DATABASE_URL")
 	if dsn == "" {

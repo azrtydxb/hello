@@ -384,12 +384,13 @@ jobs:
 
   bench:
     # TestDetectorLatency (spec ai-agent S-19): every AIOps detector under
-    # 2 s over 1 000 000 CDRs and 10 000 devices. It needs PostgreSQL and
-    # Valkey and seeds for minutes, so it runs only when dispatched:
-    # gh workflow run ci.yaml --ref <branch>
+    # 2 s over 1 000 000 CDRs and 10 000 devices, and BenchmarkStoreDriver
+    # (momo FromSQLDB against the native pgxpool driver). They need
+    # PostgreSQL and Valkey and take minutes, so they run only when
+    # dispatched: gh workflow run ci.yaml --ref <branch>
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 45
+    timeout-minutes: 60
     container:
       image: golang:1.27-bookworm
     env:
@@ -436,7 +437,13 @@ jobs:
           wait_tcp "$vk" 6379
           echo "HELLO_TEST_DATABASE_URL=postgres://hello:hello@$pg:5432/hello?sslmode=disable" >> "$GITHUB_ENV"
           echo "HELLO_TEST_VALKEY_ADDR=$vk:6379" >> "$GITHUB_ENV"
+      # momo Phase 4 decision: the store's statements on momo's FromSQLDB
+      # driver (database/sql) against the native pgxpool driver.
+      - name: Store driver benchmark (FromSQLDB vs pgxpool)
+        timeout-minutes: 15
+        run: go test -count=5 -timeout 14m -run '^$' -bench BenchmarkStoreDriver -benchmem ./internal/store/
       - name: Detector latency over 1 000 000 CDRs
+        if: ${{ !cancelled() }}
         run: go test -count=1 -timeout 40m -v -run TestDetectorLatency ./internal/ai/detect/
 
   lab:
