@@ -1,4 +1,4 @@
-// momo:fromdb sha256=247d0e796ce777aaa17212aca03558ace977d9182da01ecab61a28e65706abcd
+// momo:fromdb sha256=bbe6c3b1c1d79b105d71ed15dfd626d7d2c4051746aa396a5ef3538576539826
 // Written by momo generate --from-db. A re-run keeps this file if you edit it, and reports a conflict when the database changed the model.
 
 package models
@@ -38,7 +38,14 @@ type CrmCallLog struct {
 // MomoConfig declares what a tag cannot: the other indexes, constraints, enums and defaults.
 func (m *CrmCallLog) MomoConfig(c *momo.Config) {
 	c.Unique("crm_call_logs_connector_id_call_id_key", &m.ConnectorID, &m.CallID)
-	c.Check("crm_call_logs_status_check", "(status = ANY (ARRAY['waiting'::text, 'pending'::text, 'logged'::text, 'update'::text, 'dead'::text, 'skipped'::text]))")
+	c.CheckIn(&m.Status,
+		"dead",
+		"logged",
+		"pending",
+		"skipped",
+		"update",
+		"waiting",
+	)
 	c.Index("crm_call_logs_due", &m.NextAttemptAt).Where("(status = ANY (ARRAY['pending'::text, 'update'::text]))")
 	c.Index("crm_call_logs_renew", &m.LinkExpiresAt).Where("(link_expires_at IS NOT NULL)")
 }

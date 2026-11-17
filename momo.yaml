@@ -10,8 +10,8 @@
 # "Regenerating the models"):
 #
 #   HELLO_MODELS_DATABASE_URL=postgres://...  # a database goose migrated to the latest version
-#   go run github.com/azrtydxb/momo/cmd/momo@v0.14.0 generate --from-db HELLO_MODELS_DATABASE_URL --no-snapshot --overwrite
-#   go run github.com/azrtydxb/momo/cmd/momo@v0.14.0 generate
+#   go run github.com/azrtydxb/momo/cmd/momo@v0.16.0 generate --from-db HELLO_MODELS_DATABASE_URL --no-snapshot --overwrite
+#   go run github.com/azrtydxb/momo/cmd/momo@v0.16.0 generate
 #
 # TestMomoModelsMatchSchema (test/integration) fails until they are current.
 version: 1
@@ -28,6 +28,12 @@ introspect:
     - crm_oauth_states
     - crm_call_logs
     - crm_user_map
+  # Objects to leave out of the models. only narrows the tables, but momo
+  # (v0.16.0+) still inspects every standalone sequence and declares it on the
+  # first model. These sequences belong to tables that have no model yet:
+  # remove one here when its table moves to momo.
+  skip:
+    - prov_redirect_jobs_seq # prov_redirect_jobs.seq (migrations/00006_provisioning.sql)
   uuid: google
   # Every NOT NULL column with a default gets the dbdefault tag, so a model
   # insert leaves it to PostgreSQL; a non-zero constant default is a pointer

@@ -238,7 +238,11 @@ var crmCallLogTable = schema.Table{
 	Checks: []schema.Check{
 		{
 			Name: "crm_call_logs_status_check",
-			Expr: "(status = ANY (ARRAY['waiting'::text, 'pending'::text, 'logged'::text, 'update'::text, 'dead'::text, 'skipped'::text]))",
+			Expr: "\"status\" IN ('dead','logged','pending','skipped','update','waiting')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"dead", "logged", "pending", "skipped", "update", "waiting"},
+			},
 		},
 	},
 }
@@ -488,11 +492,19 @@ var crmConnectionTable = schema.Table{
 		},
 		{
 			Name: "crm_connections_scope_check",
-			Expr: "(scope = ANY (ARRAY['org'::text, 'user'::text]))",
+			Expr: "\"scope\" IN ('org','user')",
+			In: &schema.CheckIn{
+				Column: "scope",
+				Values: []string{"org", "user"},
+			},
 		},
 		{
 			Name: "crm_connections_status_check",
-			Expr: "(status = ANY (ARRAY['connected'::text, 'needs_reauth'::text, 'revoked'::text]))",
+			Expr: "\"status\" IN ('connected','needs_reauth','revoked')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"connected", "needs_reauth", "revoked"},
+			},
 		},
 	},
 }
@@ -813,7 +825,11 @@ var crmUserMapTable = schema.Table{
 	Checks: []schema.Check{
 		{
 			Name: "crm_user_map_source_check",
-			Expr: "(source = ANY (ARRAY['email'::text, 'manual'::text]))",
+			Expr: "\"source\" IN ('email','manual')",
+			In: &schema.CheckIn{
+				Column: "source",
+				Values: []string{"email", "manual"},
+			},
 		},
 	},
 }
