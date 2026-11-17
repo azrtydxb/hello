@@ -6567,6 +6567,86 @@ The old `($1 = 0 OR id < $1)` typed the paging cursor as integer, so a cursor id
 - Keep `::integer` (current behaviour, same plan).
 - Switch to `::bigint`, as LookupCalls and LookupRecordings already use: no cursor limit, a behaviour change.
 
+## momo Phase 3, domain 13: internal/store AI on @name (2026-11-17, momo/store-ai)
+
+- **Scope.** `messaging_ai.go`, `ai_core.go`, `ai_sessions.go` and
+  `ai_findings.go` in `internal/store` bind by name: every `$n` became
+  `@name` with `momo.Named`, through the seam, with the SQL text,
+  `FOR UPDATE` / `SKIP LOCKED` (ClaimAIRun, FinishAIRun, the FAQ and
+  settings locks), Scan targets and error handling unchanged. The AI calls
+  themselves (go-ai-sdk) are not in the store and did not change. No schema
+  change, no migration, `go.mod` and `internal/db` unchanged.
+- **Claims and locks unchanged.** ClaimAIRun's two `SKIP LOCKED` claims, the
+  session lock
+  `pg_advisory_xact_lock(hashtext('hello:ai:session:' || @session_id::text))`
+  (CreateAITask and lockAISession) and the `sessionLocked` context marker
+  are the same statements and keys.
+- **TryLock stays raw and moved to `trylock.go`.** Its session lock lives on
+  a connection pinned with raw `database/sql` (dbq.go), where `@name` does
+  not bind, so it keeps `pg_try_advisory_lock(hashtext($1::text))` and its
+  unlock. It moved out of `ai_core.go` unchanged so that file can be in
+  `namedFiles`; `trylock.go` is not.
+- **Reused binds carry the old type.** ListAIFindings casts each filter,
+  `@status::text`, `@severity::text`, `@type::text`, in both its uses
+  (`= ''` and the column comparison); ListMsgFAQ casts `@address_id::bigint`
+  in `= 0` and in its column comparison. Already cast: ListAISessions'
+  `@owner::bigint`, upsertFinding's `@status::text`, queueAITriage's select
+  list. The other repeated uses (upsertFinding's `@severity`, the insert's
+  `@now` twice, the guardrail read's `@conversation_id` and `@address_id`,
+  the holding-line read, `aiFresh`) each compare with or fill a column of
+  the bind's type.
+- **Statements passed through helpers are constants now.**
+  `aiSessionMessages` and `aiMessageHistory` (queryAIMessages) and
+  `aiFindingAcknowledge` and `aiFindingDismiss` (findingAction, which adds
+  `@id`) have the same text; `TestAIStatementsOffline` builds them with
+  their names, since the sweep cannot see a statement passed to a helper.
+  PruneAI's steps each bind `@cutoff`; `TestPruneAISends` runs it on the
+  fake driver and checks every step reaches PostgreSQL with one argument and
+  the usage step with its date.
+
+## momo Phase 3, domain 11: internal/store messaging inbox on @name (2026-11-17, momo/store-inbox)
+
+- **Scope.** `messaging_inbox.go`, `messaging_media.go`,
+  `messaging_privacy.go`, `messaging_deskphone.go` and
+  `messaging_reports.go` in `internal/store` bind by name: every `$n`
+  became `@name` with `momo.Named`, through the seam, with the SQL text,
+  `FOR UPDATE`, `FOR NO KEY UPDATE`, `SKIP LOCKED`, the inbox event lock
+  (`pg_advisory_xact_lock(@key)` with `inboxEventLock`, one bigint bind as
+  before), Scan targets and error handling unchanged. No schema change, no
+  migration.
+- **Privacy unchanged.** The DSAR export reads the same rows in the same
+  order, and the redaction blanks, deletes and detaches the same rows in
+  the same transaction, in the same lock order. FinishMediaFetch still
+  stores a file only on a row still on its message and returns
+  `media.ErrGone` otherwise. ClaimRedactions, ClaimMediaFetch and
+  ClaimInboxNotices keep their `FOR UPDATE SKIP LOCKED` claims.
+- **Casts.** A reused bind whose use cannot type itself carries the old
+  type: `@batch::text` (ClaimRedactions, RedactionCounts), `@state::text`
+  (FinishRedaction), `@actor::text` (SupervisorViews, and with
+  `@resource_id::text` in auditSupervisorView's `INSERT ... SELECT`),
+  `@status::text` (SetConversationStatus), `@address_suffix::text`
+  (the trunk ingest), `@like::text` (ListConversations' search), `@tz::text`
+  (the report's day grouping), and `@conversation_id::bigint` in
+  emitConversationEvent's select list. The "0 means no cursor" binds
+  (`@before` in ListConversationMessages and SupervisorViews) are cast to
+  bigint on both uses, as other converted files do; the old `$n = 0` typed
+  them integer, so the one difference is that a cursor past 2^31 now works
+  where it used to fail.
+- **Shared fragments.** `visible` is used by `messaging_calls.go` too, with
+  `poolMemberParam` from `messaging_route.go`, both still on `$n`. This
+  domain uses `visibleTo` and `poolMemberNamed`, the same text with
+  `@user_id` and `@all`; `TestVisibleToMatchesVisible` keeps the two forms
+  equal until those files move and the `$n` form goes. `queueRedactions` is
+  called from `messaging.go` (on `$n`) as well: it binds the batch as
+  `@batch` when its fragment's arguments are `momo.Named`, else as the next
+  `$n`, as before.
+- **Run-time statements.** ListConversations' WHERE fragments each carry
+  their `@name` and their Named; the report's grouping keys bind `@tz`
+  (the `strings.ReplaceAll` of `$5` is gone); exportMedia binds
+  `@peer_key`. `TestInboxRuntimeStatementsBuild` runs them, with the
+  export, nameBooks and queueRedactions, on a stub driver, so a misspelled
+  name fails on the pull request tier.
+
 ## momo Phase 3, domain 12: internal/store webchat on @name (2026-11-17, momo/store-webchat)
 
 - **Scope.** `webchat.go` and `webchat_sites.go` in `internal/store` bind

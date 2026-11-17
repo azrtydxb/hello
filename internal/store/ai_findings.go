@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // Finding severities, status values and lifecycle windows.
@@ -146,9 +148,9 @@ func (s *Store) UpsertAIFindings(ctx context.Context, now time.Time, in []AIFind
 		if skipResolve == nil {
 			skipResolve = []string{}
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE ai_findings SET status = 'resolved', resolved_at = $1
-			WHERE status IN ('open', 'acknowledged') AND last_seen < $2 AND NOT (type = ANY($3))`,
-			now, now.Add(-FindingResolveAfter), skipResolve)
+		_, err := tx.ExecContext(ctx, `UPDATE ai_findings SET status = 'resolved', resolved_at = @now
+			WHERE status IN ('open', 'acknowledged') AND last_seen < @cutoff AND NOT (type = ANY(@skip_types))`,
+			momo.Named("now", now), momo.Named("cutoff", now.Add(-FindingResolveAfter)), momo.Named("skip_types", skipResolve))
 		return err
 	})
 }
@@ -157,7 +159,7 @@ func upsertFinding(ctx context.Context, tx *dbTx, now time.Time, c AIFindingInpu
 	var id, sev, status string
 	var hist []byte
 	err := tx.QueryRowContext(ctx, `SELECT id, severity, status, severity_history FROM ai_findings
-		WHERE candidate_id = $1 AND status IN ('open', 'acknowledged')`, c.CandidateID).Scan(&id, &sev, &status, &hist)
+		WHERE candidate_id = @candidate_id AND status IN ('open', 'acknowledged')`, momo.Named("candidate_id", c.CandidateID)).Scan(&id, &sev, &status, &hist)
 	if err == nil {
 		if c.Severity != sev {
 			if hist, err = appendHistory(hist, c.Severity, now); err != nil {
@@ -167,21 +169,22 @@ func upsertFinding(ctx context.Context, tx *dbTx, now time.Time, c AIFindingInpu
 				status = FindingOpen // a rise is a new alert, acknowledged or not
 			}
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE ai_findings SET severity = $2, status = $3::text, severity_history = $4,
-			title = $5, evidence = $6, last_seen = $7, occurrences = occurrences + 1,
-			explained = CASE WHEN severity <> $2 THEN false ELSE explained END,
-			explanation = CASE WHEN severity <> $2 THEN NULL ELSE explanation END,
-			acknowledged_by = CASE WHEN $3::text = 'open' THEN NULL ELSE acknowledged_by END,
-			acknowledged_at = CASE WHEN $3::text = 'open' THEN NULL ELSE acknowledged_at END
-			WHERE id = $1`, id, c.Severity, status, hist, c.Title, []byte(c.Evidence), now)
+		_, err = tx.ExecContext(ctx, `UPDATE ai_findings SET severity = @severity, status = @status::text, severity_history = @severity_history,
+			title = @title, evidence = @evidence, last_seen = @now, occurrences = occurrences + 1,
+			explained = CASE WHEN severity <> @severity THEN false ELSE explained END,
+			explanation = CASE WHEN severity <> @severity THEN NULL ELSE explanation END,
+			acknowledged_by = CASE WHEN @status::text = 'open' THEN NULL ELSE acknowledged_by END,
+			acknowledged_at = CASE WHEN @status::text = 'open' THEN NULL ELSE acknowledged_at END
+			WHERE id = @id`, momo.Named("id", id), momo.Named("severity", c.Severity), momo.Named("status", status),
+			momo.Named("severity_history", hist), momo.Named("title", c.Title), momo.Named("evidence", []byte(c.Evidence)), momo.Named("now", now))
 		return err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	err = tx.QueryRowContext(ctx, `SELECT id, severity, severity_history FROM ai_findings
-		WHERE candidate_id = $1 AND status = 'dismissed' AND dismissed_at > $2
-		ORDER BY dismissed_at DESC LIMIT 1`, c.CandidateID, now.Add(-FindingDismissSuppression)).Scan(&id, &sev, &hist)
+		WHERE candidate_id = @candidate_id AND status = 'dismissed' AND dismissed_at > @cutoff
+		ORDER BY dismissed_at DESC LIMIT 1`, momo.Named("candidate_id", c.CandidateID), momo.Named("cutoff", now.Add(-FindingDismissSuppression))).Scan(&id, &sev, &hist)
 	switch {
 	case err == nil:
 		if severityRank(c.Severity) <= severityRank(sev) {
@@ -190,10 +193,11 @@ func upsertFinding(ctx context.Context, tx *dbTx, now time.Time, c AIFindingInpu
 		if hist, err = appendHistory(hist, c.Severity, now); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE ai_findings SET status = 'open', severity = $2, severity_history = $3,
-			title = $4, evidence = $5, last_seen = $6, occurrences = occurrences + 1, explained = false,
-			dismissed_by = NULL, dismissed_at = NULL, dismiss_reason = NULL WHERE id = $1`,
-			id, c.Severity, hist, c.Title, []byte(c.Evidence), now)
+		_, err = tx.ExecContext(ctx, `UPDATE ai_findings SET status = 'open', severity = @severity, severity_history = @severity_history,
+			title = @title, evidence = @evidence, last_seen = @now, occurrences = occurrences + 1, explained = false,
+			dismissed_by = NULL, dismissed_at = NULL, dismiss_reason = NULL WHERE id = @id`,
+			momo.Named("id", id), momo.Named("severity", c.Severity), momo.Named("severity_history", hist),
+			momo.Named("title", c.Title), momo.Named("evidence", []byte(c.Evidence)), momo.Named("now", now))
 		return err
 	case !errors.Is(err, sql.ErrNoRows):
 		return err
@@ -204,8 +208,10 @@ func upsertFinding(ctx context.Context, tx *dbTx, now time.Time, c AIFindingInpu
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO ai_findings
 		(id, candidate_id, type, subject, severity, title, evidence, first_seen, last_seen, severity_history)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $7, $8)`,
-		c.CandidateID, c.Type, c.Subject, c.Severity, c.Title, []byte(c.Evidence), now, hist)
+		VALUES (gen_random_uuid(), @candidate_id, @type, @subject, @severity, @title, @evidence, @now, @now, @severity_history)`,
+		momo.Named("candidate_id", c.CandidateID), momo.Named("type", c.Type), momo.Named("subject", c.Subject),
+		momo.Named("severity", c.Severity), momo.Named("title", c.Title), momo.Named("evidence", []byte(c.Evidence)),
+		momo.Named("now", now), momo.Named("severity_history", hist))
 	return err
 }
 
@@ -222,9 +228,11 @@ func (s *Store) ListAIFindings(ctx context.Context, f AIFindingFilter) ([]AIFind
 		f.Limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+findingCols+` FROM ai_findings f
-		WHERE ($1 = '' OR f.status = $1) AND ($2 = '' OR f.severity = $2) AND ($3 = '' OR f.type = $3)
+		WHERE (@status::text = '' OR f.status = @status::text) AND (@severity::text = '' OR f.severity = @severity::text)
+		  AND (@type::text = '' OR f.type = @type::text)
 		ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
-		         f.rank NULLS LAST, f.last_seen DESC, f.id LIMIT $4`, f.Status, f.Severity, f.Type, f.Limit)
+		         f.rank NULLS LAST, f.last_seen DESC, f.id LIMIT @limit`,
+		momo.Named("status", f.Status), momo.Named("severity", f.Severity), momo.Named("type", f.Type), momo.Named("limit", f.Limit))
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +251,7 @@ func (s *Store) ListAIFindings(ctx context.Context, f AIFindingFilter) ([]AIFind
 // GetAIFinding returns one finding; id is a UUID, anything else is
 // ErrNotFound.
 func (s *Store) GetAIFinding(ctx context.Context, id string) (AIFinding, error) {
-	f, err := scanFinding(s.db.QueryRowContext(ctx, `SELECT `+findingCols+` FROM ai_findings f WHERE f.id::text = $1`, id))
+	f, err := scanFinding(s.db.QueryRowContext(ctx, `SELECT `+findingCols+` FROM ai_findings f WHERE f.id::text = @id`, momo.Named("id", id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return f, ErrNotFound
 	}
@@ -282,8 +290,8 @@ func (s *Store) SetAIExplanations(ctx context.Context, xs []AIExplained) error {
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE ai_findings SET explanation = $2, explained = true, rank = $3
-				WHERE id::text = $1 AND status = 'open'`, x.ID, b, x.Rank); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE ai_findings SET explanation = @explanation, explained = true, rank = @rank
+				WHERE id::text = @id AND status = 'open'`, momo.Named("id", x.ID), momo.Named("explanation", b), momo.Named("rank", x.Rank)); err != nil {
 				return err
 			}
 		}
@@ -294,29 +302,38 @@ func (s *Store) SetAIExplanations(ctx context.Context, xs []AIExplained) error {
 // AcknowledgeAIFinding marks an open finding acknowledged (ErrFindingState
 // otherwise) and audits it.
 func (s *Store) AcknowledgeAIFinding(ctx context.Context, actor string, userID int64, id string) (AIFinding, error) {
-	return s.findingAction(ctx, actor, "acknowledge", id, `UPDATE ai_findings SET status = 'acknowledged',
-		acknowledged_by = $2, acknowledged_at = now() WHERE id::text = $1 AND status = 'open'`, userID)
+	return s.findingAction(ctx, actor, "acknowledge", id, aiFindingAcknowledge, momo.Named("user_id", userID))
 }
 
 // DismissAIFinding dismisses an open or acknowledged finding with a reason
 // (ErrFindingState otherwise) and audits it; the candidate is then not
 // raised for 24 hours unless its severity rises.
 func (s *Store) DismissAIFinding(ctx context.Context, actor string, userID int64, id, reason string) (AIFinding, error) {
-	return s.findingAction(ctx, actor, "dismiss", id, `UPDATE ai_findings SET status = 'dismissed',
-		dismissed_by = $2, dismissed_at = now(), dismiss_reason = $3, rank = NULL
-		WHERE id::text = $1 AND status IN ('open', 'acknowledged')`, userID, reason)
+	return s.findingAction(ctx, actor, "dismiss", id, aiFindingDismiss, momo.Named("user_id", userID), momo.Named("reason", reason))
 }
 
+// The finding actions' statements: findingAction binds @id, the caller
+// @user_id (and @reason).
+const (
+	aiFindingAcknowledge = `UPDATE ai_findings SET status = 'acknowledged',
+		acknowledged_by = @user_id, acknowledged_at = now() WHERE id::text = @id AND status = 'open'`
+	aiFindingDismiss = `UPDATE ai_findings SET status = 'dismissed',
+		dismissed_by = @user_id, dismissed_at = now(), dismiss_reason = @reason, rank = NULL
+		WHERE id::text = @id AND status IN ('open', 'acknowledged')`
+)
+
+// findingAction runs query on finding id: query binds @id, which it adds, and
+// the names of args.
 func (s *Store) findingAction(ctx context.Context, actor, action, id, query string, args ...any) (AIFinding, error) {
 	var out AIFinding
 	err := s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, query, append([]any{id}, args...)...)
+		res, err := tx.ExecContext(ctx, query, append([]any{momo.Named("id", id)}, args...)...)
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			var exists bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM ai_findings WHERE id::text = $1)`, id).Scan(&exists); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM ai_findings WHERE id::text = @id)`, momo.Named("id", id)).Scan(&exists); err != nil {
 				return err
 			}
 			if !exists {
@@ -327,7 +344,7 @@ func (s *Store) findingAction(ctx context.Context, actor, action, id, query stri
 		if err := insertAudit(ctx, tx, actor, action, "ai_finding", id); err != nil {
 			return err
 		}
-		out, err = scanFinding(tx.QueryRowContext(ctx, `SELECT `+findingCols+` FROM ai_findings f WHERE f.id::text = $1`, id))
+		out, err = scanFinding(tx.QueryRowContext(ctx, `SELECT `+findingCols+` FROM ai_findings f WHERE f.id::text = @id`, momo.Named("id", id)))
 		return err
 	})
 	return out, err
