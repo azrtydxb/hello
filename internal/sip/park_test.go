@@ -276,12 +276,18 @@ type parkedCall struct {
 
 func establish(t *testing.T, a, b *phone) parkedCall {
 	t.Helper()
+	// The INVITE and ACK that b gets for this call are picked by their
+	// sender and Call-ID, not by queue position: anything left over in
+	// the queues would otherwise give the test another call's dialog,
+	// and a BYE on that ended dialog is never sent (byeFrom).
+	drainReqs(b.invites)
+	drainReqs(b.acks)
 	r := waitCall(t, dial(t.Context(), a, "200"))
 	if r.err != nil {
 		t.Fatalf("call: %v", r.err)
 	}
-	invB := waitReq(t, b.invites, "INVITE to b")
-	waitReq(t, b.acks, "ACK to b")
+	invB := waitReqFrom(t, b.invites, b.pbx, "", "INVITE to b")
+	waitReqFrom(t, b.acks, b.pbx, invB.CallID().Value(), "ACK to b")
 	pc := parkedCall{r: r, feedA: startRTPFeed(t, r.dcs.InviteResponse.Body()), feedB: startRTPFeed(t, invB.Body()),
 		dssB: b.serverFor(invB)}
 	pc.feedA.silence(0.1)
@@ -435,9 +441,33 @@ func TestCallPark(t *testing.T) {
 	pbx.nextCDR(t)
 }
 
-// byeFrom hangs up a call from the phone that was called.
+// waitReqFrom waits on ch for a request sent by src (the PBX) and, when
+// callID is set, of that Call-ID; other requests are skipped.
+func waitReqFrom(t *testing.T, ch chan *sip.Request, src, callID, what string) *sip.Request {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case r := <-ch:
+			if r.Source() == src && (callID == "" || r.CallID().Value() == callID) {
+				return r
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s", what)
+			return nil
+		}
+	}
+}
+
+// byeFrom hangs up a call from the phone that was called. sipgo's Bye
+// returns nil without sending anything on a dialog that has already
+// ended, which would leave the test waiting for a BYE the PBX was never
+// asked to relay: that is a failure here, not a silent no-op.
 func byeFrom(t *testing.T, dss *sipgo.DialogServerSession) {
 	t.Helper()
+	if dss.LoadState() == sip.DialogStateEnded {
+		t.Fatalf("BYE from the callee: its dialog %s had already ended", dss.InviteRequest.CallID().Value())
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := dss.Bye(ctx); err != nil {
