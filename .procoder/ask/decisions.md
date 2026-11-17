@@ -6805,6 +6805,7 @@ passes.
 - **Cost.** The directory Provisioner's `*sql.Tx` interface, 13 direct
   `BeginTx` calls, `TryLock`'s pinned connection, `store.New` wiring and
   the other `hellodb.New` users would all move.
-- **Proposed.** Skip Phase 4 as the plan's rule says (no user-visible
-  benefit); keep the benchmark. Pending the user's answer under "momo
-  Phase 4 go/no-go".
+- **Decided (user, 2026-11-17): skip Phase 4, keep the benchmark.** The
+  store stays on `FromSQLDB` and `dbq`; PR #404 merges so
+  `BenchmarkStoreDriver` keeps running in the dispatch-only bench job. A
+  later switch must keep the cached-statement exec mode.
