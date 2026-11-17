@@ -35,6 +35,33 @@ func TestScheduleOpen(t *testing.T) {
 	}
 }
 
+// TestScheduleOpenToMidnight fails if a window until 23:59 or 24:00 closes
+// before midnight, or runs into the next day.
+func TestScheduleOpenToMidnight(t *testing.T) {
+	for _, to := range []string{"23:59", "24:00"} {
+		s := Schedule{Zone: "UTC", Days: []ScheduleDay{{Day: 1, From: "00:00", To: to}}}
+		if err := s.Validate(); err != nil {
+			t.Fatalf("until %s: %v", to, err)
+		}
+		// 2026-11-16 is a Monday.
+		for v, want := range map[string]bool{
+			"2026-11-16T00:00:00Z": true,
+			"2026-11-16T23:58:59Z": true,
+			"2026-11-16T23:59:00Z": true,
+			"2026-11-16T23:59:59Z": true,
+			"2026-11-17T00:00:00Z": false, // Tuesday
+		} {
+			at, _ := time.Parse(time.RFC3339, v)
+			if got := s.Open(at); got != want {
+				t.Errorf("until %s: Open(%s) = %v, want %v", to, v, got, want)
+			}
+		}
+	}
+	if (Schedule{Zone: "UTC", Days: []ScheduleDay{{Day: 1, From: "24:00", To: "24:00"}}}).Validate() == nil {
+		t.Error("a window from 24:00 was accepted")
+	}
+}
+
 func TestScheduleValidate(t *testing.T) {
 	good := ScheduleDay{Day: 1, From: "09:00", To: "17:00"}
 	for name, s := range map[string]Schedule{

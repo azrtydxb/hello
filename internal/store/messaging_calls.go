@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/phonebook"
 )
 
@@ -23,6 +25,9 @@ func cdrDigits(x string) string {
 // and so no calls.
 func (s *Store) ConversationCalls(ctx context.Context, acc InboxAccess, convID int64, limit int) ([]CDR, error) {
 	var peerKey, peerKind string
+	// The visibility condition is the inbox's (visible, messaging_inbox.go),
+	// which still binds $1 and $2, so this read binds $n until the inbox
+	// moves to @name.
 	err := s.db.QueryRowContext(ctx, `SELECT c.peer_key, c.peer_kind FROM conversations c WHERE c.id = $3 AND `+visible,
 		acc.UserID, acc.All, convID).Scan(&peerKey, &peerKind)
 	if err != nil {
@@ -39,13 +44,14 @@ func (s *Store) ConversationCalls(ctx context.Context, acc InboxAccess, convID i
 	digits := strings.TrimPrefix(key, "+")
 	// A number of nine digits or more matches by its last nine, as the
 	// phonebook's fallback key does, so 0475 12 34 56 and +32475123456 are one
-	// number; a shorter one must match whole.
+	// number; a shorter one must match whole. Every column's condition binds
+	// @digits.
 	suffix, long := phonebook.Suffix(key)
 	match := func(col string) string {
 		if long {
-			return `(length(` + cdrDigits(col) + `) >= 9 AND right(` + cdrDigits(col) + `, 9) = $1)`
+			return `(length(` + cdrDigits(col) + `) >= 9 AND right(` + cdrDigits(col) + `, 9) = @digits::text)`
 		}
-		return cdrDigits(col) + ` = $1`
+		return cdrDigits(col) + ` = @digits::text`
 	}
 	arg := digits
 	if long {
@@ -53,15 +59,16 @@ func (s *Store) ConversationCalls(ctx context.Context, acc InboxAccess, convID i
 	}
 	where := `(` + match("c.source") + ` OR ` + match("c.destination") + ` OR ` + match("c.original_destination") +
 		` OR ` + match("c.rewritten_destination") + `)`
-	args := []any{arg, limit}
+	args := []any{momo.Named("digits", arg), momo.Named("limit", limit)}
 	if !acc.All {
 		where += ` AND EXISTS (
 			SELECT 1 FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id
-			WHERE ue.user_id = $3 AND (c.source = e.number OR c.destination = e.number OR c.original_destination = e.number))`
-		args = append(args, acc.UserID)
+			WHERE ue.user_id = @user_id AND (c.source = e.number OR c.destination = e.number OR c.original_destination = e.number))`
+		args = append(args, momo.Named("user_id", acc.UserID))
 	}
 	//nolint:gosec // G202: the prefix, the digit expressions and the conditions are constants
-	rows, err := s.db.QueryContext(ctx, cdrQuery+`FROM cdrs c WHERE `+where+` ORDER BY c.id DESC LIMIT $2`, args...)
+	rows, err := s.db.QueryContext(ctx, cdrQuery+`FROM cdrs c WHERE `+where+` ORDER BY c.id DESC LIMIT @limit`, args...)
+
 	if err != nil {
 		return nil, err
 	}

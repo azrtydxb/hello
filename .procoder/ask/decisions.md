@@ -6646,3 +6646,119 @@ The old `($1 = 0 OR id < $1)` typed the paging cursor as integer, so a cursor id
   `@peer_key`. `TestInboxRuntimeStatementsBuild` runs them, with the
   export, nameBooks and queueRedactions, on a stub driver, so a misspelled
   name fails on the pull request tier.
+
+## momo Phase 3, domain 10: internal/store messaging core on @name (2026-11-17, momo/store-messaging)
+
+- **Scope.** `messages.go`, `messaging.go`, `messaging_route.go`,
+  `messaging_route_views.go`, `messaging_carrier.go` and
+  `messaging_events.go` bind by name (`@name` with `momo.Named`) and are in
+  `namedFiles`; `messaging_calls.go` binds by name but for one read. The SQL
+  text, `FOR UPDATE` / `SKIP LOCKED`, Scan targets and error handling are
+  unchanged. No schema change, no migration, `go.mod` and `internal/db`
+  unchanged.
+- **Advisory locks keep their keys.** The inbox event lock
+  (`inboxEventLock`), the carrier claim lock (`outboundClaimLock`), the
+  first-contact lock (`firstContactLock`) and the per-agent capacity lock
+  (`agentLock` with the user id) bind `@key`, `@lock` and `@user_id`; momo
+  renders them as the same `SELECT pg_advisory_xact_lock($1)` and
+  `pg_advisory_xact_lock($1::int, ($2::bigint % 2147483647)::int)` with the
+  same values. The SIP message NOTIFY is `pg_notify(@channel, @batch)`,
+  sent as the same `pg_notify($1, $2)`.
+- **Casts for reused binds.** A reused `@name` is one bind per use, so a use
+  whose type no column fixes carries the type PostgreSQL inferred for the
+  single `$n`: the listings' `lower(@query::text)` (four uses),
+  ConversationCalls' `@digits::text` (one use per CDR column, four), FinishOutbound's
+  and FinishPoll's `CASE WHEN @status::text = 'delivered'` (the `status =`
+  use takes the column's type), recordChannelHealth's
+  `@degraded_after::int` (twice, as `fail_streak` is INT), ListOptOuts'
+  `@q::text` (twice), and routeOne's `@assignee::bigint` (the column use
+  gained the cast its `IS NULL` use had). ListMsgAddresses'
+  `@channel_id::bigint` and ListOptOuts' `@address_id::bigint` were int4
+  before (`$1 = 0` typed them); they are int8 now, which matches the bigint
+  columns and changes no result for an id that fitted. Uses compared with
+  a column on each side (the paging group's `@target`, ErasePeer's
+  `@peer_key`, the upserts' `@note` and `@peer_key`, StartConversation's
+  `@user_id`) need no cast. The SIP message insert's `@status::text` was
+  already cast at both uses.
+- **The listings' assembled WHERE.** messageWhere no longer rewrites `?`
+  to `$n`: each condition carries its own `@name` (`@extension`,
+  `@extensions`, `@conversation`, `@status`, `@query`) and appends its
+  Named only with it; ListMessages adds `@before` and both listings
+  `@limit`. PostgreSQL receives the same statement with each reused value
+  as one bind per use, in order, and the casts above: a one-off check
+  against the old code found no other difference for any of the 64
+  filter combinations. `TestMessageListingsSend` pins the exact SQL and
+  arguments of every combination (and that the conversation list ignores
+  the conversation filter), `TestConversationCallsSends` the CDR read's
+  four forms. The `fmt.Sprintf` placeholder numbering is gone; the gosec
+  suppressions stay, with their reason updated.
+- **Statements the sweep cannot see are constants now and built offline.**
+  routeName's four reads (`routeName*`), the group sends' recipient reads
+  (`ringGroupRecipients`, `pagingGroupRecipients`, `broadcastRecipients`)
+  and ErasePeer's provider read (`erasePeerProviders`) went through a
+  switch or through `queryStrings`; their text is unchanged and
+  `TestMessagingStatementsOffline` builds them with every listing filter.
+- **Left on `$n`, owned by other domains.** ConversationCalls' visibility
+  read joins `visible` (`messaging_inbox.go`), which binds `$1`/`$2`, so it
+  binds `$3` until the inbox converts `visible`; `messaging_calls.go` is
+  therefore not in `namedFiles` (the sweep would refuse that read). ErasePeer's
+  redaction select binds `$1`, because `queueRedactions`
+  (`messaging_privacy.go`) wraps it and numbers its batch `$n+1`.
+  `poolMemberParam` (in `messaging_route.go`) stays `$1::bigint`: only
+  `visible` uses it.
+- **Carrier credentials.** sealChannelCredentials binds the sealed bytes
+  as `@credentials_enc`; nothing logs argument values (momo's logger never
+  does, and the tests print only recorded listing and CDR statements).
+
+## TestPrackAndReplaces: a Replaces refusal is counted before it is sent (2026-11-17)
+
+CI flaked `confirmed dialog` with `hello_replaces_total{confirmed,forbidden}
+= 0` (run 43931278463, a branch that does not touch `internal/sip`). It
+was the product. `replacesFail` sent the refusal, wrote the CDR and only
+then counted it. The test moves on once it has the refusal and the CDR, so a
+handler goroutine stalled after the CDR left the count unread through the
+next two refusals. A forced 300 ms sleep at that point reproduces the CI
+failure every time. The refusal is now counted before the response goes out,
+so anyone who sees the refusal (the phone, a scrape after it) sees it
+counted. With the same sleep after the response and the CDR, the test
+passes.
+
+- **The ok counts stay where they are.** A takeover is ok only once the
+  replacing phone has ACKed its 200, after the BYE to the phone that left, so
+  it cannot be counted before the response. A forced sleep there gives
+  `{confirmed,ok} = 2, want 3`. The test now waits up to 10 s for the count
+  to reach 3 and still fails unless it is exactly 3.
+- **A takeover across nodes whose 200 cannot be sent counts as refused.**
+  `replaceRemote` returned without counting when `answerSelf` failed, while
+  `replaceCallee` and `replaceLinkedParty` count the same failure as
+  refused; it now counts it too (coordinator's decision, 2026-11-17).
+  `answerSelf` fails when the 200 cannot be sent (the phone cancelled, the
+  transaction is gone). It does not wait for the ACK, so a phone that never
+  ACKs is not detected on the `answerSelf` paths, local or remote; only
+  `replaceCaller` (`WriteResponse`) sees that case. The new test,
+  `TestReplacesAcrossNodesAnswerFails`, holds the answer on the second
+  node until the phone has cancelled and fails without the count.
+
+## momo Phase 3, domain 12: internal/store webchat on @name (2026-11-17, momo/store-webchat)
+
+- **Scope.** `webchat.go` and `webchat_sites.go` in `internal/store` bind
+  by name: every `$n` became `@name` with `momo.Named`, through the seam,
+  with the SQL text, `FOR UPDATE`, Scan targets, `mapErr` and the no-row
+  checks unchanged. No schema change, no migration, `go.mod` and
+  `internal/db` unchanged.
+- **Public visitor paths unchanged.** The visitor token is still bound as
+  its SHA-256 (`@token_hash`), the day's address hash as `@ip_hash::bytea`,
+  and the block checks, the unanswered-message cap, the site's
+  `max_open_unassigned` count and the reopen window
+  (`make_interval(days => @reopen_days)`) are the same SQL. The site
+  origins are still bound as `@allowed_origins::text[]`, and the Turnstile
+  secret is sealed and bound as before. Nothing logs an argument value.
+- **No casts added.** The reused binds were already cast
+  (ChatSession's `@name::text` and `@email::text`, insertAgentReply's and
+  FinishChatEmailReply's `@status::text`) or are typed by their columns on
+  every use (CreateChatSite's `@address` for `address` and `address_key`,
+  both TEXT; chatSend's `@conversation_id`, BIGINT on both sides).
+- **Chat event lock key unchanged.** chatEvent and ChatAgentTyping send
+  `SELECT pg_advisory_xact_lock(@key)` with `int64(chatEventLock)`, one
+  bigint bind as before.
+- **maintainChat's three deletes** take no arguments and are unchanged.
