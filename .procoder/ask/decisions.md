@@ -6840,4 +6840,5 @@ and PostgreSQL's stored `col = ANY (ARRAY[...])` diff as equal but are not
 
 - File it upstream in azrtydxb/momo (Recommended): a short issue with the
   reproduction; Hello keeps its test-side normalisation until it is fixed.
+  **Chosen by the user, 2026-11-18; filed as azrtydxb/momo#227.**
 - Don't file: keep the normalisation in Hello only.
