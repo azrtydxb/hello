@@ -3,6 +3,7 @@ package sip
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -314,8 +315,16 @@ func TestPrackAndReplaces(t *testing.T) {
 		if !sawCaller {
 			t.Errorf("the replacing caller's CDR does not name the call it replaced: %+v", got)
 		}
-		if v := pbx.metric(t, "hello_replaces_total", map[string]string{"dialog": "confirmed", "result": "ok"}); v != 3 {
-			t.Errorf("hello_replaces_total{confirmed,ok} = %v, want 3", v)
+		// A takeover counts as ok once the replacing phone has ACKed its 200,
+		// after the BYE to the phone that left, so the last one may still be
+		// on its way when the test gets here.
+		var okCount float64
+		eventually(t, "hello_replaces_total{confirmed,ok} reaches 3", func() bool {
+			okCount = pbx.metric(t, "hello_replaces_total", map[string]string{"dialog": "confirmed", "result": "ok"})
+			return okCount >= 3
+		})
+		if okCount != 3 {
+			t.Errorf("hello_replaces_total{confirmed,ok} = %v, want 3", okCount)
 		}
 	})
 }
@@ -388,6 +397,64 @@ func TestReplacesAcrossNodes(t *testing.T) {
 	talks(t, feedA, feedB2, "a1 and b2 across nodes")
 	hangup(t, r.dcs)
 	waitReq(t, b2.byes, "BYE to b2 on the other node")
+}
+
+// TestReplacesAcrossNodesAnswerFails: a takeover across nodes whose 200 to
+// the replacing phone cannot be sent (the phone cancelled while the holding
+// node rewired the call) is counted as refused, as the same failure is on a
+// call on this node. It fails if the takeover goes uncounted or counts as
+// ok.
+func TestReplacesAcrossNodesAnswerFails(t *testing.T) {
+	st := parkStore(t)
+	shared := newFakeState()
+	withShared := func(_ *Config, d *Deps) { d.State = shared }
+	ports := func(lo, hi int) pbxOpt { return func(c *Config, _ *Deps) { c.RTPPortMin, c.RTPPortMax = lo, hi } }
+	pbx1 := startPBX(t, replacesDevices(), ports(31000, 31499), withPark(st, "sip-a", testLot), withShared)
+	pbx2 := startPBX(t, replacesDevices(), ports(31500, 31999), withPark(st, "sip-b", testLot), withShared)
+	a1, b1 := newPhone(t, pbx1, "a1", "pa"), newPhone(t, pbx1, "b1", "pb1")
+	b2 := newPhone(t, pbx2, "b2", "pb2")
+	for _, p := range []*phone{a1, b1, b2} {
+		p.register(t)
+	}
+	b2.setCallee(busy())
+	r := waitCall(t, dial(t.Context(), a1, "200"))
+	if r.err != nil {
+		t.Fatalf("call: %v", r.err)
+	}
+	invB := waitReq(t, b1.invites, "INVITE to b1")
+	waitReq(t, b1.acks, "ACK to b1")
+
+	// pbx2 answers b2 only after b2 has cancelled its INVITE.
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	hook := func() {
+		once.Do(func() {
+			close(entered)
+			<-release
+		})
+	}
+	pbx2.srv.answerHook.Store(&hook)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	res := dialReplacing(ctx, b2, "100", calleeDialog(b1.serverFor(invB)))
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the takeover was never answered")
+	}
+	cancel()
+	if rr := waitCall(t, res); rr.err == nil {
+		t.Fatal("the cancelled takeover was answered")
+	}
+	close(release)
+
+	confirmed := func(result string) float64 {
+		return pbx2.metric(t, "hello_replaces_total", map[string]string{"dialog": "confirmed", "result": result})
+	}
+	eventually(t, "the failed takeover is counted as refused", func() bool { return confirmed(replacesRefused) == 1 })
+	if v := confirmed(replacesOK); v != 0 {
+		t.Errorf("hello_replaces_total{confirmed,ok} = %v, want 0", v)
+	}
 }
 
 func TestParseReplaces(t *testing.T) {
