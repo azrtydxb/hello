@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/prov"
@@ -71,7 +73,7 @@ func nameBooks(ctx context.Context, q dbQuery, userID int64) ([]nameBook, error)
 		return nil, err
 	}
 	if userID > 0 {
-		if err := add(`SELECT id FROM phonebooks WHERE kind = 'personal' AND owner_user_id = $1`, NameSourcePersonal, userID); err != nil {
+		if err := add(`SELECT id FROM phonebooks WHERE kind = 'personal' AND owner_user_id = @user_id`, NameSourcePersonal, momo.Named("user_id", userID)); err != nil {
 			return nil, err
 		}
 		if err := add(`
@@ -80,8 +82,8 @@ func nameBooks(ctx context.Context, q dbQuery, userID int64) ([]nameBook, error)
 			JOIN phones p ON p.device_id = d.id
 			JOIN phone_group_books gb ON gb.group_id = p.group_id
 			JOIN phonebooks b ON b.id = gb.book_id AND b.kind = 'named'
-			WHERE u.id = $1
-			GROUP BY p.group_id, gb.position, b.id ORDER BY p.group_id, gb.position`, NameSourceNamed, userID); err != nil {
+			WHERE u.id = @user_id
+			GROUP BY p.group_id, gb.position, b.id ORDER BY p.group_id, gb.position`, NameSourceNamed, momo.Named("user_id", userID)); err != nil {
 			return nil, err
 		}
 	}
@@ -105,12 +107,12 @@ func resolveContactName(ctx context.Context, q dbQuery, userID int64, peerKey st
 	for _, b := range books {
 		var in phonebook.EntryInput
 		if b.source == NameSourceExtensions {
-			err = q.QueryRowContext(ctx, `SELECT name FROM extensions WHERE number = $1 AND NOT directory_hidden`, peerKey).Scan(&in.LastName)
+			err = q.QueryRowContext(ctx, `SELECT name FROM extensions WHERE number = @number AND NOT directory_hidden`, momo.Named("number", peerKey)).Scan(&in.LastName)
 		} else {
 			err = q.QueryRowContext(ctx, `
 				SELECT e.first_name, e.last_name, e.company
 				FROM phonebook_entries e, jsonb_array_elements(e.numbers) n
-				WHERE e.book_id = $1 AND n->>'key' = $2 ORDER BY e.id LIMIT 1`, b.id, peerKey).Scan(&in.FirstName, &in.LastName, &in.Company)
+				WHERE e.book_id = @book_id AND n->>'key' = @key ORDER BY e.id LIMIT 1`, momo.Named("book_id", b.id), momo.Named("key", peerKey)).Scan(&in.FirstName, &in.LastName, &in.Company)
 		}
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
@@ -138,8 +140,8 @@ func resolveContactName(ctx context.Context, q dbQuery, userID int64, peerKey st
 	rows, err := q.QueryContext(ctx, `
 		SELECT DISTINCT e.id, e.book_id, e.first_name, e.last_name, e.company
 		FROM phonebook_entries e, jsonb_array_elements(e.numbers) n
-		WHERE e.book_id = ANY($1::bigint[]) AND length(ltrim(n->>'key', '+')) >= 9 AND right(ltrim(n->>'key', '+'), 9) = $2
-		ORDER BY e.id LIMIT 2`, int64Array(ids), suffix)
+		WHERE e.book_id = ANY(@book_ids::bigint[]) AND length(ltrim(n->>'key', '+')) >= 9 AND right(ltrim(n->>'key', '+'), 9) = @suffix
+		ORDER BY e.id LIMIT 2`, momo.Named("book_ids", int64Array(ids)), momo.Named("suffix", suffix))
 	if err != nil {
 		return "", "", err
 	}
@@ -216,7 +218,7 @@ func (s *Store) UserPhoneVendors(ctx context.Context, userID int64) ([]prov.Vend
 		SELECT DISTINCT p.vendor FROM phones p
 		JOIN devices d ON d.id = p.device_id
 		JOIN users u ON u.extension_id = d.extension_id
-		WHERE u.id = $1 ORDER BY 1`, userID)
+		WHERE u.id = @user_id ORDER BY 1`, momo.Named("user_id", userID))
 	if err != nil {
 		return nil, err
 	}
@@ -249,10 +251,10 @@ func (s *Store) deliverToDeskPhone(ctx context.Context, tx *dbTx, convID, cm, us
 		FROM conversations c
 		JOIN msg_channels ch ON ch.id = c.channel_id
 		JOIN msg_addresses a ON a.id = c.address_id
-		JOIN conversation_messages m ON m.id = $2 AND m.conversation_id = c.id AND m.kind = 'message' AND m.direction = 'in'
-		JOIN users u ON u.id = $3 AND u.enabled
+		JOIN conversation_messages m ON m.id = @message_id AND m.conversation_id = c.id AND m.kind = 'message' AND m.direction = 'in'
+		JOIN users u ON u.id = @user_id AND u.enabled
 		JOIN extensions e ON e.id = u.extension_id
-		WHERE c.id = $1`, convID, cm, userID).Scan(&chKind, &peerKey, &peerName, &body, &ext, &extKind, &addrOn, &userOn)
+		WHERE c.id = @conversation_id`, momo.Named("conversation_id", convID), momo.Named("message_id", cm), momo.Named("user_id", userID)).Scan(&chKind, &peerKey, &peerName, &body, &ext, &extKind, &addrOn, &userOn)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -260,7 +262,7 @@ func (s *Store) deliverToDeskPhone(ctx context.Context, tx *dbTx, convID, cm, us
 		return err
 	}
 	var files int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM message_media WHERE message_id = $1`, cm).Scan(&files); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM message_media WHERE message_id = @message_id`, momo.Named("message_id", cm)).Scan(&files); err != nil {
 		return err
 	}
 	// A phone cannot show an attachment: it is told there is one (spec
@@ -277,8 +279,8 @@ func (s *Store) deliverToDeskPhone(ctx context.Context, tx *dbTx, convID, cm, us
 		return nil
 	}
 	var queued bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM messages WHERE conversation_message_id = $1 AND recipient = $2
-		AND recipient_kind = 'extension')`, cm, ext).Scan(&queued); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM messages WHERE conversation_message_id = @message_id AND recipient = @recipient
+		AND recipient_kind = 'extension')`, momo.Named("message_id", cm), momo.Named("recipient", ext)).Scan(&queued); err != nil {
 		return err
 	}
 	if queued {
@@ -315,8 +317,8 @@ func (s *Store) deliverToDeskPhone(ctx context.Context, tx *dbTx, convID, cm, us
 // to the phones of the user it was just assigned to.
 func (s *Store) deliverLastToDeskPhone(ctx context.Context, tx *dbTx, convID, userID int64) error {
 	var cm int64
-	err := tx.QueryRowContext(ctx, `SELECT id FROM conversation_messages WHERE conversation_id = $1
-		AND direction = 'in' AND kind = 'message' ORDER BY id DESC LIMIT 1`, convID).Scan(&cm)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM conversation_messages WHERE conversation_id = @conversation_id
+		AND direction = 'in' AND kind = 'message' ORDER BY id DESC LIMIT 1`, momo.Named("conversation_id", convID)).Scan(&cm)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -358,7 +360,7 @@ func (s *Store) ReplyFromDevice(ctx context.Context, ext, peerKey, body string) 
 		SELECT u.id, e.id, coalesce(NULLIF(u.display_name, ''), u.username)
 		FROM extensions e JOIN users u ON u.enabled AND u.role IN ('user', 'operator', 'admin')
 			AND (u.extension_id = e.id OR EXISTS (SELECT 1 FROM user_extensions ue WHERE ue.user_id = u.id AND ue.extension_id = e.id))
-		WHERE e.number = $1 ORDER BY (u.extension_id = e.id) DESC, u.id LIMIT 1`, ext).Scan(&userID, &extID, &name)
+		WHERE e.number = @number ORDER BY (u.extension_id = e.id) DESC, u.id LIMIT 1`, momo.Named("number", ext)).Scan(&userID, &extID, &name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil
 	}
@@ -370,16 +372,16 @@ func (s *Store) ReplyFromDevice(ctx context.Context, ext, peerKey, body string) 
 		SELECT c.id FROM conversations c
 		JOIN msg_channels ch ON ch.id = c.channel_id AND ch.provider = 'sip_trunk'
 		JOIN msg_addresses a ON a.id = c.address_id
-		WHERE c.peer_key = $1 AND c.status <> 'spam' AND (
-			(c.assignee_user_id = $2 AND c.status <> 'resolved')
-			OR (a.owner_extension_id = $3 AND (c.assignee_user_id IS NULL OR c.assignee_user_id = $2)))
-		ORDER BY coalesce(c.assignee_user_id = $2, FALSE) DESC, (c.status <> 'resolved') DESC, c.last_message_at DESC, c.id DESC LIMIT 1`,
-		peerKey, userID, extID).Scan(&convID)
+		WHERE c.peer_key = @peer_key AND c.status <> 'spam' AND (
+			(c.assignee_user_id = @user_id AND c.status <> 'resolved')
+			OR (a.owner_extension_id = @extension_id AND (c.assignee_user_id IS NULL OR c.assignee_user_id = @user_id)))
+		ORDER BY coalesce(c.assignee_user_id = @user_id, FALSE) DESC, (c.status <> 'resolved') DESC, c.last_message_at DESC, c.id DESC LIMIT 1`,
+		momo.Named("peer_key", peerKey), momo.Named("user_id", userID), momo.Named("extension_id", extID)).Scan(&convID)
 	if errors.Is(err, sql.ErrNoRows) {
 		var other bool
 		if err := s.db.QueryRowContext(ctx, `
 			SELECT EXISTS (SELECT 1 FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id AND ch.provider = 'sip_trunk'
-				WHERE c.peer_key = $1 AND c.status NOT IN ('resolved', 'spam'))`, peerKey).Scan(&other); err != nil {
+				WHERE c.peer_key = @peer_key AND c.status NOT IN ('resolved', 'spam'))`, momo.Named("peer_key", peerKey)).Scan(&other); err != nil {
 			return out, err
 		}
 		if other {
@@ -401,8 +403,8 @@ func (s *Store) ReplyFromDevice(ctx context.Context, ext, peerKey, body string) 
 		return out, err
 	}
 	var recent int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM conversation_messages WHERE sender_user_id = $1 AND direction = 'out'
-		AND kind = 'message' AND created_at > now() - interval '1 minute'`, userID).Scan(&recent); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM conversation_messages WHERE sender_user_id = @user_id AND direction = 'out'
+		AND kind = 'message' AND created_at > now() - interval '1 minute'`, momo.Named("user_id", userID)).Scan(&recent); err != nil {
 		return out, err
 	}
 	if recent >= set.RatePerMinute {
@@ -458,9 +460,9 @@ func (s *Store) AddConversationContact(ctx context.Context, acc InboxAccess, con
 		}
 		// A shared name is kept on the conversations of the number that have
 		// no better one, so every reader and the desk phones see it.
-		if _, err := s.db.ExecContext(ctx, `UPDATE conversations SET peer_name = $2, peer_name_source = 'company'
-			WHERE peer_key = $1 AND (peer_name = '' OR peer_name_source IN ('provider', 'extensions', 'company'))`,
-			c.Peer, strings.TrimSpace(in.DisplayName())); err != nil {
+		if _, err := s.db.ExecContext(ctx, `UPDATE conversations SET peer_name = @peer_name, peer_name_source = 'company'
+			WHERE peer_key = @peer_key AND (peer_name = '' OR peer_name_source IN ('provider', 'extensions', 'company'))`,
+			momo.Named("peer_key", c.Peer), momo.Named("peer_name", strings.TrimSpace(in.DisplayName()))); err != nil {
 			return Conversation{}, err
 		}
 	default:

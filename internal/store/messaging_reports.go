@@ -13,8 +13,9 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // Report groupings.
@@ -50,8 +51,8 @@ func (s *Store) GetInboxSLA(ctx context.Context) (InboxSLA, error) {
 // PutInboxSLA replaces the service-level targets.
 func (s *Store) PutInboxSLA(ctx context.Context, actor string, t InboxSLA) (InboxSLA, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE messaging_settings SET sla_first_response_seconds = $1, sla_resolution_seconds = $2`,
-			t.FirstResponseSeconds, t.ResolutionSeconds); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE messaging_settings SET sla_first_response_seconds = @first_response, sla_resolution_seconds = @resolution`,
+			momo.Named("first_response", t.FirstResponseSeconds), momo.Named("resolution", t.ResolutionSeconds)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update", "messaging_sla", "1")
@@ -131,7 +132,7 @@ func reportKeys(by string) (convKey, msgKey string, err error) {
 		return `coalesce(c.assignee_user_id::text, '')`,
 			`coalesce(CASE WHEN m.direction = 'out' THEN m.sender_user_id ELSE c.assignee_user_id END::text, '')`, nil
 	case ReportByDay:
-		return `to_char(c.created_at AT TIME ZONE $5, 'YYYY-MM-DD')`, `to_char(m.created_at AT TIME ZONE $5, 'YYYY-MM-DD')`, nil
+		return `to_char(c.created_at AT TIME ZONE @tz::text, 'YYYY-MM-DD')`, `to_char(m.created_at AT TIME ZONE @tz::text, 'YYYY-MM-DD')`, nil
 	}
 	return "", "", fmt.Errorf("store: unknown report grouping %q", by)
 }
@@ -184,8 +185,9 @@ func (s *Store) reportRows(ctx context.Context, f InboxReportFilter, by string, 
 		}
 		return r
 	}
-	// $5 (the zone) is only read by the day grouping; it is passed always so
-	// the parameter list is the same.
+	// @tz (the zone) is only read by the day grouping; it is bound always
+	// (the statements name it in their own "@tz::text IS NOT NULL") so the
+	// argument list is the same.
 	//nolint:gosec // G202: the keys are fixed SQL fragments chosen above; every value is bound.
 	rows, err := s.db.QueryContext(ctx, `
 		WITH conv AS (
@@ -195,7 +197,7 @@ func (s *Store) reportRows(ctx context.Context, f InboxReportFilter, by string, 
 			       CASE WHEN c.status = 'resolved' AND c.resolved_at IS NOT NULL
 			            THEN extract(epoch FROM c.resolved_at - c.created_at) END AS rt
 			FROM conversations c
-			WHERE c.created_at >= $1 AND c.created_at < $2 AND c.status <> 'spam' AND $5::text IS NOT NULL
+			WHERE c.created_at >= @from AND c.created_at < @to AND c.status <> 'spam' AND @tz::text IS NOT NULL
 		)
 		SELECT k, count(*), count(*) FILTER (WHERE origin = 'inbound'), count(*) FILTER (WHERE origin = 'outbound'),
 		       count(*) FILTER (WHERE status = 'resolved'),
@@ -203,11 +205,12 @@ func (s *Store) reportRows(ctx context.Context, f InboxReportFilter, by string, 
 		       coalesce(percentile_cont(0.9) WITHIN GROUP (ORDER BY frt), 0),
 		       count(rt), coalesce(avg(rt), 0), coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY rt), 0),
 		       coalesce(percentile_cont(0.9) WITHIN GROUP (ORDER BY rt), 0),
-		       count(*) FILTER (WHERE origin = 'inbound' AND $3::int > 0
-		           AND (frt > $3::int OR (frt IS NULL AND status <> 'resolved' AND now() - created_at > make_interval(secs => $3::int)))),
-		       count(*) FILTER (WHERE $4::int > 0
-		           AND (rt > $4::int OR (rt IS NULL AND status <> 'resolved' AND now() - created_at > make_interval(secs => $4::int))))
-		FROM conv GROUP BY k`, f.From, f.To, sla.FirstResponseSeconds, sla.ResolutionSeconds, tz)
+		       count(*) FILTER (WHERE origin = 'inbound' AND @first_response::int > 0
+		           AND (frt > @first_response::int OR (frt IS NULL AND status <> 'resolved' AND now() - created_at > make_interval(secs => @first_response::int)))),
+		       count(*) FILTER (WHERE @resolution::int > 0
+		           AND (rt > @resolution::int OR (rt IS NULL AND status <> 'resolved' AND now() - created_at > make_interval(secs => @resolution::int))))
+		FROM conv GROUP BY k`, momo.Named("from", f.From), momo.Named("to", f.To),
+		momo.Named("first_response", sla.FirstResponseSeconds), momo.Named("resolution", sla.ResolutionSeconds), momo.Named("tz", tz))
 	if err != nil {
 		return nil, err
 	}
@@ -231,10 +234,10 @@ func (s *Store) reportRows(ctx context.Context, f InboxReportFilter, by string, 
 	}
 	//nolint:gosec // G202: as above.
 	rows, err = s.db.QueryContext(ctx, `
-		SELECT `+strings.ReplaceAll(msgKey, "$5", "$3")+` AS k, count(*) FILTER (WHERE m.direction = 'in'), count(*) FILTER (WHERE m.direction = 'out')
+		SELECT `+msgKey+` AS k, count(*) FILTER (WHERE m.direction = 'in'), count(*) FILTER (WHERE m.direction = 'out')
 		FROM conversation_messages m JOIN conversations c ON c.id = m.conversation_id
-		WHERE m.kind = 'message' AND m.created_at >= $1 AND m.created_at < $2 AND c.status <> 'spam' AND $3::text IS NOT NULL
-		GROUP BY 1`, f.From, f.To, tz)
+		WHERE m.kind = 'message' AND m.created_at >= @from AND m.created_at < @to AND c.status <> 'spam' AND @tz::text IS NOT NULL
+		GROUP BY 1`, momo.Named("from", f.From), momo.Named("to", f.To), momo.Named("tz", tz))
 	if err != nil {
 		return nil, err
 	}
@@ -275,11 +278,11 @@ func (s *Store) labelReportRows(ctx context.Context, by string, rows []InboxRepo
 	var q, none string
 	switch by {
 	case ReportByChannel:
-		q, none = `SELECT name FROM msg_channels WHERE id = $1`, "Deleted channel"
+		q, none = `SELECT name FROM msg_channels WHERE id = @id`, "Deleted channel"
 	case ReportByQueue:
-		q, none = `SELECT name FROM queues WHERE id = $1`, "No queue"
+		q, none = `SELECT name FROM queues WHERE id = @id`, "No queue"
 	case ReportByAgent:
-		q, none = `SELECT coalesce(NULLIF(display_name, ''), username) FROM users WHERE id = $1`, "Unassigned"
+		q, none = `SELECT coalesce(NULLIF(display_name, ''), username) FROM users WHERE id = @id`, "Unassigned"
 	default:
 		for i := range rows {
 			rows[i].Label = rows[i].Key
@@ -293,7 +296,7 @@ func (s *Store) labelReportRows(ctx context.Context, by string, rows []InboxRepo
 			continue
 		}
 		var name string
-		switch err := s.db.QueryRowContext(ctx, q, id).Scan(&name); {
+		switch err := s.db.QueryRowContext(ctx, q, momo.Named("id", id)).Scan(&name); {
 		case errors.Is(err, sql.ErrNoRows):
 			rows[i].Label = "#" + rows[i].Key + " (deleted)"
 		case err != nil:

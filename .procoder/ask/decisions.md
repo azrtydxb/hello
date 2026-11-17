@@ -6603,3 +6603,46 @@ The old `($1 = 0 OR id < $1)` typed the paging cursor as integer, so a cursor id
   PruneAI's steps each bind `@cutoff`; `TestPruneAISends` runs it on the
   fake driver and checks every step reaches PostgreSQL with one argument and
   the usage step with its date.
+
+## momo Phase 3, domain 11: internal/store messaging inbox on @name (2026-11-17, momo/store-inbox)
+
+- **Scope.** `messaging_inbox.go`, `messaging_media.go`,
+  `messaging_privacy.go`, `messaging_deskphone.go` and
+  `messaging_reports.go` in `internal/store` bind by name: every `$n`
+  became `@name` with `momo.Named`, through the seam, with the SQL text,
+  `FOR UPDATE`, `FOR NO KEY UPDATE`, `SKIP LOCKED`, the inbox event lock
+  (`pg_advisory_xact_lock(@key)` with `inboxEventLock`, one bigint bind as
+  before), Scan targets and error handling unchanged. No schema change, no
+  migration.
+- **Privacy unchanged.** The DSAR export reads the same rows in the same
+  order, and the redaction blanks, deletes and detaches the same rows in
+  the same transaction, in the same lock order. FinishMediaFetch still
+  stores a file only on a row still on its message and returns
+  `media.ErrGone` otherwise. ClaimRedactions, ClaimMediaFetch and
+  ClaimInboxNotices keep their `FOR UPDATE SKIP LOCKED` claims.
+- **Casts.** A reused bind whose use cannot type itself carries the old
+  type: `@batch::text` (ClaimRedactions, RedactionCounts), `@state::text`
+  (FinishRedaction), `@actor::text` (SupervisorViews, and with
+  `@resource_id::text` in auditSupervisorView's `INSERT ... SELECT`),
+  `@status::text` (SetConversationStatus), `@address_suffix::text`
+  (the trunk ingest), `@like::text` (ListConversations' search), `@tz::text`
+  (the report's day grouping), and `@conversation_id::bigint` in
+  emitConversationEvent's select list. The "0 means no cursor" binds
+  (`@before` in ListConversationMessages and SupervisorViews) are cast to
+  bigint on both uses, as other converted files do; the old `$n = 0` typed
+  them integer, so the one difference is that a cursor past 2^31 now works
+  where it used to fail.
+- **Shared fragments.** `visible` is used by `messaging_calls.go` too, with
+  `poolMemberParam` from `messaging_route.go`, both still on `$n`. This
+  domain uses `visibleTo` and `poolMemberNamed`, the same text with
+  `@user_id` and `@all`; `TestVisibleToMatchesVisible` keeps the two forms
+  equal until those files move and the `$n` form goes. `queueRedactions` is
+  called from `messaging.go` (on `$n`) as well: it binds the batch as
+  `@batch` when its fragment's arguments are `momo.Named`, else as the next
+  `$n`, as before.
+- **Run-time statements.** ListConversations' WHERE fragments each carry
+  their `@name` and their Named; the report's grouping keys bind `@tz`
+  (the `strings.ReplaceAll` of `$5` is gone); exportMedia binds
+  `@peer_key`. `TestInboxRuntimeStatementsBuild` runs them, with the
+  export, nameBooks and queueRedactions, on a stub driver, so a misspelled
+  name fails on the pull request tier.
