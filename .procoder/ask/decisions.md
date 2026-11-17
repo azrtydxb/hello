@@ -6842,3 +6842,15 @@ and PostgreSQL's stored `col = ANY (ARRAY[...])` diff as equal but are not
   reproduction; Hello keeps its test-side normalisation until it is fixed.
   **Chosen by the user, 2026-11-18; filed as azrtydxb/momo#227.**
 - Don't file: keep the normalisation in Hello only.
+
+## File a momo issue: introspect.only still collects standalone sequences of unlisted tables (2026-11-18)
+
+Found while bumping to momo v0.16.0 (PR #405): with `introspect.only`
+naming the CRM tables, `--from-db` still declares `prov_redirect_jobs_seq`
+(the default of the unmodelled `prov_redirect_jobs.seq`) on the first
+model. Hello lists it under `introspect.skip` as a workaround.
+
+- File it upstream in azrtydxb/momo (Recommended): `only` should also scope
+  sequences to those the listed tables use.
+- Don't file: keep the `introspect.skip` entry; Phase 5 models the sequence
+  anyway.
