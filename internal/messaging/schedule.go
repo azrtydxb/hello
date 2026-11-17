@@ -58,7 +58,10 @@ type Schedule struct {
 }
 
 // ScheduleDay is one window: Day is 0 (Sunday) to 6, From and To are "HH:MM"
-// with From before To.
+// with From before To. The window opens at From and closes at To. A To of
+// "24:00" or "23:59" runs to midnight: a time field cannot say 24:00, so
+// "until 23:59" is how a console writes the rest of the day, and closing for
+// that day's last minute would turn a round-the-clock number away nightly.
 type ScheduleDay struct {
 	Day  int    `json:"day"`
 	From string `json:"from"`
@@ -84,7 +87,7 @@ func (s Schedule) Validate() error {
 			return errors.New("day must be 0 (Sunday) to 6")
 		}
 		from, ok1 := parseClock(d.From)
-		to, ok2 := parseClock(d.To)
+		to, ok2 := parseEnd(d.To)
 		if !ok1 || !ok2 || from >= to {
 			return errors.New("each window needs from and to as HH:MM, from before to")
 		}
@@ -103,12 +106,24 @@ func (s Schedule) Open(now time.Time) bool {
 	m := t.Hour()*60 + t.Minute()
 	for _, d := range s.Days {
 		from, _ := parseClock(d.From)
-		to, _ := parseClock(d.To)
+		to, _ := parseEnd(d.To)
 		if d.Day == int(t.Weekday()) && m >= from && m < to {
 			return true
 		}
 	}
 	return false
+}
+
+// endOfDay is midnight at the end of a day, in minutes.
+const endOfDay = 24 * 60
+
+// parseEnd parses a window's To: "HH:MM", or "24:00"; "23:59" and "24:00"
+// both mean midnight at the end of the day (see ScheduleDay).
+func parseEnd(s string) (int, bool) {
+	if s == "24:00" || s == "23:59" {
+		return endOfDay, true
+	}
+	return parseClock(s)
 }
 
 func parseClock(s string) (int, bool) {
