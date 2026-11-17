@@ -421,8 +421,18 @@ func TestVideoNegotiation(t *testing.T) {
 		if ms[1].Codecs()[0].PT != 98 {
 			t.Errorf("callee's H.264 is on pt %d, want the caller's 98", ms[1].Codecs()[0].PT)
 		}
+		// Only the codec and attribute lines can carry these: the ICE
+		// credentials and the fingerprint are random and may spell one.
+		var attrs []string
+		for _, l := range strings.Split(strings.ToLower(string(mustBuild(t, c.offerB))), "\n") {
+			for _, p := range []string{"a=rtpmap:", "a=fmtp:", "a=rtcp-fb:", "a=extmap"} {
+				if strings.HasPrefix(l, p) {
+					attrs = append(attrs, l)
+				}
+			}
+		}
 		for _, bad := range []string{"rtx", "ulpfec", "red", "extmap", "transport-cc"} {
-			if strings.Contains(strings.ToLower(string(mustBuild(t, c.offerB))), bad) {
+			if strings.Contains(strings.Join(attrs, "\n"), bad) {
 				t.Errorf("the offer to the callee contains %s", bad)
 			}
 		}
