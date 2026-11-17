@@ -6793,3 +6793,18 @@ passes.
   `trylock.go` (`TryLock`'s pinned connection, raw `database/sql`); `dbq.go`
   and `backup.go`'s goose read stay raw `database/sql` and bind nothing
   positional. Every other file is in `namedFiles`.
+
+## momo Phase 4: native pgxpool driver for the store (2026-11-17, momo/phase4-bench)
+
+- **Measured (PR #404, BenchmarkStoreDriver, CI bench job).** With cached
+  statements, native pgxpool is 5-16% faster per statement than
+  `FromSQLDB` (up to 31% under 4-way contention) and allocates about 40%
+  less on reads; in momo's default `QueryExecModeExec` it is 9-150% slower.
+  The saving is 7-100 µs on calls of 0.07-0.9 ms; hello-sip's CDR writer
+  already runs on pgxpool.
+- **Cost.** The directory Provisioner's `*sql.Tx` interface, 13 direct
+  `BeginTx` calls, `TryLock`'s pinned connection, `store.New` wiring and
+  the other `hellodb.New` users would all move.
+- **Proposed.** Skip Phase 4 as the plan's rule says (no user-visible
+  benefit); keep the benchmark. Pending the user's answer under "momo
+  Phase 4 go/no-go".
