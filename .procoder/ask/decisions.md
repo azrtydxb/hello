@@ -6809,3 +6809,26 @@ passes.
   store stays on `FromSQLDB` and `dbq`; PR #404 merges so
   `BenchmarkStoreDriver` keeps running in the dispatch-only bench job. A
   later switch must keep the cached-statement exec mode.
+
+## momo Phase 5: migration engine takeover inputs (2026-11-17, momo/phase5-decisions)
+
+- **Upstream gaps closed.** momo v0.16.0 (2026-11-16) closes G1
+  (azrtydxb/momo#205: `momo.sum` format 2, merged line by line with
+  `momo.sum merge=union`; independent branches validate, dependent ones fail
+  at validate; `migrate rebase --renumber`), G2 (#206: `c.CheckIn`, a
+  value-list CHECK diffed as a set, so adding a value is additive) and G12
+  (#207: `c.Sequence`, so `prov_redirect_jobs_seq` is modelled and the init
+  migration applies on an empty database). Hello bumps to v0.16.0 first.
+- **Proposed workflow.** Model-first after cutover: edit the model,
+  `momo generate`, `momo migrate diff <name>`, `validate` in CI; parallel
+  PRs rely on format 2 plus union merge, and a PR that loses the race runs
+  `momo migrate rebase --renumber`. Data steps are custom or Go migrations.
+  Additive CHECK lists use `c.CheckIn`.
+- **Proposed legacy retention.** Keep the frozen goose set
+  (`migrations/legacy/00001-00107`) and the takeover path for at least two
+  releases after the cutover, and until no pre-cutover backup is still
+  restorable under the backup retention.
+- **Migrator role.** Baseline needs `CREATE` on the database. Read-only
+  kubectl cannot show the privileges of the `hello-store` DSN's role on kw;
+  the user confirms them.
+- Pending the user's answers under "momo Phase 5 inputs".
