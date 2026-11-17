@@ -1,39 +1,37 @@
-# momo (github.com/azrtydxb/momo) settings for Hello's database layer.
+# momo (github.com/azrtydxb/momo) settings for Hello's database layer: the
+# models, the migrations and the engine hello-control runs.
 #
-# Goose stays the migration tool (migrations/, internal/migrate): this file
-# has no migrate section and momo applies no migration. momo is the query
-# layer only, adopted one package at a time (docs/database.md).
+# The models in internal/db/models declare the whole schema. A schema change
+# edits a model and generates a migration from it (docs/database.md,
+# "Changing the schema"), from the repository root, without a database:
 #
-# The models in internal/db/models are generated from a database that goose
-# migrated, for the tables listed in introspect.only. Regenerate them after a
-# goose migration that changes one of those tables (docs/database.md,
-# "Regenerating the models"):
+#   MOMO=github.com/azrtydxb/momo/cmd/momo@$(go list -m -f '{{.Version}}' github.com/azrtydxb/momo)
+#   go run "$MOMO" generate
+#   go run "$MOMO" migrate diff <name>
+#   go run "$MOMO" migrate validate
 #
-#   HELLO_MODELS_DATABASE_URL=postgres://...  # a database goose migrated to the latest version
-#   go run github.com/azrtydxb/momo/cmd/momo@v0.16.0 generate --from-db HELLO_MODELS_DATABASE_URL --no-snapshot --overwrite
-#   go run github.com/azrtydxb/momo/cmd/momo@v0.16.0 generate
-#
-# TestMomoModelsMatchSchema (test/integration) fails until they are current.
+# hello-control reads this file too (it is embedded, see momo.go at the
+# repository root), so the engine it runs and the CLI agree.
 version: 1
 packages:
   - ./internal/db/models
 dialects: [postgres]
+migrate:
+  dir:
+    postgres: migrations/postgres
+  # A DDL statement waits this long for its table lock, then the migration
+  # rolls back and the init container's retry loop runs it again.
+  lock_timeout: 30s
+  exclude:
+    # goose's history, left in place after the takeover from the frozen goose
+    # set (migrations/legacy), with its id sequence.
+    - goose_db_version
+    - goose_db_version_*
 introspect:
   package: models
   out: internal/db/models
-  # The modeled tables. Add a table here when its package moves to momo.
-  only:
-    - crm_connectors
-    - crm_connections
-    - crm_oauth_states
-    - crm_call_logs
-    - crm_user_map
-  # Objects to leave out of the models. only narrows the tables, but momo
-  # (v0.16.0+) still inspects every standalone sequence and declares it on the
-  # first model. These sequences belong to tables that have no model yet:
-  # remove one here when its table moves to momo.
   skip:
-    - prov_redirect_jobs_seq # prov_redirect_jobs.seq (migrations/00006_provisioning.sql)
+    - goose_db_version
   uuid: google
   # Every NOT NULL column with a default gets the dbdefault tag, so a model
   # insert leaves it to PostgreSQL; a non-zero constant default is a pointer
