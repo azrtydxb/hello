@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/router"
 	"github.com/azrtydxb/hello/internal/queue"
@@ -84,13 +86,13 @@ func (s *Store) ChatAuth(ctx context.Context, siteID int64, token string, ipHash
 	err := s.db.QueryRowContext(ctx, `
 		SELECT v.id, v.site_id, v.name, v.email, v.consent_to_store,
 			EXISTS (SELECT 1 FROM chat_blocks b WHERE b.site_id = v.site_id AND b.until > now()
-				AND (b.visitor_id = v.id OR (b.ip_hash IS NOT NULL AND b.ip_hash = $3::bytea)))
-		FROM chat_visitors v WHERE v.site_id = $1 AND v.token_hash = $2`,
-		siteID, chatTokenHash(token), ipHash).Scan(&v.ID, &v.SiteID, &v.Name, &v.Email, &v.Consent, &v.Blocked)
+				AND (b.visitor_id = v.id OR (b.ip_hash IS NOT NULL AND b.ip_hash = @ip_hash::bytea)))
+		FROM chat_visitors v WHERE v.site_id = @site_id AND v.token_hash = @token_hash`,
+		momo.Named("site_id", siteID), momo.Named("token_hash", chatTokenHash(token)), momo.Named("ip_hash", ipHash)).Scan(&v.ID, &v.SiteID, &v.Name, &v.Email, &v.Consent, &v.Blocked)
 	if err != nil {
 		return v, mapErr(err)
 	}
-	_, _ = s.db.ExecContext(ctx, `UPDATE chat_visitors SET last_seen = now() WHERE id = $1 AND last_seen < now() - interval '1 minute'`, v.ID)
+	_, _ = s.db.ExecContext(ctx, `UPDATE chat_visitors SET last_seen = now() WHERE id = @id AND last_seen < now() - interval '1 minute'`, momo.Named("id", v.ID))
 	return v, nil
 }
 
@@ -100,8 +102,8 @@ func (s *Store) ChatIPBlocked(ctx context.Context, siteID int64, ipHash []byte) 
 		return false, nil
 	}
 	var b bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM chat_blocks WHERE site_id = $1 AND until > now() AND ip_hash = $2::bytea)`,
-		siteID, ipHash).Scan(&b)
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM chat_blocks WHERE site_id = @site_id AND until > now() AND ip_hash = @ip_hash::bytea)`,
+		momo.Named("site_id", siteID), momo.Named("ip_hash", ipHash)).Scan(&b)
 	return b, err
 }
 
@@ -129,7 +131,7 @@ func (s *Store) ChatAvailability(ctx context.Context, site ChatSite, now time.Ti
 	var kind, target, sched, action, ahKind, ahTarget string
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT route_kind, route_target, schedule::text, after_hours_action, after_hours_route_kind, after_hours_route_target
-		FROM msg_addresses WHERE id = $1`, site.AddressID).Scan(&kind, &target, &sched, &action, &ahKind, &ahTarget); err != nil {
+		FROM msg_addresses WHERE id = @id`, momo.Named("id", site.AddressID)).Scan(&kind, &target, &sched, &action, &ahKind, &ahTarget); err != nil {
 		return false, "", mapErr(err)
 	}
 	var schedule messaging.Schedule
@@ -151,8 +153,8 @@ func (s *Store) ChatAvailability(ctx context.Context, site ChatSite, now time.Ti
 	}
 	var n int
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT count(*) FROM conversations WHERE channel_id = $1 AND assignee_user_id IS NULL
-			AND status IN ('open', 'pending') AND NOT offline`, site.ChannelID).Scan(&n); err != nil {
+		SELECT count(*) FROM conversations WHERE channel_id = @channel_id AND assignee_user_id IS NULL
+			AND status IN ('open', 'pending') AND NOT offline`, momo.Named("channel_id", site.ChannelID)).Scan(&n); err != nil {
 		return false, "", err
 	}
 	if n >= site.MaxOpenUnassigned {
@@ -172,7 +174,7 @@ func (s *Store) routeStaffed(ctx context.Context, kind, target string, states ma
 	switch {
 	case p.queue > 0:
 		var name string
-		if err := s.db.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = $1`, p.queue).Scan(&name); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = @id`, momo.Named("id", p.queue)).Scan(&name); err != nil {
 			return false, mapErr(err)
 		}
 		agents, err := routerStore{s}.Agents(ctx, p.queue)
@@ -182,15 +184,15 @@ func (s *Store) routeStaffed(ctx context.Context, kind, target string, states ma
 		return router.Staffed(router.Queue{ID: p.queue, Name: name}, agents, router.Availability{States: states}), nil
 	case p.user > 0:
 		err = s.db.QueryRowContext(ctx, `
-			SELECT EXISTS (SELECT 1 FROM inbox_presence WHERE user_id = $1 AND seen_at > now() - interval '2 minutes')`,
-			p.user).Scan(&present)
+			SELECT EXISTS (SELECT 1 FROM inbox_presence WHERE user_id = @user_id AND seen_at > now() - interval '2 minutes')`,
+			momo.Named("user_id", p.user)).Scan(&present)
 	case p.group > 0:
 		err = s.db.QueryRowContext(ctx, `
 			SELECT EXISTS (SELECT 1 FROM ring_group_members gm
 				JOIN user_extensions ue ON ue.extension_id = gm.extension_id
 				JOIN users u ON u.id = ue.user_id AND u.enabled AND u.role IN ('user', 'operator', 'admin')
 				JOIN inbox_presence p ON p.user_id = u.id AND p.seen_at > now() - interval '2 minutes'
-				WHERE gm.group_id = $1)`, p.group).Scan(&present)
+				WHERE gm.group_id = @group_id)`, momo.Named("group_id", p.group)).Scan(&present)
 	default:
 		err = s.db.QueryRowContext(ctx, `
 			SELECT EXISTS (SELECT 1 FROM inbox_presence p JOIN users u ON u.id = p.user_id
@@ -267,32 +269,35 @@ func (s *Store) ChatSession(ctx context.Context, in ChatSessionInput) (ChatSessi
 		}
 		if err := s.db.QueryRowContext(ctx, `
 			INSERT INTO chat_visitors (site_id, token_hash, name, email, consent_to_store, ip_hash, ua_family, page)
-			VALUES ($1, $2, $3, $4, $5, $6::bytea, $7, $8) RETURNING id`,
-			in.Site.ID, chatTokenHash(tok), in.Name, in.Email, in.Consent && (in.Name != "" || in.Email != ""), in.IPHash,
-			in.UAFamily, in.Page).Scan(&v.ID); err != nil {
+			VALUES (@site_id, @token_hash, @name, @email, @consent_to_store, @ip_hash::bytea, @ua_family, @page) RETURNING id`,
+			momo.Named("site_id", in.Site.ID), momo.Named("token_hash", chatTokenHash(tok)), momo.Named("name", in.Name),
+			momo.Named("email", in.Email), momo.Named("consent_to_store", in.Consent && (in.Name != "" || in.Email != "")),
+			momo.Named("ip_hash", in.IPHash), momo.Named("ua_family", in.UAFamily), momo.Named("page", in.Page)).Scan(&v.ID); err != nil {
 			return res, mapErr(err)
 		}
 		res.Token, res.Created = tok, true
 	} else if in.Name != "" || in.Email != "" {
 		if _, err := s.db.ExecContext(ctx, `
-			UPDATE chat_visitors SET name = CASE WHEN $2::text <> '' THEN $2::text ELSE name END,
-				email = CASE WHEN $3::text <> '' THEN $3::text ELSE email END,
-				consent_to_store = consent_to_store OR $4::boolean, ip_hash = coalesce($5::bytea, ip_hash), last_seen = now()
-			WHERE id = $1`, v.ID, in.Name, in.Email, in.Consent, in.IPHash); err != nil {
+			UPDATE chat_visitors SET name = CASE WHEN @name::text <> '' THEN @name::text ELSE name END,
+				email = CASE WHEN @email::text <> '' THEN @email::text ELSE email END,
+				consent_to_store = consent_to_store OR @consent::boolean, ip_hash = coalesce(@ip_hash::bytea, ip_hash), last_seen = now()
+			WHERE id = @id`, momo.Named("id", v.ID), momo.Named("name", in.Name), momo.Named("email", in.Email),
+			momo.Named("consent", in.Consent), momo.Named("ip_hash", in.IPHash)); err != nil {
 			return res, err
 		}
 	}
 	res.VisitorID = v.ID
 	var conv int64
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id FROM conversations WHERE address_id = $1 AND peer_key = $2 AND status NOT IN ('resolved', 'spam')`,
-		in.Site.AddressID, chatPeerKey(v.ID)).Scan(&conv)
+		SELECT id FROM conversations WHERE address_id = @address_id AND peer_key = @peer_key AND status NOT IN ('resolved', 'spam')`,
+		momo.Named("address_id", in.Site.AddressID), momo.Named("peer_key", chatPeerKey(v.ID))).Scan(&conv)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return res, err
 	}
 	res.ConversationID = conv
 	if conv != 0 && in.Name != "" {
-		_, _ = s.db.ExecContext(ctx, `UPDATE conversations SET peer_name = $2, peer_name_source = 'visitor' WHERE id = $1 AND peer_name = ''`, conv, in.Name)
+		_, _ = s.db.ExecContext(ctx, `UPDATE conversations SET peer_name = @peer_name, peer_name_source = 'visitor' WHERE id = @id AND peer_name = ''`,
+			momo.Named("id", conv), momo.Named("peer_name", in.Name))
 	}
 	return res, nil
 }
@@ -343,13 +348,13 @@ func (s *Store) chatSend(ctx context.Context, tx *dbTx, in ChatSendInput, res *C
 	var name, email string
 	// Locking the visitor serialises one visitor's messages, so the single
 	// open conversation and the caps are exact.
-	if err := tx.QueryRowContext(ctx, `SELECT name, email FROM chat_visitors WHERE id = $1 AND site_id = $2 FOR UPDATE`,
-		in.VisitorID, in.Site.ID).Scan(&name, &email); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT name, email FROM chat_visitors WHERE id = @id AND site_id = @site_id FOR UPDATE`,
+		momo.Named("id", in.VisitorID), momo.Named("site_id", in.Site.ID)).Scan(&name, &email); err != nil {
 		return err
 	}
 	var on bool
-	if err := tx.QueryRowContext(ctx, `SELECT c.enabled AND a.enabled FROM msg_channels c, msg_addresses a WHERE c.id = $1 AND a.id = $2`,
-		in.Site.ChannelID, in.Site.AddressID).Scan(&on); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT c.enabled AND a.enabled FROM msg_channels c, msg_addresses a WHERE c.id = @channel_id AND a.id = @address_id`,
+		momo.Named("channel_id", in.Site.ChannelID), momo.Named("address_id", in.Site.AddressID)).Scan(&on); err != nil {
 		return err
 	}
 	if !on {
@@ -357,8 +362,8 @@ func (s *Store) chatSend(ctx context.Context, tx *dbTx, in ChatSendInput, res *C
 	}
 	peer := chatPeerKey(in.VisitorID)
 	var spam bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE address_id = $1 AND peer_key = $2 AND status = 'spam')`,
-		in.Site.AddressID, peer).Scan(&spam); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE address_id = @address_id AND peer_key = @peer_key AND status = 'spam')`,
+		momo.Named("address_id", in.Site.AddressID), momo.Named("peer_key", peer)).Scan(&spam); err != nil {
 		return err
 	}
 	if spam {
@@ -370,18 +375,18 @@ func (s *Store) chatSend(ctx context.Context, tx *dbTx, in ChatSendInput, res *C
 		newConv    bool
 		reopenDays int
 	)
-	err := tx.QueryRowContext(ctx, `SELECT id FROM conversations WHERE address_id = $1 AND peer_key = $2 AND status NOT IN ('resolved', 'spam') FOR UPDATE`,
-		in.Site.AddressID, peer).Scan(&conv)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM conversations WHERE address_id = @address_id AND peer_key = @peer_key AND status NOT IN ('resolved', 'spam') FOR UPDATE`,
+		momo.Named("address_id", in.Site.AddressID), momo.Named("peer_key", peer)).Scan(&conv)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.QueryRowContext(ctx, `SELECT reopen_days FROM messaging_settings`).Scan(&reopenDays); err != nil {
 			return err
 		}
 		err = tx.QueryRowContext(ctx, `
-			SELECT id FROM conversations WHERE address_id = $1 AND peer_key = $2 AND status = 'resolved'
-				AND last_message_at > now() - make_interval(days => $3) ORDER BY last_message_at DESC, id DESC LIMIT 1 FOR UPDATE`,
-			in.Site.AddressID, peer, reopenDays).Scan(&conv)
+			SELECT id FROM conversations WHERE address_id = @address_id AND peer_key = @peer_key AND status = 'resolved'
+				AND last_message_at > now() - make_interval(days => @reopen_days) ORDER BY last_message_at DESC, id DESC LIMIT 1 FOR UPDATE`,
+			momo.Named("address_id", in.Site.AddressID), momo.Named("peer_key", peer), momo.Named("reopen_days", reopenDays)).Scan(&conv)
 		if err == nil {
-			if _, err := tx.ExecContext(ctx, `UPDATE conversations SET status = 'open', resolved_at = NULL WHERE id = $1`, conv); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE conversations SET status = 'open', resolved_at = NULL WHERE id = @id`, momo.Named("id", conv)); err != nil {
 				return err
 			}
 		}
@@ -397,8 +402,8 @@ func (s *Store) chatSend(ctx context.Context, tx *dbTx, in ChatSendInput, res *C
 		if !in.Offline {
 			var n int
 			if err := tx.QueryRowContext(ctx, `
-				SELECT count(*) FROM conversations WHERE channel_id = $1 AND assignee_user_id IS NULL
-					AND status IN ('open', 'pending') AND NOT offline`, in.Site.ChannelID).Scan(&n); err != nil {
+				SELECT count(*) FROM conversations WHERE channel_id = @channel_id AND assignee_user_id IS NULL
+					AND status IN ('open', 'pending') AND NOT offline`, momo.Named("channel_id", in.Site.ChannelID)).Scan(&n); err != nil {
 				return err
 			}
 			if n >= in.Site.MaxOpenUnassigned {
@@ -411,8 +416,9 @@ func (s *Store) chatSend(ctx context.Context, tx *dbTx, in ChatSendInput, res *C
 		}
 		err = tx.QueryRowContext(ctx, `
 			INSERT INTO conversations (channel_id, address_id, peer_key, peer_kind, peer_name, peer_name_source, offline)
-			VALUES ($1, $2, $3, 'visitor', $4, $5, $6) RETURNING id`,
-			in.Site.ChannelID, in.Site.AddressID, peer, name, src, in.Offline).Scan(&conv)
+			VALUES (@channel_id, @address_id, @peer_key, 'visitor', @peer_name, @peer_name_source, @offline) RETURNING id`,
+			momo.Named("channel_id", in.Site.ChannelID), momo.Named("address_id", in.Site.AddressID), momo.Named("peer_key", peer),
+			momo.Named("peer_name", name), momo.Named("peer_name_source", src), momo.Named("offline", in.Offline)).Scan(&conv)
 		newConv = true
 	}
 	if err != nil {
@@ -421,10 +427,10 @@ func (s *Store) chatSend(ctx context.Context, tx *dbTx, in ChatSendInput, res *C
 	res.ConversationID = conv
 	var unanswered int
 	if err := tx.QueryRowContext(ctx, `
-		SELECT count(*) FROM conversation_messages m WHERE m.conversation_id = $1 AND m.direction = 'in' AND m.kind = 'message'
+		SELECT count(*) FROM conversation_messages m WHERE m.conversation_id = @conversation_id AND m.direction = 'in' AND m.kind = 'message'
 			AND m.id > coalesce((SELECT max(o.id) FROM conversation_messages o
-				WHERE o.conversation_id = $1 AND o.direction = 'out' AND o.kind = 'message' AND o.sender_kind <> 'system'), 0)`,
-		conv).Scan(&unanswered); err != nil {
+				WHERE o.conversation_id = @conversation_id AND o.direction = 'out' AND o.kind = 'message' AND o.sender_kind <> 'system'), 0)`,
+		momo.Named("conversation_id", conv)).Scan(&unanswered); err != nil {
 		return err
 	}
 	if unanswered >= messaging.MaxChatUnanswered {
@@ -437,13 +443,14 @@ func (s *Store) chatSend(ctx context.Context, tx *dbTx, in ChatSendInput, res *C
 	var msgID int64
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status, client_msg_id)
-		VALUES ($1, $2, 'in', 'message', 'customer', $3, $4, 'delivered', $5)
+		VALUES (@conversation_id, @channel_id, 'in', 'message', 'customer', @sender_name, @body, 'delivered', @client_msg_id)
 		ON CONFLICT (conversation_id, client_msg_id) DO NOTHING RETURNING id`,
-		conv, in.Site.ChannelID, sender, in.Text, in.ClientMsgID).Scan(&msgID)
+		momo.Named("conversation_id", conv), momo.Named("channel_id", in.Site.ChannelID), momo.Named("sender_name", sender),
+		momo.Named("body", in.Text), momo.Named("client_msg_id", in.ClientMsgID)).Scan(&msgID)
 	if errors.Is(err, sql.ErrNoRows) {
 		res.Duplicate = true
-		return tx.QueryRowContext(ctx, `SELECT id FROM conversation_messages WHERE conversation_id = $1 AND client_msg_id = $2`,
-			conv, in.ClientMsgID).Scan(&res.MessageID)
+		return tx.QueryRowContext(ctx, `SELECT id FROM conversation_messages WHERE conversation_id = @conversation_id AND client_msg_id = @client_msg_id`,
+			momo.Named("conversation_id", conv), momo.Named("client_msg_id", in.ClientMsgID)).Scan(&res.MessageID)
 	}
 	if err != nil {
 		return err
@@ -453,12 +460,12 @@ func (s *Store) chatSend(ctx context.Context, tx *dbTx, in ChatSendInput, res *C
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE conversations SET last_message_id = $2, last_message_at = now(), last_inbound_at = now(),
+		UPDATE conversations SET last_message_id = @last_message_id, last_message_at = now(), last_inbound_at = now(),
 			status = CASE WHEN status IN ('pending', 'snoozed') THEN 'open' ELSE status END, snoozed_until = NULL
-		WHERE id = $1`, conv, msgID); err != nil {
+		WHERE id = @id`, momo.Named("id", conv), momo.Named("last_message_id", msgID)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE msg_channels SET last_event_at = now() WHERE id = $1`, in.Site.ChannelID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE msg_channels SET last_event_at = now() WHERE id = @id`, momo.Named("id", in.Site.ChannelID)); err != nil {
 		return err
 	}
 	if err := queueAITriage(ctx, tx, conv, in.Site.AddressID, msgID); err != nil {
@@ -521,7 +528,7 @@ func loadChatAttachments(ctx context.Context, q dbQuery, lines []*ChatLine) erro
 		at[l.ID] = append(at[l.ID], l)
 	}
 	rows, err := q.QueryContext(ctx, `SELECT message_id, id, filename, content_type, size, status FROM message_media
-		WHERE message_id = ANY($1::bigint[]) ORDER BY id`, ids)
+		WHERE message_id = ANY(@ids::bigint[]) ORDER BY id`, momo.Named("ids", ids))
 	if err != nil {
 		return err
 	}
@@ -549,8 +556,8 @@ func (s *Store) ChatHistory(ctx context.Context, visitorID, after int64, limit i
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT m.id, m.direction, m.body, m.created_at FROM conversation_messages m
 		JOIN conversations c ON c.id = m.conversation_id
-		WHERE c.peer_kind = 'visitor' AND c.peer_key = $1 AND m.kind = 'message' AND m.status IN ('sent', 'delivered', 'read') AND m.id > $2
-		ORDER BY m.id DESC LIMIT $3`, chatPeerKey(visitorID), after, limit)
+		WHERE c.peer_kind = 'visitor' AND c.peer_key = @peer_key AND m.kind = 'message' AND m.status IN ('sent', 'delivered', 'read') AND m.id > @after
+		ORDER BY m.id DESC LIMIT @limit`, momo.Named("peer_key", chatPeerKey(visitorID)), momo.Named("after", after), momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
@@ -602,7 +609,8 @@ func (s *Store) ChatEvents(ctx context.Context, visitorID, after int64, limit in
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT e.id, e.type, coalesce(m.id, 0), coalesce(m.direction, ''), coalesce(m.body, ''), coalesce(m.created_at, e.at)
 		FROM chat_events e LEFT JOIN conversation_messages m ON m.id = e.message_id AND m.kind = 'message'
-		WHERE e.visitor_id = $1 AND e.id > $2 ORDER BY e.id LIMIT $3`, visitorID, after, limit)
+		WHERE e.visitor_id = @visitor_id AND e.id > @after ORDER BY e.id LIMIT @limit`,
+		momo.Named("visitor_id", visitorID), momo.Named("after", after), momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
@@ -648,14 +656,14 @@ func (s *Store) ChatEvents(ctx context.Context, visitorID, after int64, limit in
 // ChatLatestEventID is the newest event id of a visitor (0 for none).
 func (s *Store) ChatLatestEventID(ctx context.Context, visitorID int64) (int64, error) {
 	var id int64
-	err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM chat_events WHERE visitor_id = $1`, visitorID).Scan(&id)
+	err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM chat_events WHERE visitor_id = @visitor_id`, momo.Named("visitor_id", visitorID)).Scan(&id)
 	return id, err
 }
 
 // chatEvent tells the visitor of conversation convID something happened.
 // It does nothing for a conversation that is not a chat.
 func chatEvent(ctx context.Context, tx *dbTx, convID, msgID int64, typ string) error {
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(chatEventLock)); err != nil {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(chatEventLock))); err != nil {
 		return err
 	}
 	var msg any
@@ -664,9 +672,9 @@ func chatEvent(ctx context.Context, tx *dbTx, convID, msgID int64, typ string) e
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO chat_events (visitor_id, type, message_id)
-		SELECT v.id, $2, $3::bigint FROM conversations c
+		SELECT v.id, @type, @message_id::bigint FROM conversations c
 		JOIN chat_visitors v ON v.id = `+visitorOfPeer+`
-		WHERE c.id = $1`, convID, typ, msg)
+		WHERE c.id = @id`, momo.Named("id", convID), momo.Named("type", typ), momo.Named("message_id", msg))
 	return err
 }
 
@@ -675,8 +683,8 @@ func chatEvent(ctx context.Context, tx *dbTx, convID, msgID int64, typ string) e
 func openChatConversation(ctx context.Context, tx *dbTx, siteAddress, visitorID int64) (int64, error) {
 	var conv int64
 	err := tx.QueryRowContext(ctx, `
-		SELECT id FROM conversations WHERE address_id = $1 AND peer_key = $2 AND status NOT IN ('resolved', 'spam') FOR UPDATE`,
-		siteAddress, chatPeerKey(visitorID)).Scan(&conv)
+		SELECT id FROM conversations WHERE address_id = @address_id AND peer_key = @peer_key AND status NOT IN ('resolved', 'spam') FOR UPDATE`,
+		momo.Named("address_id", siteAddress), momo.Named("peer_key", chatPeerKey(visitorID))).Scan(&conv)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
@@ -705,7 +713,8 @@ func (s *Store) ChatEnd(ctx context.Context, site ChatSite, visitorID int64) err
 		if err != nil || conv == 0 {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET status = 'resolved', resolved_at = now(), snoozed_until = NULL WHERE id = $1`, conv); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET status = 'resolved', resolved_at = now(), snoozed_until = NULL WHERE id = @id`,
+			momo.Named("id", conv)); err != nil {
 			return err
 		}
 		row := convRow{ID: conv, ChannelID: site.ChannelID, AddressID: site.AddressID, PeerKey: chatPeerKey(visitorID)}
@@ -730,7 +739,7 @@ func (s *Store) ChatEnd(ctx context.Context, site ChatSite, visitorID int64) err
 // ChatTranscript returns the address the visitor gave and everything of
 // their chats the visitor can see.
 func (s *Store) ChatTranscript(ctx context.Context, visitorID int64) (email string, lines []ChatLine, err error) {
-	if err := s.db.QueryRowContext(ctx, `SELECT email FROM chat_visitors WHERE id = $1`, visitorID).Scan(&email); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT email FROM chat_visitors WHERE id = @id`, momo.Named("id", visitorID)).Scan(&email); err != nil {
 		return "", nil, mapErr(err)
 	}
 	lines, err = s.ChatHistory(ctx, visitorID, 0, 500)
@@ -757,7 +766,7 @@ func (s *Store) chatInfo(ctx context.Context, convID int64) (*ChatInfo, error) {
 			EXISTS (SELECT 1 FROM chat_blocks b WHERE b.visitor_id = v.id AND b.until > now())
 		FROM conversations c JOIN chat_sites cs ON cs.channel_id = c.channel_id
 		LEFT JOIN chat_visitors v ON v.id = `+visitorOfPeer+`
-		WHERE c.id = $1`, convID).Scan(&ci.SiteID, &ci.Offline, &ci.Email, &ci.Page, &ci.Browser, &ci.Blocked)
+		WHERE c.id = @id`, momo.Named("id", convID)).Scan(&ci.SiteID, &ci.Offline, &ci.Email, &ci.Page, &ci.Browser, &ci.Blocked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -779,24 +788,27 @@ func insertAgentReply(ctx context.Context, tx *dbTx, c convRow, acc InboxAccess,
 	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_user_id,
 			sender_name, body, status, client_msg_id, sent_at)
-		VALUES ($1, $2, 'out', 'message', 'user', $3, $4, $5, $6::text, $7, CASE WHEN $6::text = 'sent' THEN now() END) RETURNING id`,
-		c.ID, c.ChannelID, acc.UserID, acc.Name, body, status, clientID).Scan(&id); err != nil {
+		VALUES (@conversation_id, @channel_id, 'out', 'message', 'user', @sender_user_id, @sender_name, @body, @status::text,
+			@client_msg_id, CASE WHEN @status::text = 'sent' THEN now() END) RETURNING id`,
+		momo.Named("conversation_id", c.ID), momo.Named("channel_id", c.ChannelID), momo.Named("sender_user_id", acc.UserID),
+		momo.Named("sender_name", acc.Name), momo.Named("body", body), momo.Named("status", status),
+		momo.Named("client_msg_id", clientID)).Scan(&id); err != nil {
 		return 0, err
 	}
 	claimed := !c.Assignee.Valid
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE conversations SET last_message_id = $2, last_message_at = now(),
-			assignee_user_id = coalesce(assignee_user_id, $3),
+		UPDATE conversations SET last_message_id = @last_message_id, last_message_at = now(),
+			assignee_user_id = coalesce(assignee_user_id, @user_id),
 			first_response_at = coalesce(first_response_at, now()),
 			status = CASE WHEN status IN ('resolved', 'snoozed') THEN 'open' ELSE status END,
 			resolved_at = CASE WHEN status = 'resolved' THEN NULL ELSE resolved_at END,
 			snoozed_until = NULL
-		WHERE id = $1`, c.ID, id, acc.UserID); err != nil {
+		WHERE id = @id`, momo.Named("id", c.ID), momo.Named("last_message_id", id), momo.Named("user_id", acc.UserID)); err != nil {
 		return 0, err
 	}
 	if claimed {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES ($1, $2, 'reply')`,
-			c.ID, acc.UserID); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES (@conversation_id, @to_user_id, 'reply')`,
+			momo.Named("conversation_id", c.ID), momo.Named("to_user_id", acc.UserID)); err != nil {
 			return 0, err
 		}
 	}
@@ -822,7 +834,7 @@ func (s *Store) chatAgentReply(ctx context.Context, tx *dbTx, c convRow, acc Inb
 	if err := chatEvent(ctx, tx, c.ID, id, "message"); err != nil {
 		return ConvMessage{}, err
 	}
-	m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = $1`, id))
+	m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = @id`, momo.Named("id", id)))
 	if err != nil {
 		return m, err
 	}
@@ -841,20 +853,20 @@ func (s *Store) ChatAgentTyping(ctx context.Context, acc InboxAccess, convID int
 			return err
 		}
 		var chat bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM chat_sites WHERE channel_id = $1)`, c.ChannelID).Scan(&chat); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM chat_sites WHERE channel_id = @channel_id)`, momo.Named("channel_id", c.ChannelID)).Scan(&chat); err != nil {
 			return err
 		}
 		if !chat {
 			return ErrNotChat
 		}
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(chatEventLock)); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(chatEventLock))); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO chat_events (visitor_id, type)
 			SELECT v.id, 'typing' FROM conversations c JOIN chat_visitors v ON v.id = `+visitorOfPeer+`
-			WHERE c.id = $1 AND NOT EXISTS (SELECT 1 FROM chat_events e WHERE e.visitor_id = v.id AND e.type = 'typing'
-				AND e.at > now() - interval '3 seconds')`, c.ID)
+			WHERE c.id = @id AND NOT EXISTS (SELECT 1 FROM chat_events e WHERE e.visitor_id = v.id AND e.type = 'typing'
+				AND e.at > now() - interval '3 seconds')`, momo.Named("id", c.ID))
 		return err
 	})
 }
@@ -879,7 +891,7 @@ func (s *Store) BlockChatVisitor(ctx context.Context, acc InboxAccess, convID in
 			SELECT cs.id, v.id, v.ip_hash, v.last_seen FROM conversations c
 			JOIN chat_sites cs ON cs.channel_id = c.channel_id
 			JOIN chat_visitors v ON v.id = `+visitorOfPeer+`
-			WHERE c.id = $1`, c.ID).Scan(&siteID, &visitorID, &ipHash, &seen)
+			WHERE c.id = @id`, momo.Named("id", c.ID)).Scan(&siteID, &visitorID, &ipHash, &seen)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotChat
 		}
@@ -889,8 +901,8 @@ func (s *Store) BlockChatVisitor(ctx context.Context, acc InboxAccess, convID in
 		now := time.Now().UTC()
 		until := now.Add(ttl)
 		if err := tx.QueryRowContext(ctx, `
-			INSERT INTO chat_blocks (site_id, visitor_id, until, by_user_id) VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
-			siteID, visitorID, until, acc.UserID).Scan(&out.ID, &out.CreatedAt); err != nil {
+			INSERT INTO chat_blocks (site_id, visitor_id, until, by_user_id) VALUES (@site_id, @visitor_id, @until, @by_user_id) RETURNING id, created_at`,
+			momo.Named("site_id", siteID), momo.Named("visitor_id", visitorID), momo.Named("until", until), momo.Named("by_user_id", acc.UserID)).Scan(&out.ID, &out.CreatedAt); err != nil {
 			return err
 		}
 		out.SiteID, out.VisitorID, out.Until = siteID, &visitorID, until
@@ -900,14 +912,15 @@ func (s *Store) BlockChatVisitor(ctx context.Context, acc InboxAccess, convID in
 			if until.Before(ipUntil) {
 				ipUntil = until
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO chat_blocks (site_id, ip_hash, until, by_user_id) VALUES ($1, $2, $3, $4)`,
-				siteID, ipHash, ipUntil, acc.UserID); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO chat_blocks (site_id, ip_hash, until, by_user_id) VALUES (@site_id, @ip_hash, @until, @by_user_id)`,
+				momo.Named("site_id", siteID), momo.Named("ip_hash", ipHash), momo.Named("until", ipUntil), momo.Named("by_user_id", acc.UserID)); err != nil {
 				return err
 			}
 			out.ByIP = true
 		}
 		if c.Status != messaging.StatusResolved {
-			if _, err := tx.ExecContext(ctx, `UPDATE conversations SET status = 'resolved', resolved_at = now(), snoozed_until = NULL WHERE id = $1`, c.ID); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE conversations SET status = 'resolved', resolved_at = now(), snoozed_until = NULL WHERE id = @id`,
+				momo.Named("id", c.ID)); err != nil {
 				return err
 			}
 			if _, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", acc.Name+" blocked the visitor"); err != nil {
@@ -954,7 +967,7 @@ func (s *Store) PrepareChatEmailReply(ctx context.Context, acc InboxAccess, in S
 			FROM conversations cv JOIN chat_sites cs ON cs.channel_id = cv.channel_id
 			JOIN msg_channels ch ON ch.id = cv.channel_id
 			LEFT JOIN chat_visitors v ON v.id = CASE WHEN cv.peer_kind = 'visitor' THEN substr(cv.peer_key, 9)::bigint END
-			WHERE cv.id = $1`, c.ID).Scan(&offline, &email, &siteName, &chEnable)
+			WHERE cv.id = @id`, momo.Named("id", c.ID)).Scan(&offline, &email, &siteName, &chEnable)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotChat
 		}
@@ -963,7 +976,8 @@ func (s *Store) PrepareChatEmailReply(ctx context.Context, acc InboxAccess, in S
 		}
 		if in.ClientMsgID != "" {
 			m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+`
-				FROM conversation_messages WHERE conversation_id = $1 AND client_msg_id = $2`, c.ID, in.ClientMsgID))
+				FROM conversation_messages WHERE conversation_id = @conversation_id AND client_msg_id = @client_msg_id`,
+				momo.Named("conversation_id", c.ID), momo.Named("client_msg_id", in.ClientMsgID)))
 			if err == nil {
 				rep = ChatEmailReply{Message: m, To: email, SiteName: siteName}
 				return nil
@@ -985,7 +999,7 @@ func (s *Store) PrepareChatEmailReply(ctx context.Context, acc InboxAccess, in S
 		if err != nil {
 			return err
 		}
-		m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = $1`, id))
+		m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = @id`, momo.Named("id", id)))
 		if err != nil {
 			return err
 		}
@@ -1006,8 +1020,10 @@ func (s *Store) FinishChatEmailReply(ctx context.Context, msgID int64, sent bool
 			status, code = messaging.DeliveryFailed, "email_failed"
 		}
 		err := tx.QueryRowContext(ctx, `
-			UPDATE conversation_messages SET status = $2::text, error_code = $3::text, sent_at = CASE WHEN $2::text = 'sent' THEN now() ELSE sent_at END
-			WHERE id = $1 AND status = 'sending' RETURNING conversation_id`, msgID, status, code).Scan(&conv)
+			UPDATE conversation_messages SET status = @status::text, error_code = @error_code::text,
+				sent_at = CASE WHEN @status::text = 'sent' THEN now() ELSE sent_at END
+			WHERE id = @id AND status = 'sending' RETURNING conversation_id`,
+			momo.Named("id", msgID), momo.Named("status", status), momo.Named("error_code", code)).Scan(&conv)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

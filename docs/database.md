@@ -34,6 +34,7 @@ Moved so far:
   - AI: `messaging_ai.go`, `ai_core.go`, `ai_sessions.go`, `ai_findings.go` (`TryLock` moved to `trylock.go`, which stays raw and keeps its `$1`)
   - messaging inbox: `messaging_inbox.go`, `messaging_media.go`, `messaging_privacy.go`, `messaging_deskphone.go`, `messaging_reports.go`
   - messaging core: `messages.go`, `messaging.go`, `messaging_route.go`, `messaging_route_views.go`, `messaging_carrier.go`, `messaging_events.go`, and `messaging_calls.go` but for its visibility read, which joins the inbox's `visible` condition and binds `$n` until the inbox moves; ErasePeer's select for `queueRedactions` (privacy) binds `$1` as that helper numbers after it
+  - webchat: `webchat.go`, `webchat_sites.go`
 - `internal/store`, at its seam, with the files of the core and
   configuration domain converted to `@name` binds: `store.go`, `batch.go`,
   `config.go`, `dialspace.go`, `dirprovision.go` and `flow_canvas.go`, and

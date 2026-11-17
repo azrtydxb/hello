@@ -6738,3 +6738,27 @@ passes.
   `replaceCaller` (`WriteResponse`) sees that case. The new test,
   `TestReplacesAcrossNodesAnswerFails`, holds the answer on the second
   node until the phone has cancelled and fails without the count.
+
+## momo Phase 3, domain 12: internal/store webchat on @name (2026-11-17, momo/store-webchat)
+
+- **Scope.** `webchat.go` and `webchat_sites.go` in `internal/store` bind
+  by name: every `$n` became `@name` with `momo.Named`, through the seam,
+  with the SQL text, `FOR UPDATE`, Scan targets, `mapErr` and the no-row
+  checks unchanged. No schema change, no migration, `go.mod` and
+  `internal/db` unchanged.
+- **Public visitor paths unchanged.** The visitor token is still bound as
+  its SHA-256 (`@token_hash`), the day's address hash as `@ip_hash::bytea`,
+  and the block checks, the unanswered-message cap, the site's
+  `max_open_unassigned` count and the reopen window
+  (`make_interval(days => @reopen_days)`) are the same SQL. The site
+  origins are still bound as `@allowed_origins::text[]`, and the Turnstile
+  secret is sealed and bound as before. Nothing logs an argument value.
+- **No casts added.** The reused binds were already cast
+  (ChatSession's `@name::text` and `@email::text`, insertAgentReply's and
+  FinishChatEmailReply's `@status::text`) or are typed by their columns on
+  every use (CreateChatSite's `@address` for `address` and `address_key`,
+  both TEXT; chatSend's `@conversation_id`, BIGINT on both sides).
+- **Chat event lock key unchanged.** chatEvent and ChatAgentTyping send
+  `SELECT pg_advisory_xact_lock(@key)` with `int64(chatEventLock)`, one
+  bigint bind as before.
+- **maintainChat's three deletes** take no arguments and are unchanged.
