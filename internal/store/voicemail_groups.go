@@ -11,6 +11,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // Voicemail group limits (spec D12).
@@ -80,7 +82,7 @@ func listVoicemailGroups(ctx context.Context, q querier, where string, args ...a
 		byID[out[i].ID] = &out[i]
 	}
 	mrows, err := q.QueryContext(ctx, `SELECT m.group_id, m.extension_id, e.number, e.name FROM voicemail_group_members m
-		JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = ANY($1) ORDER BY m.group_id, e.number`, ids)
+		JOIN extensions e ON e.id = m.extension_id WHERE m.group_id = ANY(@ids) ORDER BY m.group_id, e.number`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +105,7 @@ func (s *Store) ListVoicemailGroups(ctx context.Context) ([]VoicemailGroup, erro
 
 // GetVoicemailGroup returns one voicemail group.
 func (s *Store) GetVoicemailGroup(ctx context.Context, id int64) (VoicemailGroup, error) {
-	gs, err := listVoicemailGroups(ctx, s.db, `WHERE g.id = $1`, id)
+	gs, err := listVoicemailGroups(ctx, s.db, `WHERE g.id = @id`, momo.Named("id", id))
 	if err != nil {
 		return VoicemailGroup{}, err
 	}
@@ -119,17 +121,17 @@ func writeVoicemailGroupMembers(ctx context.Context, tx *dbTx, id int64, members
 	if len(members) > MaxVoicemailGroupMembers {
 		return fieldError("members", fmt.Sprintf("at most %d members", MaxVoicemailGroupMembers))
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM voicemail_group_members WHERE group_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM voicemail_group_members WHERE group_id = @group_id`, momo.Named("group_id", id)); err != nil {
 		return err
 	}
 	for _, ext := range members {
 		var boxes int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM voicemail_boxes WHERE extension_id = $1`, ext).Scan(&boxes); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM voicemail_boxes WHERE extension_id = @extension_id`, momo.Named("extension_id", ext)).Scan(&boxes); err != nil {
 			return err
 		}
 		if boxes == 0 {
 			var n int
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM extensions WHERE id = $1`, ext).Scan(&n); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM extensions WHERE id = @id`, momo.Named("id", ext)).Scan(&n); err != nil {
 				return err
 			}
 			if n == 0 {
@@ -137,7 +139,8 @@ func writeVoicemailGroupMembers(ctx context.Context, tx *dbTx, id int64, members
 			}
 			return fieldError("members", fmt.Sprintf("extension %d has no voicemail box", ext))
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO voicemail_group_members (group_id, extension_id) VALUES ($1, $2)`, id, ext); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO voicemail_group_members (group_id, extension_id) VALUES (@group_id, @extension_id)`,
+			momo.Named("group_id", id), momo.Named("extension_id", ext)); err != nil {
 			return pagingFK(err, "members")
 		}
 	}
@@ -160,13 +163,14 @@ func (s *Store) CreateVoicemailGroup(ctx context.Context, actor string, in Voice
 		}
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO voicemail_groups (number, name, enabled, max_seconds)
-			VALUES ($1, $2, $3, $4) RETURNING id`, in.Number, in.Name, in.Enabled, in.MaxSeconds).Scan(&id); err != nil {
+			VALUES (@number, @name, @enabled, @max_seconds) RETURNING id`,
+			momo.Named("number", in.Number), momo.Named("name", in.Name), momo.Named("enabled", in.Enabled), momo.Named("max_seconds", in.MaxSeconds)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := writeVoicemailGroupMembers(ctx, tx, id, in.Members); err != nil {
 			return id, err
 		}
-		gs, err := listVoicemailGroups(ctx, tx, `WHERE g.id = $1`, id)
+		gs, err := listVoicemailGroups(ctx, tx, `WHERE g.id = @id`, momo.Named("id", id))
 		if err == nil && len(gs) == 1 {
 			g = gs[0]
 		}
@@ -181,7 +185,7 @@ func (s *Store) UpdateVoicemailGroup(ctx context.Context, actor string, id int64
 	var g VoicemailGroup
 	err := s.configChange(ctx, actor, "update", "voicemail_group", check, func(tx *dbTx) (int64, error) {
 		var cur string
-		if err := tx.QueryRowContext(ctx, `SELECT number FROM voicemail_groups WHERE id = $1`, id).Scan(&cur); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT number FROM voicemail_groups WHERE id = @id`, momo.Named("id", id)).Scan(&cur); err != nil {
 			return id, mapErr(err)
 		}
 		if in.Number != cur {
@@ -192,8 +196,9 @@ func (s *Store) UpdateVoicemailGroup(ctx context.Context, actor string, id int64
 				return id, err
 			}
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE voicemail_groups SET number = $2, name = $3, enabled = $4,
-			max_seconds = $5, updated_at = now() WHERE id = $1`, id, in.Number, in.Name, in.Enabled, in.MaxSeconds)
+		res, err := tx.ExecContext(ctx, `UPDATE voicemail_groups SET number = @number, name = @name, enabled = @enabled,
+			max_seconds = @max_seconds, updated_at = now() WHERE id = @id`, momo.Named("id", id),
+			momo.Named("number", in.Number), momo.Named("name", in.Name), momo.Named("enabled", in.Enabled), momo.Named("max_seconds", in.MaxSeconds))
 		if err != nil {
 			return id, err
 		}
@@ -203,7 +208,7 @@ func (s *Store) UpdateVoicemailGroup(ctx context.Context, actor string, id int64
 		if err := writeVoicemailGroupMembers(ctx, tx, id, in.Members); err != nil {
 			return id, err
 		}
-		gs, err := listVoicemailGroups(ctx, tx, `WHERE g.id = $1`, id)
+		gs, err := listVoicemailGroups(ctx, tx, `WHERE g.id = @id`, momo.Named("id", id))
 		if err == nil && len(gs) == 1 {
 			g = gs[0]
 		}
@@ -218,13 +223,13 @@ func (s *Store) UpdateVoicemailGroup(ctx context.Context, actor string, id int64
 func (s *Store) DeleteVoicemailGroup(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "voicemail_group", check, func(tx *dbTx) (int64, error) {
 		var number string
-		if err := tx.QueryRowContext(ctx, `SELECT number FROM voicemail_groups WHERE id = $1`, id).Scan(&number); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT number FROM voicemail_groups WHERE id = @id`, momo.Named("id", id)).Scan(&number); err != nil {
 			return id, mapErr(err)
 		}
 		if err := refuseIfVoicemailGroupUsed(ctx, tx, "voicemail group "+number, number); err != nil {
 			return id, err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM voicemail_groups WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM voicemail_groups WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -237,20 +242,20 @@ func (s *Store) DeleteVoicemailGroup(ctx context.Context, actor string, id int64
 func refuseIfVoicemailGroupUsed(ctx context.Context, tx *dbTx, what, number string) error {
 	var refs []string
 	for _, q := range []struct{ query, label string }{
-		{`SELECT name FROM inbound_routes WHERE destination_kind = 'voicemail_group' AND destination = $1 ORDER BY name`, "inbound route"},
+		{`SELECT name FROM inbound_routes WHERE destination_kind = 'voicemail_group' AND destination = @number ORDER BY name`, "inbound route"},
 		{`SELECT m.name FROM ivr_menus m WHERE
-			(m.timeout_kind = 'voicemail_group' AND m.timeout_target = $1)
-			OR (m.invalid_kind = 'voicemail_group' AND m.invalid_target = $1)
-			OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind = 'voicemail_group' AND o.dest_target = $1)
+			(m.timeout_kind = 'voicemail_group' AND m.timeout_target = @number)
+			OR (m.invalid_kind = 'voicemail_group' AND m.invalid_target = @number)
+			OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind = 'voicemail_group' AND o.dest_target = @number)
 			ORDER BY m.name`, "IVR menu"},
 		{`SELECT name FROM time_conditions WHERE
-			(open_kind = 'voicemail_group' AND open_target = $1) OR (closed_kind = 'voicemail_group' AND closed_target = $1)
-			OR (holiday_kind = 'voicemail_group' AND holiday_target = $1) ORDER BY name`, "time condition"},
+			(open_kind = 'voicemail_group' AND open_target = @number) OR (closed_kind = 'voicemail_group' AND closed_target = @number)
+			OR (holiday_kind = 'voicemail_group' AND holiday_target = @number) ORDER BY name`, "time condition"},
 		{`SELECT name FROM queues WHERE
-			(timeout_kind = 'voicemail_group' AND timeout_target = $1) OR (full_kind = 'voicemail_group' AND full_target = $1)
-			OR (no_agents_kind = 'voicemail_group' AND no_agents_target = $1) ORDER BY name`, "queue"},
+			(timeout_kind = 'voicemail_group' AND timeout_target = @number) OR (full_kind = 'voicemail_group' AND full_target = @number)
+			OR (no_agents_kind = 'voicemail_group' AND no_agents_target = @number) ORDER BY name`, "queue"},
 	} {
-		rows, err := tx.QueryContext(ctx, q.query, number)
+		rows, err := tx.QueryContext(ctx, q.query, momo.Named("number", number))
 		if err != nil {
 			return err
 		}
@@ -285,9 +290,10 @@ func (s *Store) InsertVoicemailGroupMessage(ctx context.Context, boxIDs []int64,
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		INSERT INTO voicemail_messages (box_id, minio_object, caller, caller_name, duration_ms)
-		SELECT u.b, $2::text, $3::text, $4::text, $5::bigint FROM unnest($1::bigint[]) AS u(b)
+		SELECT u.b, @minio_object::text, @caller::text, @caller_name::text, @duration_ms::bigint FROM unnest(@box_ids::bigint[]) AS u(b)
 		JOIN voicemail_boxes vb ON vb.id = u.b
-		RETURNING box_id`, boxIDs, object, caller, callerName, durationMs)
+		RETURNING box_id`, momo.Named("box_ids", boxIDs), momo.Named("minio_object", object), momo.Named("caller", caller),
+		momo.Named("caller_name", callerName), momo.Named("duration_ms", durationMs))
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +318,7 @@ func releaseVoicemailObject(ctx context.Context, q querier, object string) (stri
 		return "", nil
 	}
 	var n int
-	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM voicemail_messages WHERE minio_object = $1`, object).Scan(&n); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM voicemail_messages WHERE minio_object = @minio_object`, momo.Named("minio_object", object)).Scan(&n); err != nil {
 		return "", err
 	}
 	if n > 0 {

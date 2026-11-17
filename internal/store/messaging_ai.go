@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/msgai"
 )
@@ -99,8 +101,8 @@ func (a *ConvAI) decode(triage, applied string) error {
 // run is pending.
 func (s *Store) convDraft(ctx context.Context, convID int64) (*ConvDraft, bool, error) {
 	var pending bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM ai_message_runs WHERE conversation_id = $1 AND state IN ('queued', 'running'))`,
-		convID).Scan(&pending); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM ai_message_runs WHERE conversation_id = @conversation_id AND state IN ('queued', 'running'))`,
+		momo.Named("conversation_id", convID)).Scan(&pending); err != nil {
 		return nil, false, err
 	}
 	var (
@@ -109,10 +111,10 @@ func (s *Store) convDraft(ctx context.Context, convID int64) (*ConvDraft, bool, 
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT r.id, r.message_id, r.result::text, coalesce(r.finished_at, r.created_at) FROM ai_message_runs r
-		WHERE r.conversation_id = $1 AND r.kind = 'draft' AND r.state = 'done' AND r.result IS NOT NULL
+		WHERE r.conversation_id = @conversation_id AND r.kind = 'draft' AND r.state = 'done' AND r.result IS NOT NULL
 		  AND NOT EXISTS (SELECT 1 FROM conversation_messages x WHERE x.conversation_id = r.conversation_id AND x.id > r.message_id
 		                  AND x.kind = 'message' AND (x.direction = 'in' OR x.sender_kind IN ('user', 'ai')))
-		ORDER BY r.id DESC LIMIT 1`, convID).Scan(&d.RunID, &d.MessageID, &raw, &d.CreatedAt)
+		ORDER BY r.id DESC LIMIT 1`, momo.Named("conversation_id", convID)).Scan(&d.RunID, &d.MessageID, &raw, &d.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, pending, nil
 	}
@@ -141,8 +143,8 @@ func (s *Store) RevertConversationAI(ctx context.Context, acc InboxAccess, convI
 			tagsJSON, priority, appliedJSON string
 			spam                            bool
 		)
-		if err := tx.QueryRowContext(ctx, `SELECT to_json(tags)::text, priority, ai_applied::text, ai_spam FROM conversations WHERE id = $1`,
-			c.ID).Scan(&tagsJSON, &priority, &appliedJSON, &spam); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT to_json(tags)::text, priority, ai_applied::text, ai_spam FROM conversations WHERE id = @id`,
+			momo.Named("id", c.ID)).Scan(&tagsJSON, &priority, &appliedJSON, &spam); err != nil {
 			return err
 		}
 		var tags []string
@@ -166,9 +168,9 @@ func (s *Store) RevertConversationAI(ctx context.Context, acc InboxAccess, convI
 			priority = applied.Priority
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE conversations SET tags = $2, priority = $3, ai_spam = FALSE, ai_applied = '{}',
+			UPDATE conversations SET tags = @tags, priority = @priority, ai_spam = FALSE, ai_applied = '{}',
 				ai_triage = CASE WHEN ai_triage IS NULL THEN NULL ELSE jsonb_set(ai_triage, '{reverted}', 'true') END
-			WHERE id = $1`, c.ID, kept, priority); err != nil {
+			WHERE id = @id`, momo.Named("id", c.ID), momo.Named("tags", kept), momo.Named("priority", priority)); err != nil {
 			return err
 		}
 		if _, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", acc.Name+" undid the AI triage's suggestions"); err != nil {
@@ -192,16 +194,18 @@ func (s *Store) RevertConversationAI(ctx context.Context, acc InboxAccess, convI
 func queueAITriage(ctx context.Context, tx *dbTx, convID, addressID, msgID int64) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO ai_message_runs (message_id, conversation_id, kind)
-		SELECT $1::bigint, $2::bigint, 'triage' FROM msg_addresses a JOIN msg_channels ch ON ch.id = a.channel_id, messaging_settings s
-		WHERE a.id = $3 AND a.ai_mode <> 'off' AND ch.ai_enabled AND s.ai_enabled
-		ON CONFLICT (message_id, kind) DO NOTHING`, msgID, convID, addressID)
+		SELECT @message_id::bigint, @conversation_id::bigint, 'triage' FROM msg_addresses a JOIN msg_channels ch ON ch.id = a.channel_id, messaging_settings s
+		WHERE a.id = @address_id AND a.ai_mode <> 'off' AND ch.ai_enabled AND s.ai_enabled
+		ON CONFLICT (message_id, kind) DO NOTHING`,
+		momo.Named("message_id", msgID), momo.Named("conversation_id", convID), momo.Named("address_id", addressID))
 	return err
 }
 
 func queueAIRun(ctx context.Context, tx *dbTx, convID, msgID int64, kind string) error {
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO ai_message_runs (message_id, conversation_id, kind) VALUES ($1, $2, $3)
-		ON CONFLICT (message_id, kind) DO NOTHING`, msgID, convID, kind)
+		INSERT INTO ai_message_runs (message_id, conversation_id, kind) VALUES (@message_id, @conversation_id, @kind)
+		ON CONFLICT (message_id, kind) DO NOTHING`,
+		momo.Named("message_id", msgID), momo.Named("conversation_id", convID), momo.Named("kind", kind))
 	return err
 }
 
@@ -226,16 +230,16 @@ func (as aiStore) ClaimAIRun(ctx context.Context) (msgai.Job, bool, error) {
 	secs := aiClaimTimeout.Seconds()
 	if _, err := as.s.db.ExecContext(ctx, `
 		UPDATE ai_message_runs SET state = 'failed', error = 'abandoned', finished_at = now()
-		WHERE id IN (SELECT id FROM ai_message_runs WHERE state = 'running' AND claimed_at < now() - make_interval(secs => $1)
-		             AND attempts >= $2 FOR UPDATE SKIP LOCKED)`, secs, aiMaxAttempts); err != nil {
+		WHERE id IN (SELECT id FROM ai_message_runs WHERE state = 'running' AND claimed_at < now() - make_interval(secs => @secs)
+		             AND attempts >= @max_attempts FOR UPDATE SKIP LOCKED)`, momo.Named("secs", secs), momo.Named("max_attempts", aiMaxAttempts)); err != nil {
 		return j, false, err
 	}
 	err := as.s.db.QueryRowContext(ctx, `
 		UPDATE ai_message_runs SET state = 'running', claimed_at = now(), attempts = attempts + 1
 		WHERE id = (SELECT id FROM ai_message_runs
-		            WHERE state = 'queued' OR (state = 'running' AND claimed_at < now() - make_interval(secs => $1))
+		            WHERE state = 'queued' OR (state = 'running' AND claimed_at < now() - make_interval(secs => @secs))
 		            ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
-		RETURNING id, message_id, conversation_id, kind`, secs).Scan(&j.RunID, &j.MessageID, &j.ConversationID, &j.Kind)
+		RETURNING id, message_id, conversation_id, kind`, momo.Named("secs", secs)).Scan(&j.RunID, &j.MessageID, &j.ConversationID, &j.Kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return j, false, nil
 	}
@@ -243,8 +247,8 @@ func (as aiStore) ClaimAIRun(ctx context.Context) (msgai.Job, bool, error) {
 }
 
 // aiFresh is the condition "no newer customer text and no reply by a person
-// or the AI follows message $2 in conversation $1".
-const aiFresh = `NOT EXISTS (SELECT 1 FROM conversation_messages fx WHERE fx.conversation_id = $1 AND fx.id > $2
+// or the AI follows message @message_id in conversation @conversation_id".
+const aiFresh = `NOT EXISTS (SELECT 1 FROM conversation_messages fx WHERE fx.conversation_id = @conversation_id AND fx.id > @message_id
 	AND fx.kind = 'message' AND (fx.direction = 'in' OR fx.sender_kind IN ('user', 'ai')))`
 
 // AIRunContext reads what a run needs.
@@ -282,9 +286,9 @@ func (s *Store) loadAIContext(ctx context.Context, q querier, job msgai.Job) (ms
 		FROM conversations c
 		JOIN msg_channels ch ON ch.id = c.channel_id
 		JOIN msg_addresses a ON a.id = c.address_id
-		JOIN conversation_messages m ON m.id = $2 AND m.conversation_id = c.id,
+		JOIN conversation_messages m ON m.id = @message_id AND m.conversation_id = c.id,
 		messaging_settings s
-		WHERE c.id = $1`, job.ConversationID, job.MessageID).Scan(
+		WHERE c.id = @conversation_id`, momo.Named("conversation_id", job.ConversationID), momo.Named("message_id", job.MessageID)).Scan(
 		&addressID, &peerKey, &peerName, &peerSrc, &c.Spam, &assigned, &lastIn,
 		&c.ChannelKind, &c.ChannelOn,
 		&c.Address.Mode, &c.Address.Redact, &c.Address.Disclosure, &c.Address.DisclosureText, &c.Address.HoldingText,
@@ -306,15 +310,17 @@ func (s *Store) loadAIContext(ctx context.Context, q querier, job msgai.Job) (ms
 	if peerSrc != "" && peerName != "" {
 		c.FirstName = strings.Fields(peerName)[0]
 	}
-	if err := q.QueryRowContext(ctx, `SELECT `+aiFresh, job.ConversationID, job.MessageID).Scan(&c.Fresh); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT `+aiFresh,
+		momo.Named("conversation_id", job.ConversationID), momo.Named("message_id", job.MessageID)).Scan(&c.Fresh); err != nil {
 		return c, err
 	}
 
 	// The conversation up to the message: its last texts, oldest first.
 	rows, err := q.QueryContext(ctx, `
 		SELECT direction, sender_kind, body FROM conversation_messages
-		WHERE conversation_id = $1 AND id <= $2 AND kind = 'message'
-		ORDER BY id DESC LIMIT $3`, job.ConversationID, job.MessageID, msgai.MaxContextMessages)
+		WHERE conversation_id = @conversation_id AND id <= @message_id AND kind = 'message'
+		ORDER BY id DESC LIMIT @limit`, momo.Named("conversation_id", job.ConversationID), momo.Named("message_id", job.MessageID),
+		momo.Named("limit", msgai.MaxContextMessages))
 	if err != nil {
 		return c, err
 	}
@@ -361,8 +367,8 @@ func (s *Store) loadAIContext(ctx context.Context, q querier, job msgai.Job) (ms
 
 	if job.Kind != msgai.KindTriage {
 		var raw string
-		err := q.QueryRowContext(ctx, `SELECT result::text FROM ai_message_runs WHERE message_id = $1 AND kind = 'triage' AND state = 'done' AND result IS NOT NULL`,
-			job.MessageID).Scan(&raw)
+		err := q.QueryRowContext(ctx, `SELECT result::text FROM ai_message_runs WHERE message_id = @message_id AND kind = 'triage' AND state = 'done' AND result IS NOT NULL`,
+			momo.Named("message_id", job.MessageID)).Scan(&raw)
 		if err == nil {
 			var t msgai.Triage
 			if json.Unmarshal([]byte(raw), &t) == nil {
@@ -381,17 +387,17 @@ func (s *Store) loadAIContext(ctx context.Context, q querier, job msgai.Job) (ms
 	var lastHuman sql.NullTime
 	err = q.QueryRowContext(ctx, `
 		WITH h AS (SELECT max(id) AS id, max(created_at) AS at FROM conversation_messages
-		           WHERE conversation_id = $1 AND direction = 'out' AND kind = 'message' AND sender_kind = 'user')
-		SELECT EXISTS (SELECT 1 FROM sms_opt_outs WHERE address_id = $2 AND peer_hash = $3 AND state = 'out'),
+		           WHERE conversation_id = @conversation_id AND direction = 'out' AND kind = 'message' AND sender_kind = 'user')
+		SELECT EXISTS (SELECT 1 FROM sms_opt_outs WHERE address_id = @address_id AND peer_hash = @peer_hash AND state = 'out'),
 		       (SELECT at FROM h),
-		       (SELECT count(*) FROM conversation_messages WHERE conversation_id = $1 AND sender_kind = 'ai' AND kind = 'message'
+		       (SELECT count(*) FROM conversation_messages WHERE conversation_id = @conversation_id AND sender_kind = 'ai' AND kind = 'message'
 		            AND id > coalesce((SELECT id FROM h), 0)),
-		       (SELECT count(*) FROM conversation_messages WHERE conversation_id = $1 AND sender_kind = 'ai' AND kind = 'message'),
+		       (SELECT count(*) FROM conversation_messages WHERE conversation_id = @conversation_id AND sender_kind = 'ai' AND kind = 'message'),
 		       (SELECT count(*) FROM conversation_messages am JOIN conversations ac ON ac.id = am.conversation_id
-		            WHERE am.sender_kind = 'ai' AND am.created_at > now() - interval '1 hour' AND ac.address_id = $2),
-		       EXISTS (SELECT 1 FROM conversation_messages WHERE conversation_id = $1 AND sender_kind = 'system' AND ai_run_id IS NOT NULL
+		            WHERE am.sender_kind = 'ai' AND am.created_at > now() - interval '1 hour' AND ac.address_id = @address_id),
+		       EXISTS (SELECT 1 FROM conversation_messages WHERE conversation_id = @conversation_id AND sender_kind = 'system' AND ai_run_id IS NOT NULL
 		            AND id > coalesce((SELECT id FROM h), 0))`,
-		job.ConversationID, addressID, h).Scan(&c.OptedOut, &lastHuman, &c.AIRepliesSinceHuman, &c.AIRepliesTotal, &c.AISentLastHour, &c.HoldingSinceHuman)
+		momo.Named("conversation_id", job.ConversationID), momo.Named("address_id", addressID), momo.Named("peer_hash", h)).Scan(&c.OptedOut, &lastHuman, &c.AIRepliesSinceHuman, &c.AIRepliesTotal, &c.AISentLastHour, &c.HoldingSinceHuman)
 	if err != nil {
 		return c, err
 	}
@@ -435,7 +441,7 @@ func (as aiStore) FinishAIRun(ctx context.Context, job msgai.Job, res msgai.Resu
 		err := tx.QueryRowContext(ctx, `
 			SELECT r.state, EXISTS (SELECT 1 FROM conversation_messages x WHERE x.conversation_id = r.conversation_id
 				AND x.id <= r.message_id AND x.redacted_at > r.created_at - interval '1 minute')
-			FROM ai_message_runs r WHERE r.id = $1 FOR UPDATE OF r`, job.RunID).Scan(&state, &redacted)
+			FROM ai_message_runs r WHERE r.id = @id FOR UPDATE OF r`, momo.Named("id", job.RunID)).Scan(&state, &redacted)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // erased with its conversation
 		}
@@ -447,15 +453,15 @@ func (as aiStore) FinishAIRun(ctx context.Context, job msgai.Job, res msgai.Resu
 		}
 		if redacted {
 			_, err := tx.ExecContext(ctx, `UPDATE ai_message_runs SET state = 'stale', result = NULL, error = 'redacted', finished_at = now()
-				WHERE id = $1`, job.RunID)
+				WHERE id = @id`, momo.Named("id", job.RunID))
 			return err
 		}
 		var c convRow
 		var mode string
 		err = tx.QueryRowContext(ctx, `
 			SELECT c.id, c.channel_id, c.address_id, c.peer_key, c.status, c.assignee_user_id, a.ai_mode
-			FROM conversations c JOIN msg_addresses a ON a.id = c.address_id WHERE c.id = $1 FOR UPDATE OF c`,
-			job.ConversationID).Scan(&c.ID, &c.ChannelID, &c.AddressID, &c.PeerKey, &c.Status, &c.Assignee, &mode)
+			FROM conversations c JOIN msg_addresses a ON a.id = c.address_id WHERE c.id = @id FOR UPDATE OF c`,
+			momo.Named("id", job.ConversationID)).Scan(&c.ID, &c.ChannelID, &c.AddressID, &c.PeerKey, &c.Status, &c.Assignee, &mode)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -463,7 +469,8 @@ func (as aiStore) FinishAIRun(ctx context.Context, job msgai.Job, res msgai.Resu
 			return err
 		}
 		var fresh bool
-		if err := tx.QueryRowContext(ctx, `SELECT `+aiFresh, job.ConversationID, job.MessageID).Scan(&fresh); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT `+aiFresh,
+			momo.Named("conversation_id", job.ConversationID), momo.Named("message_id", job.MessageID)).Scan(&fresh); err != nil {
 			return err
 		}
 		var result any
@@ -528,8 +535,8 @@ func (as aiStore) FinishAIRun(ctx context.Context, job msgai.Job, res msgai.Resu
 			}
 			raw = string(b)
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE ai_message_runs SET state = $2, result = $3::jsonb, error = $4, finished_at = now() WHERE id = $1`,
-			job.RunID, res.State, raw, res.Error)
+		_, err = tx.ExecContext(ctx, `UPDATE ai_message_runs SET state = @state, result = @result::jsonb, error = @error, finished_at = now() WHERE id = @id`,
+			momo.Named("id", job.RunID), momo.Named("state", res.State), momo.Named("result", raw), momo.Named("error", res.Error))
 		return err
 	})
 }
@@ -541,8 +548,8 @@ func (as aiStore) FinishAIRun(ctx context.Context, job msgai.Job, res msgai.Resu
 // for a number that routes through the AI.
 func applyTriage(ctx context.Context, tx *dbTx, convID, msgID int64, t msgai.Triage) error {
 	var tagsJSON, priority, appliedJSON string
-	if err := tx.QueryRowContext(ctx, `SELECT to_json(tags)::text, priority, ai_applied::text FROM conversations WHERE id = $1`,
-		convID).Scan(&tagsJSON, &priority, &appliedJSON); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT to_json(tags)::text, priority, ai_applied::text FROM conversations WHERE id = @id`,
+		momo.Named("id", convID)).Scan(&tagsJSON, &priority, &appliedJSON); err != nil {
 		return err
 	}
 	var tags []string
@@ -585,8 +592,9 @@ func applyTriage(ctx context.Context, tx *dbTx, convID, msgID int64, t msgai.Tri
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE conversations SET tags = $2, priority = $3, ai_spam = ai_spam OR $4, ai_triage = $5::jsonb, ai_applied = $6::jsonb
-		WHERE id = $1`, convID, tags, priority, t.Spam, string(tb), string(ab)); err != nil {
+		UPDATE conversations SET tags = @tags, priority = @priority, ai_spam = ai_spam OR @spam, ai_triage = @triage::jsonb, ai_applied = @applied::jsonb
+		WHERE id = @id`, momo.Named("id", convID), momo.Named("tags", tags), momo.Named("priority", priority), momo.Named("spam", t.Spam),
+		momo.Named("triage", string(tb)), momo.Named("applied", string(ab))); err != nil {
 		return err
 	}
 	return emitConversationEvent(ctx, tx, convID, 0, "conversation.updated", nil)
@@ -637,8 +645,8 @@ func (s *Store) applyAutoReply(ctx context.Context, tx *dbTx, c convRow, job msg
 	if !d.Handoff {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET ai_handoff_at = now(), ai_handoff_reason = $2 WHERE id = $1`,
-		c.ID, d.Reason); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET ai_handoff_at = now(), ai_handoff_reason = @reason WHERE id = @id`,
+		momo.Named("id", c.ID), momo.Named("reason", d.Reason)); err != nil {
 		return err
 	}
 	if _, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "",
@@ -648,10 +656,10 @@ func (s *Store) applyAutoReply(ctx context.Context, tx *dbTx, c convRow, job msg
 	var holding string
 	var sentBefore bool
 	if err := tx.QueryRowContext(ctx, `
-		SELECT a.ai_holding_text, EXISTS (SELECT 1 FROM conversation_messages m WHERE m.conversation_id = $1 AND m.sender_kind = 'system'
-			AND m.ai_run_id IS NOT NULL AND m.id > coalesce((SELECT max(id) FROM conversation_messages u WHERE u.conversation_id = $1
+		SELECT a.ai_holding_text, EXISTS (SELECT 1 FROM conversation_messages m WHERE m.conversation_id = @conversation_id AND m.sender_kind = 'system'
+			AND m.ai_run_id IS NOT NULL AND m.id > coalesce((SELECT max(id) FROM conversation_messages u WHERE u.conversation_id = @conversation_id
 				AND u.direction = 'out' AND u.kind = 'message' AND u.sender_kind = 'user'), 0))
-		FROM msg_addresses a WHERE a.id = $2`, c.ID, c.AddressID).Scan(&holding, &sentBefore); err != nil {
+		FROM msg_addresses a WHERE a.id = @address_id`, momo.Named("conversation_id", c.ID), momo.Named("address_id", c.AddressID)).Scan(&holding, &sentBefore); err != nil {
 		return err
 	}
 	if strings.TrimSpace(holding) != "" && !sentBefore {
@@ -688,8 +696,8 @@ type MsgFAQInput struct {
 var ErrFAQFull = errors.New("store: the number has the most FAQ snippets it may have")
 
 func listFAQ(ctx context.Context, q querier, addressID int64, enabledOnly bool) ([]msgai.FAQ, error) {
-	rows, err := q.QueryContext(ctx, `SELECT id, title, body FROM msg_faq WHERE address_id = $1 AND (enabled OR NOT $2) ORDER BY id LIMIT $3`,
-		addressID, enabledOnly, msgai.MaxFAQ)
+	rows, err := q.QueryContext(ctx, `SELECT id, title, body FROM msg_faq WHERE address_id = @address_id AND (enabled OR NOT @enabled_only) ORDER BY id LIMIT @limit`,
+		momo.Named("address_id", addressID), momo.Named("enabled_only", enabledOnly), momo.Named("limit", msgai.MaxFAQ))
 	if err != nil {
 		return nil, err
 	}
@@ -715,7 +723,8 @@ func scanFAQ(r interface{ Scan(...any) error }) (MsgFAQ, error) {
 
 // ListMsgFAQ lists a number's snippets (every number's with addressID 0).
 func (s *Store) ListMsgFAQ(ctx context.Context, addressID int64) ([]MsgFAQ, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+faqCols+` FROM msg_faq WHERE $1 = 0 OR address_id = $1 ORDER BY address_id, id`, addressID)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+faqCols+` FROM msg_faq WHERE @address_id::bigint = 0 OR address_id = @address_id::bigint ORDER BY address_id, id`,
+		momo.Named("address_id", addressID))
 	if err != nil {
 		return nil, err
 	}
@@ -733,7 +742,7 @@ func (s *Store) ListMsgFAQ(ctx context.Context, addressID int64) ([]MsgFAQ, erro
 
 // GetMsgFAQ returns one snippet.
 func (s *Store) GetMsgFAQ(ctx context.Context, id int64) (MsgFAQ, error) {
-	f, err := scanFAQ(s.db.QueryRowContext(ctx, `SELECT `+faqCols+` FROM msg_faq WHERE id = $1`, id))
+	f, err := scanFAQ(s.db.QueryRowContext(ctx, `SELECT `+faqCols+` FROM msg_faq WHERE id = @id`, momo.Named("id", id)))
 	return f, mapErr(err)
 }
 
@@ -742,7 +751,7 @@ func (s *Store) CreateMsgFAQ(ctx context.Context, actor string, in MsgFAQInput) 
 	var id int64
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var one int
-		err := tx.QueryRowContext(ctx, `SELECT 1 FROM msg_addresses WHERE id = $1 FOR UPDATE`, in.AddressID).Scan(&one)
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM msg_addresses WHERE id = @id FOR UPDATE`, momo.Named("id", in.AddressID)).Scan(&one)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fieldError("addressId", "no such messaging number")
 		}
@@ -750,14 +759,14 @@ func (s *Store) CreateMsgFAQ(ctx context.Context, actor string, in MsgFAQInput) 
 			return err
 		}
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM msg_faq WHERE address_id = $1`, in.AddressID).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM msg_faq WHERE address_id = @address_id`, momo.Named("address_id", in.AddressID)).Scan(&n); err != nil {
 			return err
 		}
 		if n >= msgai.MaxFAQ {
 			return ErrFAQFull
 		}
-		if err := tx.QueryRowContext(ctx, `INSERT INTO msg_faq (address_id, title, body, enabled) VALUES ($1, $2, $3, $4) RETURNING id`,
-			in.AddressID, in.Title, in.Body, in.Enabled).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO msg_faq (address_id, title, body, enabled) VALUES (@address_id, @title, @body, @enabled) RETURNING id`,
+			momo.Named("address_id", in.AddressID), momo.Named("title", in.Title), momo.Named("body", in.Body), momo.Named("enabled", in.Enabled)).Scan(&id); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "msg_faq", strconv.FormatInt(id, 10))
@@ -772,8 +781,8 @@ func (s *Store) CreateMsgFAQ(ctx context.Context, actor string, in MsgFAQInput) 
 // stays.
 func (s *Store) UpdateMsgFAQ(ctx context.Context, actor string, id int64, in MsgFAQInput) (MsgFAQ, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
-		r, err := tx.ExecContext(ctx, `UPDATE msg_faq SET title = $2, body = $3, enabled = $4, updated_at = now() WHERE id = $1`,
-			id, in.Title, in.Body, in.Enabled)
+		r, err := tx.ExecContext(ctx, `UPDATE msg_faq SET title = @title, body = @body, enabled = @enabled, updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("title", in.Title), momo.Named("body", in.Body), momo.Named("enabled", in.Enabled))
 		if err != nil {
 			return err
 		}
@@ -791,7 +800,7 @@ func (s *Store) UpdateMsgFAQ(ctx context.Context, actor string, id int64, in Msg
 // DeleteMsgFAQ removes a snippet.
 func (s *Store) DeleteMsgFAQ(ctx context.Context, actor string, id int64) error {
 	return s.tx(ctx, func(tx *dbTx) error {
-		r, err := tx.ExecContext(ctx, `DELETE FROM msg_faq WHERE id = $1`, id)
+		r, err := tx.ExecContext(ctx, `DELETE FROM msg_faq WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return err
 		}
@@ -829,7 +838,7 @@ func (s *Store) GetMsgAddressAI(ctx context.Context, addressID int64) (MsgAddres
 		SELECT ai_mode, ai_redact, ai_disclosure, ai_disclosure_text, ai_holding_text, ai_max_replies, ai_hourly_cap,
 		       round(ai_min_confidence::numeric, 2)::float8, to_json(ai_auto_intents)::text, to_json(ai_handoff_words)::text,
 		       (SELECT count(*) FROM msg_faq f WHERE f.address_id = a.id)
-		FROM msg_addresses a WHERE id = $1`, addressID).Scan(&m.Mode, &m.Redact, &m.Disclosure, &m.DisclosureText, &m.HoldingText,
+		FROM msg_addresses a WHERE id = @id`, momo.Named("id", addressID)).Scan(&m.Mode, &m.Redact, &m.Disclosure, &m.DisclosureText, &m.HoldingText,
 		&m.MaxReplies, &m.HourlyCap, &m.MinConfidence, &auto, &words, &m.FAQCount)
 	if err != nil {
 		return m, mapErr(err)
@@ -843,14 +852,17 @@ func (s *Store) GetMsgAddressAI(ctx context.Context, addressID int64) (MsgAddres
 func (s *Store) PutMsgAddressAI(ctx context.Context, actor string, m MsgAddressAI) (MsgAddressAI, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var was string
-		if err := tx.QueryRowContext(ctx, `SELECT ai_mode FROM msg_addresses WHERE id = $1 FOR UPDATE`, m.AddressID).Scan(&was); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT ai_mode FROM msg_addresses WHERE id = @id FOR UPDATE`, momo.Named("id", m.AddressID)).Scan(&was); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE msg_addresses SET ai_mode = $2, ai_redact = $3, ai_disclosure = $4, ai_disclosure_text = $5, ai_holding_text = $6,
-				ai_max_replies = $7, ai_hourly_cap = $8, ai_min_confidence = $9, ai_auto_intents = $10, ai_handoff_words = $11
-			WHERE id = $1`, m.AddressID, m.Mode, m.Redact, m.Disclosure, m.DisclosureText, m.HoldingText, m.MaxReplies, m.HourlyCap,
-			m.MinConfidence, m.AutoIntents, m.HandoffWords); err != nil {
+			UPDATE msg_addresses SET ai_mode = @mode, ai_redact = @redact, ai_disclosure = @disclosure, ai_disclosure_text = @disclosure_text,
+				ai_holding_text = @holding_text, ai_max_replies = @max_replies, ai_hourly_cap = @hourly_cap, ai_min_confidence = @min_confidence,
+				ai_auto_intents = @auto_intents, ai_handoff_words = @handoff_words
+			WHERE id = @id`, momo.Named("id", m.AddressID), momo.Named("mode", m.Mode), momo.Named("redact", m.Redact),
+			momo.Named("disclosure", m.Disclosure), momo.Named("disclosure_text", m.DisclosureText), momo.Named("holding_text", m.HoldingText),
+			momo.Named("max_replies", m.MaxReplies), momo.Named("hourly_cap", m.HourlyCap), momo.Named("min_confidence", m.MinConfidence),
+			momo.Named("auto_intents", m.AutoIntents), momo.Named("handoff_words", m.HandoffWords)); err != nil {
 			return err
 		}
 		id := strconv.FormatInt(m.AddressID, 10)
@@ -962,8 +974,10 @@ func (s *Store) GetMessagingAI(ctx context.Context) (MessagingAI, error) {
 func (s *Store) PutMessagingAI(ctx context.Context, actor string, in MessagingAIInput) (MessagingAI, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE messaging_settings SET ai_enabled = $1, ai_auto_enabled = $2, ai_business_name = $3, ai_intents = $4, ai_sensitive_topics = $5`,
-			in.Enabled, in.AutoEnabled, in.BusinessName, in.Intents, in.SensitiveTopics); err != nil {
+			UPDATE messaging_settings SET ai_enabled = @enabled, ai_auto_enabled = @auto_enabled, ai_business_name = @business_name,
+				ai_intents = @intents, ai_sensitive_topics = @sensitive_topics`,
+			momo.Named("enabled", in.Enabled), momo.Named("auto_enabled", in.AutoEnabled), momo.Named("business_name", in.BusinessName),
+			momo.Named("intents", in.Intents), momo.Named("sensitive_topics", in.SensitiveTopics)); err != nil {
 			return err
 		}
 		ids := make([]int64, 0, len(in.Channels))
@@ -974,7 +988,7 @@ func (s *Store) PutMessagingAI(ctx context.Context, actor string, in MessagingAI
 		for _, id := range ids {
 			on := in.Channels[id]
 			var was bool
-			err := tx.QueryRowContext(ctx, `SELECT ai_enabled FROM msg_channels WHERE id = $1 FOR UPDATE`, id).Scan(&was)
+			err := tx.QueryRowContext(ctx, `SELECT ai_enabled FROM msg_channels WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&was)
 			if errors.Is(err, sql.ErrNoRows) {
 				return fieldError("channels", "no channel "+strconv.FormatInt(id, 10))
 			}
@@ -984,7 +998,7 @@ func (s *Store) PutMessagingAI(ctx context.Context, actor string, in MessagingAI
 			if was == on {
 				continue
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE msg_channels SET ai_enabled = $2 WHERE id = $1`, id, on); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE msg_channels SET ai_enabled = @ai_enabled WHERE id = @id`, momo.Named("id", id), momo.Named("ai_enabled", on)); err != nil {
 				return err
 			}
 			action := "ai_disabled"

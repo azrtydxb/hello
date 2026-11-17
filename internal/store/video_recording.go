@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // VideoSegment is one stored fragment of a stream.
@@ -117,11 +119,15 @@ func (s *Store) OpenVideoStream(ctx context.Context, correlation, node string, w
 	err := s.q(ctx).QueryRowContext(ctx, `
 		INSERT INTO recording_streams (call_correlation, part, leg, codec, container, object_prefix, segments, bytes, width, height,
 			offset_ms, duration_ms, segment_list, started_at, state, failure, node, ended_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, CASE WHEN $15 = 'recording' THEN NULL ELSE now() END)
+		VALUES (@call_correlation, @part, @leg, @codec, @container, @object_prefix, @segments, @bytes, @width, @height,
+			@offset_ms, @duration_ms, @segment_list, @started_at, @state::text, @failure, @node, CASE WHEN @state::text = 'recording' THEN NULL ELSE now() END)
 		ON CONFLICT (call_correlation, part, leg) DO UPDATE SET updated_at = now(), node = EXCLUDED.node
 		RETURNING id`,
-		correlation, w.Part, w.Leg, w.Codec, w.Container, w.Prefix, len(w.Segments), w.Bytes, w.Width, w.Height,
-		w.OffsetMs, durationMs(w.Segments), list, w.Started, streamState(w), w.Failed, node).Scan(&id)
+		momo.Named("call_correlation", correlation), momo.Named("part", w.Part), momo.Named("leg", w.Leg), momo.Named("codec", w.Codec),
+		momo.Named("container", w.Container), momo.Named("object_prefix", w.Prefix), momo.Named("segments", len(w.Segments)),
+		momo.Named("bytes", w.Bytes), momo.Named("width", w.Width), momo.Named("height", w.Height), momo.Named("offset_ms", w.OffsetMs),
+		momo.Named("duration_ms", durationMs(w.Segments)), momo.Named("segment_list", list), momo.Named("started_at", w.Started),
+		momo.Named("state", streamState(w)), momo.Named("failure", w.Failed), momo.Named("node", node)).Scan(&id)
 	return id, mapErr(err)
 }
 
@@ -129,11 +135,13 @@ func (s *Store) OpenVideoStream(ctx context.Context, correlation, node string, w
 func (s *Store) UpdateVideoStream(ctx context.Context, id int64, w VideoStreamWrite) error {
 	list, _ := json.Marshal(nonNilSegments(w.Segments))
 	res, err := s.q(ctx).ExecContext(ctx, `
-		UPDATE recording_streams SET segments = $2, bytes = $3, width = $4, height = $5, duration_ms = $6, segment_list = $7,
-			state = CASE WHEN state IN ('finalized', 'purged') THEN state ELSE $8 END,
-			failure = $9, updated_at = now(),
-			ended_at = CASE WHEN $8 = 'recording' THEN ended_at ELSE COALESCE(ended_at, now()) END
-		WHERE id = $1`, id, len(w.Segments), w.Bytes, w.Width, w.Height, durationMs(w.Segments), list, streamState(w), w.Failed)
+		UPDATE recording_streams SET segments = @segments, bytes = @bytes, width = @width, height = @height, duration_ms = @duration_ms, segment_list = @segment_list,
+			state = CASE WHEN state IN ('finalized', 'purged') THEN state ELSE @state::text END,
+			failure = @failure, updated_at = now(),
+			ended_at = CASE WHEN @state::text = 'recording' THEN ended_at ELSE COALESCE(ended_at, now()) END
+		WHERE id = @id`, momo.Named("id", id), momo.Named("segments", len(w.Segments)), momo.Named("bytes", w.Bytes),
+		momo.Named("width", w.Width), momo.Named("height", w.Height), momo.Named("duration_ms", durationMs(w.Segments)),
+		momo.Named("segment_list", list), momo.Named("state", streamState(w)), momo.Named("failure", w.Failed))
 	if err != nil {
 		return mapErr(err)
 	}
@@ -150,7 +158,7 @@ func nonNilSegments(in []VideoSegment) []VideoSegment {
 // VideoStreamsOf lists the streams of the call with this correlation id.
 func (s *Store) VideoStreamsOf(ctx context.Context, correlation string) ([]VideoStream, error) {
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+videoStreamCols+` FROM recording_streams
-		WHERE call_correlation = $1 AND state <> 'purged' ORDER BY part, leg`, correlation)
+		WHERE call_correlation = @call_correlation AND state <> 'purged' ORDER BY part, leg`, momo.Named("call_correlation", correlation))
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +186,7 @@ func (s *Store) RecordingsWithVideo(ctx context.Context, correlations []string) 
 		return out, nil
 	}
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT DISTINCT call_correlation FROM recording_streams
-		WHERE call_correlation = ANY($1::text[]) AND state <> 'purged'`, pgTextArray(correlations))
+		WHERE call_correlation = ANY(@correlations::text[]) AND state <> 'purged'`, momo.Named("correlations", pgTextArray(correlations)))
 	if err != nil {
 		return nil, err
 	}
@@ -201,8 +209,8 @@ func (s *Store) ClaimVideoStreams(ctx context.Context, n int) ([]VideoStream, er
 		WHERE id IN (SELECT id FROM recording_streams
 			WHERE state IN ('ended', 'failed') AND final_object IS NULL AND segments > 0
 			  AND (claim_until IS NULL OR claim_until < now())
-			ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED)
-		RETURNING `+videoStreamCols, n)
+			ORDER BY id LIMIT @limit FOR UPDATE SKIP LOCKED)
+		RETURNING `+videoStreamCols, momo.Named("limit", n))
 	if err != nil {
 		return nil, err
 	}
@@ -211,8 +219,8 @@ func (s *Store) ClaimVideoStreams(ctx context.Context, n int) ([]VideoStream, er
 
 // FinishVideoStream records the finalized file of a stream.
 func (s *Store) FinishVideoStream(ctx context.Context, id int64, final string, bytes int64) error {
-	res, err := s.q(ctx).ExecContext(ctx, `UPDATE recording_streams SET final_object = $2, bytes = $3, state = 'finalized',
-		claim_until = NULL, updated_at = now() WHERE id = $1`, id, final, bytes)
+	res, err := s.q(ctx).ExecContext(ctx, `UPDATE recording_streams SET final_object = @final_object, bytes = @bytes, state = 'finalized',
+		claim_until = NULL, updated_at = now() WHERE id = @id`, momo.Named("id", id), momo.Named("final_object", final), momo.Named("bytes", bytes))
 	if err != nil {
 		return mapErr(err)
 	}
@@ -221,7 +229,7 @@ func (s *Store) FinishVideoStream(ctx context.Context, id int64, final string, b
 
 // ReleaseVideoStream gives up a claim (the finalizer failed; another try later).
 func (s *Store) ReleaseVideoStream(ctx context.Context, id int64) error {
-	_, err := s.q(ctx).ExecContext(ctx, `UPDATE recording_streams SET claim_until = now() + interval '1 minute' WHERE id = $1`, id)
+	_, err := s.q(ctx).ExecContext(ctx, `UPDATE recording_streams SET claim_until = now() + interval '1 minute' WHERE id = @id`, momo.Named("id", id))
 	return err
 }
 
@@ -231,7 +239,7 @@ func (s *Store) ReleaseVideoStream(ctx context.Context, id int64) error {
 func (s *Store) SweepVideoStreams(ctx context.Context, olderThan time.Duration) (int64, error) {
 	res, err := s.q(ctx).ExecContext(ctx, `UPDATE recording_streams SET state = 'ended', ended_at = COALESCE(ended_at, updated_at),
 		failure = CASE WHEN failure = '' THEN 'interrupted' ELSE failure END
-		WHERE state = 'recording' AND updated_at < now() - make_interval(secs => $1)`, olderThan.Seconds())
+		WHERE state = 'recording' AND updated_at < now() - make_interval(secs => @secs)`, momo.Named("secs", olderThan.Seconds()))
 	if err != nil {
 		return 0, err
 	}
@@ -241,8 +249,8 @@ func (s *Store) SweepVideoStreams(ctx context.Context, olderThan time.Duration) 
 // ExpiredVideoStreams lists up to n streams that ended more than days ago.
 func (s *Store) ExpiredVideoStreams(ctx context.Context, days, n int) ([]VideoStream, error) {
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+videoStreamCols+` FROM recording_streams
-		WHERE state <> 'recording' AND COALESCE(ended_at, updated_at) < now() - make_interval(days => $1)
-		ORDER BY id LIMIT $2`, days, n)
+		WHERE state <> 'recording' AND COALESCE(ended_at, updated_at) < now() - make_interval(days => @days)
+		ORDER BY id LIMIT @limit`, momo.Named("days", days), momo.Named("limit", n))
 	if err != nil {
 		return nil, err
 	}
@@ -251,14 +259,14 @@ func (s *Store) ExpiredVideoStreams(ctx context.Context, days, n int) ([]VideoSt
 
 // DeleteVideoStream removes a stream's row once its objects are gone.
 func (s *Store) DeleteVideoStream(ctx context.Context, id int64) error {
-	_, err := s.q(ctx).ExecContext(ctx, `DELETE FROM recording_streams WHERE id = $1`, id)
+	_, err := s.q(ctx).ExecContext(ctx, `DELETE FROM recording_streams WHERE id = @id`, momo.Named("id", id))
 	return err
 }
 
 // DeleteVideoStreamsOf removes the rows of a call's streams and returns them
 // first, so the caller can remove the objects.
 func (s *Store) DeleteVideoStreamsOf(ctx context.Context, correlation string) ([]VideoStream, error) {
-	rows, err := s.q(ctx).QueryContext(ctx, `DELETE FROM recording_streams WHERE call_correlation = $1 RETURNING `+videoStreamCols, correlation)
+	rows, err := s.q(ctx).QueryContext(ctx, `DELETE FROM recording_streams WHERE call_correlation = @call_correlation RETURNING `+videoStreamCols, momo.Named("call_correlation", correlation))
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +297,7 @@ func (s *Store) GetRecordingSettings(ctx context.Context) (RecordingSettings, er
 // SetVideoRetention changes the video retention (1 to 3650 days).
 func (s *Store) SetVideoRetention(ctx context.Context, actor string, days int) (RecordingSettings, error) {
 	err := s.configChange(ctx, actor, "update", "recording_settings", nil, func(tx *dbTx) (int64, error) {
-		_, err := tx.ExecContext(ctx, `UPDATE recording_settings SET video_retention_days = $1, updated_at = now() WHERE id = 1`, days)
+		_, err := tx.ExecContext(ctx, `UPDATE recording_settings SET video_retention_days = @days, updated_at = now() WHERE id = 1`, momo.Named("days", days))
 		return 1, err
 	})
 	if err != nil {

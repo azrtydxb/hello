@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/prov"
 	provbook "github.com/azrtydxb/hello/internal/prov/phonebook"
@@ -37,7 +39,7 @@ func phoneBookRefs(ctx context.Context, q querier, phoneID int64) ([]bookRef, er
 	)
 	err := q.QueryRowContext(ctx, `
 		SELECT p.group_id, COALESCE(g.include_extensions, TRUE), COALESCE(g.include_company, TRUE)
-		FROM phones p LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).Scan(&group, &inclExt, &inclComp)
+		FROM phones p LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = @id`, momo.Named("id", phoneID)).Scan(&group, &inclExt, &inclComp)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, prov.ErrNotFound
 	}
@@ -46,10 +48,10 @@ func phoneBookRefs(ctx context.Context, q querier, phoneID int64) ([]bookRef, er
 	}
 	rows, err := q.QueryContext(ctx, `
 		SELECT b.id, b.name, b.version, b.kind FROM phonebooks b
-		LEFT JOIN phone_group_books gb ON gb.book_id = b.id AND gb.group_id = $3
-		WHERE (b.kind = 'extensions' AND $1) OR (b.kind = 'company' AND $2) OR (b.kind = 'named' AND gb.group_id IS NOT NULL)
+		LEFT JOIN phone_group_books gb ON gb.book_id = b.id AND gb.group_id = @group_id
+		WHERE (b.kind = 'extensions' AND @include_extensions) OR (b.kind = 'company' AND @include_company) OR (b.kind = 'named' AND gb.group_id IS NOT NULL)
 		ORDER BY CASE b.kind WHEN 'extensions' THEN 0 WHEN 'company' THEN 1 ELSE 2 END, gb.position, b.id`,
-		inclExt, inclComp, group)
+		momo.Named("include_extensions", inclExt), momo.Named("include_company", inclComp), momo.Named("group_id", group))
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +77,7 @@ func phoneBookRefs(ctx context.Context, q querier, phoneID int64) ([]bookRef, er
 		JOIN devices d ON d.id = ph.device_id
 		JOIN users u ON u.extension_id = d.extension_id
 		JOIN phonebooks b ON b.owner_user_id = u.id AND b.kind = 'personal'
-		WHERE ph.id = $1`, phoneID).Scan(&p.id, &p.name, &p.version, &p.kind)
+		WHERE ph.id = @id`, momo.Named("id", phoneID)).Scan(&p.id, &p.name, &p.version, &p.kind)
 	switch {
 	case err == nil:
 		out = append(out, p)

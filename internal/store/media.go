@@ -13,6 +13,8 @@ import (
 	"errors"
 	"strconv"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // Recording is one call recording. Object is its MinIO key and stays
@@ -60,10 +62,10 @@ func (s *Store) ListRecordings(ctx context.Context, extension string, before int
 	// One static query (as in ListCDRs): an empty extension keeps everything
 	// and a zero before starts at the newest.
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+recordingCols+recordingFrom+`
-		WHERE ($1 = '' OR EXISTS (SELECT 1 FROM cdrs c
-			WHERE c.correlation_id = r.correlation_id AND (c.source = $1 OR c.destination = $1)))
-		AND ($2 = 0 OR r.id < $2)
-		ORDER BY r.id DESC LIMIT $3`, extension, before, limit+1)
+		WHERE (@extension::text = '' OR EXISTS (SELECT 1 FROM cdrs c
+			WHERE c.correlation_id = r.correlation_id AND (c.source = @extension::text OR c.destination = @extension::text)))
+		AND (@before::integer = 0 OR r.id < @before::integer)
+		ORDER BY r.id DESC LIMIT @limit`, momo.Named("extension", extension), momo.Named("before", before), momo.Named("limit", limit+1))
 	if err != nil {
 		return nil, "", err
 	}
@@ -96,15 +98,16 @@ func (s *Store) InsertRecording(ctx context.Context, correlationID, object, init
 	var id int64
 	err := s.q(ctx).QueryRowContext(ctx, `
 		INSERT INTO recordings (correlation_id, minio_object, initiated_by, duration_ms)
-		VALUES ($1, $2, $3, $4) RETURNING id`,
-		correlationID, object, initiatedBy, durationMs).Scan(&id)
+		VALUES (@correlation_id, @minio_object, @initiated_by, @duration_ms) RETURNING id`,
+		momo.Named("correlation_id", correlationID), momo.Named("minio_object", object),
+		momo.Named("initiated_by", initiatedBy), momo.Named("duration_ms", durationMs)).Scan(&id)
 	return id, mapErr(err)
 }
 
 // GetRecording returns one recording.
 func (s *Store) GetRecording(ctx context.Context, id int64) (Recording, error) {
 	rec, err := scanRecording(s.q(ctx).QueryRowContext(ctx,
-		`SELECT `+recordingCols+recordingFrom+` WHERE r.id = $1`, id))
+		`SELECT `+recordingCols+recordingFrom+` WHERE r.id = @id`, momo.Named("id", id)))
 	return rec, mapErr(err)
 }
 
@@ -115,10 +118,10 @@ func (s *Store) DeleteRecording(ctx context.Context, actor string, id int64) (st
 	var object string
 	err := s.configChange(ctx, actor, "delete", "recording", nil, func(tx *dbTx) (int64, error) {
 		if err := tx.QueryRowContext(ctx,
-			`SELECT minio_object FROM recordings WHERE id = $1`, id).Scan(&object); err != nil {
+			`SELECT minio_object FROM recordings WHERE id = @id`, momo.Named("id", id)).Scan(&object); err != nil {
 			return id, err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM recordings WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM recordings WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -183,7 +186,7 @@ func (s *Store) ListAnnouncements(ctx context.Context) ([]Announcement, error) {
 // GetAnnouncement returns one announcement.
 func (s *Store) GetAnnouncement(ctx context.Context, id int64) (Announcement, error) {
 	a, err := scanAnnouncement(s.q(ctx).QueryRowContext(ctx,
-		`SELECT `+announcementCols+` FROM announcements WHERE id = $1`, id))
+		`SELECT `+announcementCols+` FROM announcements WHERE id = @id`, momo.Named("id", id)))
 	return a, mapErr(err)
 }
 
@@ -191,7 +194,7 @@ func (s *Store) GetAnnouncement(ctx context.Context, id int64) (Announcement, er
 // there is none).
 func (s *Store) AnnouncementByName(ctx context.Context, name string) (Announcement, bool, error) {
 	a, err := scanAnnouncement(s.q(ctx).QueryRowContext(ctx,
-		`SELECT `+announcementCols+` FROM announcements WHERE name = $1`, name))
+		`SELECT `+announcementCols+` FROM announcements WHERE name = @name`, momo.Named("name", name)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Announcement{}, false, nil
 	}
@@ -208,8 +211,8 @@ func (s *Store) CreateAnnouncement(ctx context.Context, actor, name, object stri
 	err := s.configChange(ctx, actor, "create", "announcement", check, func(tx *dbTx) (int64, error) {
 		var err error
 		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
-			INSERT INTO announcements (name, minio_object) VALUES ($1, $2) RETURNING `+announcementCols,
-			name, object))
+			INSERT INTO announcements (name, minio_object) VALUES (@name, @minio_object) RETURNING `+announcementCols,
+			momo.Named("name", name), momo.Named("minio_object", object)))
 		return a.ID, err
 	})
 	return a, err
@@ -227,7 +230,7 @@ func (s *Store) ReplaceAnnouncement(ctx context.Context, actor string, id int64)
 		// no longer describes what is stored.
 		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
 			UPDATE announcements SET updated_at = now(), text_hash = NULL, generated_at = NULL
-			WHERE id = $1 RETURNING `+announcementCols, id))
+			WHERE id = @id RETURNING `+announcementCols, momo.Named("id", id)))
 		return id, err
 	})
 	return a, err
@@ -241,8 +244,9 @@ func (s *Store) SaveAnnouncementPrompt(ctx context.Context, actor string, id int
 	err := s.provChange(ctx, actor, "update", "announcement", func(tx *dbTx) (string, bool, error) {
 		var err error
 		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
-			UPDATE announcements SET source_text = $2, voice_id = $3, model_id = $4
-			WHERE id = $1 RETURNING `+announcementCols, id, text, voice, model))
+			UPDATE announcements SET source_text = @source_text, voice_id = @voice_id, model_id = @model_id
+			WHERE id = @id RETURNING `+announcementCols, momo.Named("id", id),
+			momo.Named("source_text", text), momo.Named("voice_id", voice), momo.Named("model_id", model)))
 		return strconv.FormatInt(id, 10), false, err
 	})
 	return a, mapErr(err)
@@ -256,8 +260,9 @@ func (s *Store) CreateGeneratedAnnouncement(ctx context.Context, actor, name, ob
 		var err error
 		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
 			INSERT INTO announcements (name, minio_object, source_text, voice_id, model_id, generated_at, text_hash)
-			VALUES ($1, $2, $3, $4, $5, now(), $6) RETURNING `+announcementCols,
-			name, object, text, voice, model, PromptHash(text, voice, model)))
+			VALUES (@name, @minio_object, @source_text, @voice_id, @model_id, now(), @text_hash) RETURNING `+announcementCols,
+			momo.Named("name", name), momo.Named("minio_object", object), momo.Named("source_text", text),
+			momo.Named("voice_id", voice), momo.Named("model_id", model), momo.Named("text_hash", PromptHash(text, voice, model))))
 		return a.ID, err
 	})
 	return a, err
@@ -271,10 +276,11 @@ func (s *Store) MarkAnnouncementGenerated(ctx context.Context, actor string, id 
 	err := s.configChange(ctx, actor, "generate", "announcement", nil, func(tx *dbTx) (int64, error) {
 		var err error
 		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
-			UPDATE announcements SET updated_at = now(), source_text = $2, voice_id = $3, model_id = $4,
-			       generated_at = now(), text_hash = $5
-			WHERE id = $1 RETURNING `+announcementCols,
-			id, text, voice, model, PromptHash(text, voice, model)))
+			UPDATE announcements SET updated_at = now(), source_text = @source_text, voice_id = @voice_id, model_id = @model_id,
+			       generated_at = now(), text_hash = @text_hash
+			WHERE id = @id RETURNING `+announcementCols,
+			momo.Named("id", id), momo.Named("source_text", text), momo.Named("voice_id", voice),
+			momo.Named("model_id", model), momo.Named("text_hash", PromptHash(text, voice, model))))
 		return id, err
 	})
 	return a, mapErr(err)
@@ -287,13 +293,13 @@ func (s *Store) DeleteAnnouncement(ctx context.Context, actor string, id int64, 
 	err := s.configChange(ctx, actor, "delete", "announcement", check, func(tx *dbTx) (int64, error) {
 		var name string
 		if err := tx.QueryRowContext(ctx,
-			`SELECT minio_object, name FROM announcements WHERE id = $1`, id).Scan(&object, &name); err != nil {
+			`SELECT minio_object, name FROM announcements WHERE id = @id`, momo.Named("id", id)).Scan(&object, &name); err != nil {
 			return id, err
 		}
 		if err := refuseIfIVRPoints(ctx, tx, "announcement "+name, name, IVRAnnouncement); err != nil {
 			return id, err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM announcements WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM announcements WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}

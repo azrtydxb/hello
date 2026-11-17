@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/prov"
 	provbook "github.com/azrtydxb/hello/internal/prov/phonebook"
@@ -67,7 +69,7 @@ func (s *Store) ldapInfo(ctx context.Context, phoneID int64, v prov.Vendor, mode
 	}
 	var on bool
 	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(g.ldap_enabled, FALSE) FROM phones p
-		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).Scan(&on)
+		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = @id`, momo.Named("id", phoneID)).Scan(&on)
 	if err != nil || !on {
 		return nil, err
 	}
@@ -87,7 +89,7 @@ func (s *Store) ensureLDAPPassword(ctx context.Context, phoneID int64) (string, 
 	}
 	for range 3 {
 		var enc []byte
-		err := s.db.QueryRowContext(ctx, `SELECT ldap_password_enc FROM phones WHERE id = $1`, phoneID).Scan(&enc)
+		err := s.db.QueryRowContext(ctx, `SELECT ldap_password_enc FROM phones WHERE id = @id`, momo.Named("id", phoneID)).Scan(&enc)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", prov.ErrNotFound
 		}
@@ -106,8 +108,9 @@ func (s *Store) ensureLDAPPassword(ctx context.Context, phoneID int64) (string, 
 		if err != nil {
 			return "", err
 		}
-		res, err := s.db.ExecContext(ctx, `UPDATE phones SET ldap_password_enc = $2, ldap_dn = $3
-			WHERE id = $1 AND ldap_password_enc IS NULL`, phoneID, sealed, prov.LDAPBindDN(s.prov.LDAPBase, phoneID))
+		res, err := s.db.ExecContext(ctx, `UPDATE phones SET ldap_password_enc = @ldap_password_enc, ldap_dn = @ldap_dn
+			WHERE id = @id AND ldap_password_enc IS NULL`, momo.Named("id", phoneID), momo.Named("ldap_password_enc", sealed),
+			momo.Named("ldap_dn", prov.LDAPBindDN(s.prov.LDAPBase, phoneID)))
 		if err != nil {
 			return "", err
 		}
@@ -132,7 +135,7 @@ func (s *Store) RotateLDAPPassword(ctx context.Context, actor string, phoneID in
 	err := s.provChange(ctx, actor, "ldap-password-rotate", "phone", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(phoneID, 10)
 		var cur []byte
-		err := tx.QueryRowContext(ctx, `SELECT ldap_password_enc FROM phones WHERE id = $1 FOR UPDATE`, phoneID).Scan(&cur)
+		err := tx.QueryRowContext(ctx, `SELECT ldap_password_enc FROM phones WHERE id = @id FOR UPDATE`, momo.Named("id", phoneID)).Scan(&cur)
 		if errors.Is(err, sql.ErrNoRows) {
 			return sid, false, ErrNotFound
 		}
@@ -152,9 +155,10 @@ func (s *Store) RotateLDAPPassword(ctx context.Context, actor string, phoneID in
 				}
 			}
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE phones SET ldap_password_enc = $2, ldap_prev_password_enc = $3,
-			ldap_rotated_at = now(), ldap_dn = $4, updated_at = now() WHERE id = $1`,
-			phoneID, sealed, prev, prov.LDAPBindDN(s.prov.LDAPBase, phoneID))
+		_, err = tx.ExecContext(ctx, `UPDATE phones SET ldap_password_enc = @ldap_password_enc, ldap_prev_password_enc = @ldap_prev_password_enc,
+			ldap_rotated_at = now(), ldap_dn = @ldap_dn, updated_at = now() WHERE id = @id`,
+			momo.Named("id", phoneID), momo.Named("ldap_password_enc", sealed), momo.Named("ldap_prev_password_enc", prev),
+			momo.Named("ldap_dn", prov.LDAPBindDN(s.prov.LDAPBase, phoneID)))
 		return sid, false, err
 	})
 	if err != nil {
@@ -194,7 +198,7 @@ func (s *Store) GetPhoneLDAP(ctx context.Context, phoneID int64) (PhoneLDAP, err
 	)
 	err := s.db.QueryRowContext(ctx, `SELECT p.vendor, p.model, COALESCE(g.ldap_enabled, FALSE), p.ldap_password_enc,
 		p.ldap_prev_password_enc, p.ldap_rotated_at, p.ldap_last_bind_at
-		FROM phones p LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).
+		FROM phones p LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = @id`, momo.Named("id", phoneID)).
 		Scan(&vendor, &model, &out.GroupEnabled, &enc, &prev, &rotated, &lastB)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, ErrNotFound
@@ -223,7 +227,8 @@ func (s *Store) GetPhoneLDAP(ctx context.Context, phoneID int64) (PhoneLDAP, err
 func (s *Store) SetPhoneGroupLDAP(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error) {
 	var out phonebook.Group
 	err := s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET ldap_enabled = $2, updated_at = now() WHERE id = $1`, id, enabled)
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET ldap_enabled = @ldap_enabled, updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("ldap_enabled", enabled))
 		if err != nil {
 			return err
 		}
@@ -258,7 +263,7 @@ func (s *Store) Authenticate(ctx context.Context, phoneID int64, password string
 	)
 	err := s.db.QueryRowContext(ctx, `SELECT p.ldap_password_enc, p.ldap_prev_password_enc, p.ldap_rotated_at, p.ldap_last_bind_at,
 		p.enabled, COALESCE(g.ldap_enabled, FALSE)
-		FROM phones p LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).
+		FROM phones p LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = @id`, momo.Named("id", phoneID)).
 		Scan(&cur, &prev, &rotated, &last, &enabled, &on)
 	if errors.Is(err, sql.ErrNoRows) {
 		subtle.ConstantTimeCompare([]byte(password), []byte(password))
@@ -284,7 +289,7 @@ func (s *Store) Authenticate(ctx context.Context, phoneID int64, password string
 	}
 	if !last.Valid || time.Since(last.Time) > ldapBindTouch {
 		// Best effort: a phone is not refused because the stamp failed.
-		_, _ = s.db.ExecContext(ctx, `UPDATE phones SET ldap_last_bind_at = now() WHERE id = $1`, phoneID)
+		_, _ = s.db.ExecContext(ctx, `UPDATE phones SET ldap_last_bind_at = now() WHERE id = @id`, momo.Named("id", phoneID))
 	}
 	return true, nil
 }
@@ -318,7 +323,7 @@ func (s *Store) ldapRefs(ctx context.Context, phoneID int64) ([]bookRef, error) 
 	}
 	var ok bool
 	err := s.db.QueryRowContext(ctx, `SELECT p.enabled AND COALESCE(g.ldap_enabled, FALSE) FROM phones p
-		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).Scan(&ok)
+		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = @id`, momo.Named("id", phoneID)).Scan(&ok)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !ok) {
 		return nil, prov.ErrNotFound
 	}

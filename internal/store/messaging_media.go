@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/messaging/provider"
@@ -91,7 +93,7 @@ func loadMedia(ctx context.Context, q dbQuery, msgs []ConvMessage) error {
 		}
 	}
 	rows, err := q.QueryContext(ctx, `SELECT `+convMediaCols+` FROM message_media mm
-		WHERE mm.message_id = ANY($1::bigint[]) ORDER BY mm.id`, ids)
+		WHERE mm.message_id = ANY(@ids::bigint[]) ORDER BY mm.id`, momo.Named("ids", ids))
 	if err != nil {
 		return err
 	}
@@ -133,14 +135,17 @@ func beginUpload(ctx context.Context, tx *dbTx, channelID int64, conv, user, vis
 	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO message_media (conversation_id, channel_id, direction, status, content_type, declared_type, size, sha256,
 			filename, uploader_user_id, uploader_visitor_id)
-		VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10) RETURNING id, created_at`,
-		conv, channelID, dir, in.ContentType, clip(in.Declared, 100), in.Size, in.SHA256,
-		media.CleanFilename(in.Filename, in.ContentType), user, visitor).Scan(&up.ID, &at); err != nil {
+		VALUES (@conversation_id, @channel_id, @direction, 'pending', @content_type, @declared_type, @size, @sha256,
+			@filename, @uploader_user_id, @uploader_visitor_id) RETURNING id, created_at`,
+		momo.Named("conversation_id", conv), momo.Named("channel_id", channelID), momo.Named("direction", dir),
+		momo.Named("content_type", in.ContentType), momo.Named("declared_type", clip(in.Declared, 100)), momo.Named("size", in.Size),
+		momo.Named("sha256", in.SHA256), momo.Named("filename", media.CleanFilename(in.Filename, in.ContentType)),
+		momo.Named("uploader_user_id", user), momo.Named("uploader_visitor_id", visitor)).Scan(&up.ID, &at); err != nil {
 		return up, err
 	}
 	up.ChannelID = channelID
 	up.Key = media.UploadKey(channelID, at, up.ID, in.SHA256)
-	_, err := tx.ExecContext(ctx, `UPDATE message_media SET object_key = $2 WHERE id = $1`, up.ID, up.Key)
+	_, err := tx.ExecContext(ctx, `UPDATE message_media SET object_key = @object_key WHERE id = @id`, momo.Named("id", up.ID), momo.Named("object_key", up.Key))
 	return up, err
 }
 
@@ -163,7 +168,7 @@ func (s *Store) BeginInboxUpload(ctx context.Context, acc InboxAccess, convID in
 		)
 		err := tx.QueryRowContext(ctx, `
 			SELECT c.channel_id, ch.provider FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id
-			WHERE c.id = $3 AND `+visible, acc.UserID, acc.All, convID).Scan(&channelID, &prov)
+			WHERE c.id = @id AND `+visibleTo, append(inboxAccessArgs(acc.UserID, acc.All), momo.Named("id", convID))...).Scan(&channelID, &prov)
 		if err != nil {
 			return mapErr(err)
 		}
@@ -179,15 +184,15 @@ func (s *Store) BeginInboxUpload(ctx context.Context, acc InboxAccess, convID in
 // FinishMediaUpload marks an upload's file stored and returns it.
 func (s *Store) FinishMediaUpload(ctx context.Context, id int64) (ConvMedia, error) {
 	m, err := scanConvMedia(s.db.QueryRowContext(ctx, `
-		UPDATE message_media mm SET status = 'ready' WHERE id = $1 AND status = 'pending' AND attached_at IS NULL
-		RETURNING `+convMediaCols, id))
+		UPDATE message_media mm SET status = 'ready' WHERE id = @id AND status = 'pending' AND attached_at IS NULL
+		RETURNING `+convMediaCols, momo.Named("id", id)))
 	return m, mapErr(err)
 }
 
 // AbortMediaUpload drops an upload whose file could not be stored. The
 // caller removes whatever part of the object may exist.
 func (s *Store) AbortMediaUpload(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM message_media WHERE id = $1 AND attached_at IS NULL`, id)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM message_media WHERE id = @id AND attached_at IS NULL`, momo.Named("id", id))
 	return err
 }
 
@@ -215,10 +220,10 @@ func attachUploads(ctx context.Context, tx *dbTx, convID, msgID, userID int64, i
 		return nil
 	}
 	res, err := tx.ExecContext(ctx, `
-		UPDATE message_media SET message_id = $1, attached_at = now()
-		WHERE id = ANY($2::bigint[]) AND conversation_id = $3 AND uploader_user_id = $4
+		UPDATE message_media SET message_id = @message_id, attached_at = now()
+		WHERE id = ANY(@ids::bigint[]) AND conversation_id = @conversation_id AND uploader_user_id = @user_id
 		  AND message_id IS NULL AND attached_at IS NULL AND status = 'ready' AND direction = 'out'`,
-		msgID, ids, convID, userID)
+		momo.Named("message_id", msgID), momo.Named("ids", ids), momo.Named("conversation_id", convID), momo.Named("user_id", userID))
 	if err != nil {
 		return err
 	}
@@ -234,8 +239,8 @@ func (s *Store) InboxMedia(ctx context.Context, acc InboxAccess, id int64) (Medi
 	var f MediaFile
 	m, err := scanConvMedia(s.db.QueryRowContext(ctx, `
 		SELECT `+convMediaCols+`, c.id, mm.object_key, mm.sha256 FROM message_media mm JOIN conversations c ON c.id = mm.conversation_id
-		WHERE mm.id = $3 AND (mm.attached_at IS NOT NULL OR mm.uploader_user_id = $1) AND `+visible,
-		acc.UserID, acc.All, id), &f.ConversationID, &f.Key, &f.SHA256)
+		WHERE mm.id = @id AND (mm.attached_at IS NOT NULL OR mm.uploader_user_id = @user_id) AND `+visibleTo,
+		append(inboxAccessArgs(acc.UserID, acc.All), momo.Named("id", id))...), &f.ConversationID, &f.Key, &f.SHA256)
 	if err != nil {
 		return f, mapErr(err)
 	}
@@ -264,10 +269,10 @@ func attachChatUploads(ctx context.Context, tx *dbTx, convID, msgID, visitorID i
 		return nil
 	}
 	res, err := tx.ExecContext(ctx, `
-		UPDATE message_media SET message_id = $1, conversation_id = $2, attached_at = now()
-		WHERE id = ANY($3::bigint[]) AND uploader_visitor_id = $4
+		UPDATE message_media SET message_id = @message_id, conversation_id = @conversation_id, attached_at = now()
+		WHERE id = ANY(@ids::bigint[]) AND uploader_visitor_id = @visitor_id
 		  AND message_id IS NULL AND attached_at IS NULL AND status = 'ready'`,
-		msgID, convID, ids, visitorID)
+		momo.Named("message_id", msgID), momo.Named("conversation_id", convID), momo.Named("ids", ids), momo.Named("visitor_id", visitorID))
 	if err != nil {
 		return err
 	}
@@ -285,8 +290,8 @@ func (s *Store) ChatMedia(ctx context.Context, visitorID, id int64) (MediaFile, 
 		SELECT `+convMediaCols+`, c.id, mm.object_key, mm.sha256 FROM message_media mm
 		JOIN conversation_messages x ON x.id = mm.message_id
 		JOIN conversations c ON c.id = x.conversation_id
-		WHERE mm.id = $1 AND c.peer_kind = 'visitor' AND c.peer_key = $2 AND x.kind = 'message'
-		  AND x.status IN ('sent', 'delivered', 'read')`, id, chatPeerKey(visitorID)), &f.ConversationID, &f.Key, &f.SHA256)
+		WHERE mm.id = @id AND c.peer_kind = 'visitor' AND c.peer_key = @peer_key AND x.kind = 'message'
+		  AND x.status IN ('sent', 'delivered', 'read')`, momo.Named("id", id), momo.Named("peer_key", chatPeerKey(visitorID))), &f.ConversationID, &f.Key, &f.SHA256)
 	if err != nil {
 		return f, mapErr(err)
 	}
@@ -303,7 +308,7 @@ func (s *Store) ChatMedia(ctx context.Context, visitorID, id int64) (MediaFile, 
 func (s *Store) ConversationMedia(ctx context.Context, convID int64) ([]MediaFile, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+convMediaCols+`, mm.conversation_id, mm.object_key, mm.sha256 FROM message_media mm
-		WHERE mm.conversation_id = $1 ORDER BY mm.id`, convID)
+		WHERE mm.conversation_id = @conversation_id ORDER BY mm.id`, momo.Named("conversation_id", convID))
 	if err != nil {
 		return nil, err
 	}
@@ -332,8 +337,9 @@ func insertInboundMedia(ctx context.Context, tx *dbTx, convID, msgID, channelID 
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO message_media (message_id, conversation_id, channel_id, direction, status, declared_type, size, source_ref, attached_at)
-			VALUES ($1, $2, $3, 'in', 'pending', $4, $5, $6::jsonb, now())`,
-			msgID, convID, channelID, clip(ref.ContentType, 100), max(ref.Size, 0), string(src)); err != nil {
+			VALUES (@message_id, @conversation_id, @channel_id, 'in', 'pending', @declared_type, @size, @source_ref::jsonb, now())`,
+			momo.Named("message_id", msgID), momo.Named("conversation_id", convID), momo.Named("channel_id", channelID),
+			momo.Named("declared_type", clip(ref.ContentType, 100)), momo.Named("size", max(ref.Size, 0)), momo.Named("source_ref", string(src))); err != nil {
 			return err
 		}
 	}
@@ -349,8 +355,8 @@ func (s *Store) AddInboundMedia(ctx context.Context, messageID int64, refs []pro
 	}
 	return s.tx(ctx, func(tx *dbTx) error {
 		var convID, channelID int64
-		if err := tx.QueryRowContext(ctx, `SELECT conversation_id, channel_id FROM conversation_messages WHERE id = $1 AND direction = 'in'`,
-			messageID).Scan(&convID, &channelID); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT conversation_id, channel_id FROM conversation_messages WHERE id = @id AND direction = 'in'`,
+			momo.Named("id", messageID)).Scan(&convID, &channelID); err != nil {
 			return mapErr(err)
 		}
 		return insertInboundMedia(ctx, tx, convID, messageID, channelID, refs)
@@ -368,14 +374,14 @@ func (s *Store) ClaimMediaFetch(ctx context.Context, limit int) ([]media.FetchJo
 	err := s.tx(ctx, func(tx *dbTx) error {
 		out = nil
 		rows, err := tx.QueryContext(ctx, `
-			UPDATE message_media mm SET attempts = mm.attempts + 1, next_attempt_at = now() + make_interval(secs => $2)
+			UPDATE message_media mm SET attempts = mm.attempts + 1, next_attempt_at = now() + make_interval(secs => @lease)
 			FROM msg_channels ch
 			WHERE ch.id = mm.channel_id AND mm.id IN (
 				SELECT id FROM message_media WHERE status = 'pending' AND direction = 'in' AND attached_at IS NOT NULL
 				  AND message_id IS NOT NULL AND next_attempt_at <= now()
-				ORDER BY next_attempt_at, id LIMIT $1 FOR UPDATE SKIP LOCKED)
+				ORDER BY next_attempt_at, id LIMIT @limit FOR UPDATE SKIP LOCKED)
 			RETURNING mm.id, mm.message_id, mm.channel_id, ch.provider, mm.source_ref::text, mm.created_at, mm.attempts - 1`,
-			limit, mediaLease.Seconds())
+			momo.Named("limit", limit), momo.Named("lease", mediaLease.Seconds()))
 		if err != nil {
 			return err
 		}
@@ -411,18 +417,19 @@ func (s *Store) FinishMediaFetch(ctx context.Context, job media.FetchJob, res me
 			// (message_id NULL) never names it, and the worker removes the
 			// file it just stored (media.ErrGone).
 			err = tx.QueryRowContext(ctx, `
-				UPDATE message_media SET status = 'ready', object_key = $2, content_type = $3, size = $4, sha256 = $5,
-					declared_type = $6, filename = $7, reason = '', source_ref = '{}'
-				WHERE id = $1 AND status = 'pending' AND message_id IS NOT NULL RETURNING conversation_id`,
-				job.ID, res.Key, res.ContentType, res.Size, res.SHA256, clip(res.Declared, 100),
-				"attachment"+media.Extension(res.ContentType)).Scan(&convID)
+				UPDATE message_media SET status = 'ready', object_key = @object_key, content_type = @content_type, size = @size, sha256 = @sha256,
+					declared_type = @declared_type, filename = @filename, reason = '', source_ref = '{}'
+				WHERE id = @id AND status = 'pending' AND message_id IS NOT NULL RETURNING conversation_id`,
+				momo.Named("id", job.ID), momo.Named("object_key", res.Key), momo.Named("content_type", res.ContentType),
+				momo.Named("size", res.Size), momo.Named("sha256", res.SHA256), momo.Named("declared_type", clip(res.Declared, 100)),
+				momo.Named("filename", "attachment"+media.Extension(res.ContentType))).Scan(&convID)
 			if errors.Is(err, sql.ErrNoRows) {
 				// Another worker whose lease lapsed may have stored the same
 				// file under the same key; it stays while a row of the
 				// message names it.
 				var named bool
-				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM message_media WHERE message_id = $1 AND object_key = $2)`,
-					job.MessageID, res.Key).Scan(&named); err != nil {
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM message_media WHERE message_id = @message_id AND object_key = @object_key)`,
+					momo.Named("message_id", job.MessageID), momo.Named("object_key", res.Key)).Scan(&named); err != nil {
 					return err
 				}
 				if named {
@@ -434,12 +441,13 @@ func (s *Store) FinishMediaFetch(ctx context.Context, job media.FetchJob, res me
 			// The carrier's URL is dropped with the attempt: nothing is
 			// fetched from it again.
 			err = tx.QueryRowContext(ctx, `
-				UPDATE message_media SET status = $2, reason = $3, declared_type = coalesce(NULLIF($4, ''), declared_type), source_ref = '{}'
-				WHERE id = $1 AND status = 'pending' RETURNING conversation_id`,
-				job.ID, res.Status, clip(res.Reason, 64), clip(res.Declared, 100)).Scan(&convID)
+				UPDATE message_media SET status = @status, reason = @reason, declared_type = coalesce(NULLIF(@declared_type, ''), declared_type), source_ref = '{}'
+				WHERE id = @id AND status = 'pending' RETURNING conversation_id`,
+				momo.Named("id", job.ID), momo.Named("status", res.Status), momo.Named("reason", clip(res.Reason, 64)),
+				momo.Named("declared_type", clip(res.Declared, 100))).Scan(&convID)
 		default:
-			_, err = tx.ExecContext(ctx, `UPDATE message_media SET next_attempt_at = now() + make_interval(secs => $2)
-				WHERE id = $1 AND status = 'pending'`, job.ID, res.Retry.Seconds())
+			_, err = tx.ExecContext(ctx, `UPDATE message_media SET next_attempt_at = now() + make_interval(secs => @retry_in)
+				WHERE id = @id AND status = 'pending'`, momo.Named("id", job.ID), momo.Named("retry_in", res.Retry.Seconds()))
 			return err
 		}
 		if errors.Is(err, sql.ErrNoRows) {
@@ -460,11 +468,11 @@ func (s *Store) MediaGarbage(ctx context.Context, limit int) ([]media.Garbage, e
 		SELECT id, object_key, TRUE FROM message_media WHERE message_id IS NULL AND attached_at IS NOT NULL
 		UNION ALL
 		SELECT id, object_key, TRUE FROM message_media WHERE message_id IS NULL AND attached_at IS NULL
-			AND created_at < now() - make_interval(secs => $2)
+			AND created_at < now() - make_interval(secs => @upload_ttl)
 		UNION ALL
 		SELECT id, object_key, FALSE FROM message_media WHERE status = 'ready' AND message_id IS NOT NULL
 			AND created_at < now() - make_interval(days => (SELECT retention_media_days FROM messaging_settings))
-		LIMIT $1`, limit, media.UploadTTL.Seconds())
+		LIMIT @limit`, momo.Named("limit", limit), momo.Named("upload_ttl", media.UploadTTL.Seconds()))
 	if err != nil {
 		return nil, err
 	}
@@ -495,10 +503,11 @@ func (s *Store) KnownMediaKeys(ctx context.Context, keys []string) (map[string]b
 		}
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT k.key FROM unnest($1::text[], $2::bigint[], $3::bigint[]) AS k(key, msg, mid)
+		SELECT k.key FROM unnest(@keys::text[], @msgs::bigint[], @ids::bigint[]) AS k(key, msg, mid)
 		WHERE (k.mid > 0 AND EXISTS (SELECT 1 FROM message_media mm WHERE mm.id = k.mid AND mm.object_key = k.key))
 		   OR (k.msg > 0 AND EXISTS (SELECT 1 FROM message_media mm WHERE mm.message_id = k.msg AND mm.object_key = k.key))
-		   OR EXISTS (SELECT 1 FROM message_media mm WHERE mm.message_id IS NULL AND mm.object_key = k.key)`, keys, msgs, ids)
+		   OR EXISTS (SELECT 1 FROM message_media mm WHERE mm.message_id IS NULL AND mm.object_key = k.key)`,
+		momo.Named("keys", keys), momo.Named("msgs", msgs), momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -517,11 +526,11 @@ func (s *Store) KnownMediaKeys(ctx context.Context, keys []string) (map[string]b
 // unsent upload loses its row; a file past retention leaves its row expired.
 func (s *Store) DropMedia(ctx context.Context, g media.Garbage) error {
 	if g.Drop {
-		_, err := s.db.ExecContext(ctx, `DELETE FROM message_media WHERE id = $1`, g.ID)
+		_, err := s.db.ExecContext(ctx, `DELETE FROM message_media WHERE id = @id`, momo.Named("id", g.ID))
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE message_media SET status = 'expired', object_key = '', reason = $2 WHERE id = $1`,
-		g.ID, media.ReasonRetention)
+	_, err := s.db.ExecContext(ctx, `UPDATE message_media SET status = 'expired', object_key = '', reason = @reason WHERE id = @id`,
+		momo.Named("id", g.ID), momo.Named("reason", media.ReasonRetention))
 	return err
 }
 
@@ -536,9 +545,10 @@ func (s *Store) MintMediaLink(ctx context.Context, mediaID int64) (string, time.
 	var exp time.Time
 	err = s.db.QueryRowContext(ctx, `
 		INSERT INTO media_links (token_hash, media_id, expires_at, max_uses)
-		SELECT $1, id, now() + make_interval(secs => $3), $4 FROM message_media
-		WHERE id = $2 AND direction = 'out' AND status = 'ready' AND object_key <> ''
-		RETURNING expires_at`, hash, mediaID, media.LinkTTL.Seconds(), media.LinkMaxUses).Scan(&exp)
+		SELECT @token_hash, id, now() + make_interval(secs => @ttl), @max_uses FROM message_media
+		WHERE id = @id AND direction = 'out' AND status = 'ready' AND object_key <> ''
+		RETURNING expires_at`, momo.Named("token_hash", hash), momo.Named("id", mediaID), momo.Named("ttl", media.LinkTTL.Seconds()),
+		momo.Named("max_uses", media.LinkMaxUses)).Scan(&exp)
 	if err != nil {
 		return "", time.Time{}, mapErr(err)
 	}
@@ -553,9 +563,9 @@ func (s *Store) RedeemMediaLink(ctx context.Context, tokenHash []byte) (media.St
 	err := s.db.QueryRowContext(ctx, `
 		WITH used AS (
 			UPDATE media_links SET uses = uses + 1
-			WHERE token_hash = $1 AND expires_at > now() AND uses < max_uses RETURNING media_id)
+			WHERE token_hash = @token_hash AND expires_at > now() AND uses < max_uses RETURNING media_id)
 		SELECT mm.object_key, mm.content_type, mm.filename FROM used JOIN message_media mm ON mm.id = used.media_id
-		WHERE mm.status = 'ready' AND mm.object_key <> ''`, tokenHash).Scan(&f.Key, &f.ContentType, &f.Filename)
+		WHERE mm.status = 'ready' AND mm.object_key <> ''`, momo.Named("token_hash", tokenHash)).Scan(&f.Key, &f.ContentType, &f.Filename)
 	return f, mapErr(err)
 }
 
@@ -564,9 +574,9 @@ func (s *Store) RedeemMediaLink(ctx context.Context, tokenHash []byte) (media.St
 func peerMedia(ctx context.Context, tx *dbTx, peerKey string) ([]media.Garbage, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, object_key, TRUE FROM message_media
-		WHERE conversation_id IN (SELECT id FROM conversations WHERE peer_key = $1)
-		   OR uploader_visitor_id IN (SELECT id FROM chat_visitors WHERE 'visitor:' || id::text = $1)
-		FOR UPDATE`, peerKey)
+		WHERE conversation_id IN (SELECT id FROM conversations WHERE peer_key = @peer_key)
+		   OR uploader_visitor_id IN (SELECT id FROM chat_visitors WHERE 'visitor:' || id::text = @peer_key)
+		FOR UPDATE`, momo.Named("peer_key", peerKey))
 	if err != nil {
 		return nil, err
 	}
@@ -586,7 +596,8 @@ func peerMedia(ctx context.Context, tx *dbTx, peerKey string) ([]media.Garbage, 
 // the type ctype.
 func (s *Store) SetChatSiteLogo(ctx context.Context, actor string, id int64, ctype string) (ChatSite, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE chat_sites SET logo_type = $2, logo_updated_at = now(), updated_at = now() WHERE id = $1`, id, ctype)
+		res, err := tx.ExecContext(ctx, `UPDATE chat_sites SET logo_type = @logo_type, logo_updated_at = now(), updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("logo_type", ctype))
 		if err != nil {
 			return err
 		}
@@ -604,7 +615,7 @@ func (s *Store) SetChatSiteLogo(ctx context.Context, actor string, id int64, cty
 // ClearChatSiteLogo removes a site's logo; the caller removes the object.
 func (s *Store) ClearChatSiteLogo(ctx context.Context, actor string, id int64) error {
 	return s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE chat_sites SET logo_type = '', logo_updated_at = NULL, updated_at = now() WHERE id = $1 AND logo_type <> ''`, id)
+		res, err := tx.ExecContext(ctx, `UPDATE chat_sites SET logo_type = '', logo_updated_at = NULL, updated_at = now() WHERE id = @id AND logo_type <> ''`, momo.Named("id", id))
 		if err != nil {
 			return err
 		}

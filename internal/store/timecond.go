@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/timecond"
 )
 
@@ -80,7 +82,7 @@ func listSchedules(ctx context.Context, q querier, where string, args ...any) ([
 		byID[out[i].ID] = &out[i]
 	}
 	rrows, err := q.QueryContext(ctx, `SELECT schedule_id, weekday, start_time, end_time FROM schedule_ranges
-		WHERE schedule_id = ANY($1) ORDER BY schedule_id, weekday, start_time`, ids)
+		WHERE schedule_id = ANY(@ids) ORDER BY schedule_id, weekday, start_time`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +100,7 @@ func listSchedules(ctx context.Context, q querier, where string, args ...any) ([
 		return nil, err
 	}
 	crows, err := q.QueryContext(ctx, `SELECT sc.schedule_id, c.id, c.name FROM schedule_calendars sc
-		JOIN calendars c ON c.id = sc.calendar_id WHERE sc.schedule_id = ANY($1) ORDER BY sc.schedule_id, c.name`, ids)
+		JOIN calendars c ON c.id = sc.calendar_id WHERE sc.schedule_id = ANY(@ids) ORDER BY sc.schedule_id, c.name`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +124,7 @@ func (s *Store) ListSchedules(ctx context.Context) ([]Schedule, error) {
 
 // GetSchedule returns one schedule.
 func (s *Store) GetSchedule(ctx context.Context, id int64) (Schedule, error) {
-	ss, err := listSchedules(ctx, s.q(ctx), ` WHERE s.id = $1`, id)
+	ss, err := listSchedules(ctx, s.q(ctx), ` WHERE s.id = @id`, momo.Named("id", id))
 	if err != nil {
 		return Schedule{}, err
 	}
@@ -133,27 +135,28 @@ func (s *Store) GetSchedule(ctx context.Context, id int64) (Schedule, error) {
 }
 
 func writeScheduleParts(ctx context.Context, tx *dbTx, id int64, in ScheduleInput) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM schedule_ranges WHERE schedule_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM schedule_ranges WHERE schedule_id = @schedule_id`, momo.Named("schedule_id", id)); err != nil {
 		return err
 	}
 	for _, r := range in.Ranges {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO schedule_ranges (schedule_id, weekday, start_time, end_time)
-			VALUES ($1, $2, $3, $4)`, id, r.Day, r.Start, r.End); err != nil {
+			VALUES (@schedule_id, @weekday, @start_time, @end_time)`,
+			momo.Named("schedule_id", id), momo.Named("weekday", r.Day), momo.Named("start_time", r.Start), momo.Named("end_time", r.End)); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM schedule_calendars WHERE schedule_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM schedule_calendars WHERE schedule_id = @schedule_id`, momo.Named("schedule_id", id)); err != nil {
 		return err
 	}
 	for _, c := range in.CalendarIDs {
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM calendars WHERE id = $1`, c).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM calendars WHERE id = @id`, momo.Named("id", c)).Scan(&n); err != nil {
 			return err
 		}
 		if n == 0 {
 			return fieldError("calendarIds", fmt.Sprintf("calendar %d does not exist", c))
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO schedule_calendars (schedule_id, calendar_id) VALUES ($1, $2)`, id, c); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schedule_calendars (schedule_id, calendar_id) VALUES (@schedule_id, @calendar_id)`, momo.Named("schedule_id", id), momo.Named("calendar_id", c)); err != nil {
 			return err
 		}
 	}
@@ -172,14 +175,14 @@ func (s *Store) CreateSchedule(ctx context.Context, actor string, in ScheduleInp
 			return 0, &InUseError{Msg: fmt.Sprintf("at most %d schedules", MaxSchedules)}
 		}
 		var id int64
-		if err := tx.QueryRowContext(ctx, `INSERT INTO schedules (name, time_zone) VALUES ($1, $2) RETURNING id`,
-			in.Name, in.TimeZone).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO schedules (name, time_zone) VALUES (@name, @time_zone) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("time_zone", in.TimeZone)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := writeScheduleParts(ctx, tx, id, in); err != nil {
 			return id, err
 		}
-		ss, err := listSchedules(ctx, tx, ` WHERE s.id = $1`, id)
+		ss, err := listSchedules(ctx, tx, ` WHERE s.id = @id`, momo.Named("id", id))
 		if err == nil && len(ss) == 1 {
 			out = ss[0]
 		}
@@ -192,8 +195,8 @@ func (s *Store) CreateSchedule(ctx context.Context, actor string, in ScheduleInp
 func (s *Store) UpdateSchedule(ctx context.Context, actor string, id int64, in ScheduleInput, check Check) (Schedule, error) {
 	var out Schedule
 	err := s.configChange(ctx, actor, "update", "schedule", check, func(tx *dbTx) (int64, error) {
-		res, err := tx.ExecContext(ctx, `UPDATE schedules SET name = $2, time_zone = $3, updated_at = now() WHERE id = $1`,
-			id, in.Name, in.TimeZone)
+		res, err := tx.ExecContext(ctx, `UPDATE schedules SET name = @name, time_zone = @time_zone, updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("name", in.Name), momo.Named("time_zone", in.TimeZone))
 		if err != nil {
 			return id, err
 		}
@@ -203,7 +206,7 @@ func (s *Store) UpdateSchedule(ctx context.Context, actor string, id int64, in S
 		if err := writeScheduleParts(ctx, tx, id, in); err != nil {
 			return id, err
 		}
-		ss, err := listSchedules(ctx, tx, ` WHERE s.id = $1`, id)
+		ss, err := listSchedules(ctx, tx, ` WHERE s.id = @id`, momo.Named("id", id))
 		if err == nil && len(ss) == 1 {
 			out = ss[0]
 		}
@@ -216,17 +219,17 @@ func (s *Store) UpdateSchedule(ctx context.Context, actor string, id int64, in S
 func (s *Store) DeleteSchedule(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "schedule", check, func(tx *dbTx) (int64, error) {
 		var name string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM schedules WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM schedules WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&name); err != nil {
 			return id, err
 		}
-		refs, err := stringsOf(ctx, tx, `SELECT 'time condition ' || name FROM time_conditions WHERE schedule_id = $1 ORDER BY name`, id)
+		refs, err := stringsOf(ctx, tx, `SELECT 'time condition ' || name FROM time_conditions WHERE schedule_id = @schedule_id ORDER BY name`, momo.Named("schedule_id", id))
 		if err != nil {
 			return id, err
 		}
 		if len(refs) > 0 {
 			return id, inUseBy("schedule "+name, refs)
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM schedules WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM schedules WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -331,7 +334,7 @@ func listCalendars(ctx context.Context, q querier, where string, args ...any) ([
 		byID[out[i].ID] = &out[i]
 	}
 	erows, err := q.QueryContext(ctx, `SELECT e.calendar_id, `+calEntryCols+` FROM calendar_entries e
-		WHERE e.calendar_id = ANY($1) ORDER BY e.calendar_id, e.yearly, to_char(e.start_date, 'MM-DD'), e.start_date, e.id`, ids)
+		WHERE e.calendar_id = ANY(@ids) ORDER BY e.calendar_id, e.yearly, to_char(e.start_date, 'MM-DD'), e.start_date, e.id`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +352,7 @@ func listCalendars(ctx context.Context, q querier, where string, args ...any) ([
 		return nil, err
 	}
 	srows, err := q.QueryContext(ctx, `SELECT sc.calendar_id, s.name FROM schedule_calendars sc
-		JOIN schedules s ON s.id = sc.schedule_id WHERE sc.calendar_id = ANY($1) ORDER BY sc.calendar_id, s.name`, ids)
+		JOIN schedules s ON s.id = sc.schedule_id WHERE sc.calendar_id = ANY(@ids) ORDER BY sc.calendar_id, s.name`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +375,7 @@ func (s *Store) ListCalendars(ctx context.Context) ([]Calendar, error) {
 
 // GetCalendar returns one calendar.
 func (s *Store) GetCalendar(ctx context.Context, id int64) (Calendar, error) {
-	cs, err := listCalendars(ctx, s.q(ctx), ` WHERE c.id = $1`, id)
+	cs, err := listCalendars(ctx, s.q(ctx), ` WHERE c.id = @id`, momo.Named("id", id))
 	if err != nil {
 		return Calendar{}, err
 	}
@@ -395,8 +398,10 @@ func insertEntries(ctx context.Context, tx *dbTx, calendarID int64, entries []ti
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO calendar_entries
 			(calendar_id, label, start_date, end_date, yearly, all_day, start_time, end_time, mode, open_hours)
-			VALUES ($1, $2, $3::date, $4::date, $5, $6, $7, $8, $9, $10::jsonb)`,
-			calendarID, e.Label, start, end, e.Yearly, e.AllDay, e.StartTime, e.EndTime, e.Mode, string(hours)); err != nil {
+			VALUES (@calendar_id, @label, @start_date::date, @end_date::date, @yearly, @all_day, @start_time, @end_time, @mode, @open_hours::jsonb)`,
+			momo.Named("calendar_id", calendarID), momo.Named("label", e.Label), momo.Named("start_date", start), momo.Named("end_date", end),
+			momo.Named("yearly", e.Yearly), momo.Named("all_day", e.AllDay), momo.Named("start_time", e.StartTime), momo.Named("end_time", e.EndTime), momo.Named("mode", e.Mode),
+			momo.Named("open_hours", string(hours))); err != nil {
 			return err
 		}
 	}
@@ -415,14 +420,14 @@ func (s *Store) CreateCalendar(ctx context.Context, actor string, in CalendarInp
 			return 0, &InUseError{Msg: fmt.Sprintf("at most %d calendars", MaxCalendars)}
 		}
 		var id int64
-		if err := tx.QueryRowContext(ctx, `INSERT INTO calendars (name, description) VALUES ($1, $2) RETURNING id`,
-			in.Name, in.Description).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO calendars (name, description) VALUES (@name, @description) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("description", in.Description)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := insertEntries(ctx, tx, id, in.Entries); err != nil {
 			return id, err
 		}
-		cs, err := listCalendars(ctx, tx, ` WHERE c.id = $1`, id)
+		cs, err := listCalendars(ctx, tx, ` WHERE c.id = @id`, momo.Named("id", id))
 		if err == nil && len(cs) == 1 {
 			out = cs[0]
 		}
@@ -435,21 +440,21 @@ func (s *Store) CreateCalendar(ctx context.Context, actor string, in CalendarInp
 func (s *Store) UpdateCalendar(ctx context.Context, actor string, id int64, in CalendarInput, check Check) (Calendar, error) {
 	var out Calendar
 	err := s.configChange(ctx, actor, "update", "calendar", check, func(tx *dbTx) (int64, error) {
-		res, err := tx.ExecContext(ctx, `UPDATE calendars SET name = $2, description = $3, updated_at = now() WHERE id = $1`,
-			id, in.Name, in.Description)
+		res, err := tx.ExecContext(ctx, `UPDATE calendars SET name = @name, description = @description, updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("name", in.Name), momo.Named("description", in.Description))
 		if err != nil {
 			return id, err
 		}
 		if err := requireRow(res); err != nil {
 			return id, err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM calendar_entries WHERE calendar_id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM calendar_entries WHERE calendar_id = @calendar_id`, momo.Named("calendar_id", id)); err != nil {
 			return id, err
 		}
 		if err := insertEntries(ctx, tx, id, in.Entries); err != nil {
 			return id, err
 		}
-		cs, err := listCalendars(ctx, tx, ` WHERE c.id = $1`, id)
+		cs, err := listCalendars(ctx, tx, ` WHERE c.id = @id`, momo.Named("id", id))
 		if err == nil && len(cs) == 1 {
 			out = cs[0]
 		}
@@ -465,16 +470,16 @@ func (s *Store) ImportCalendarEntries(ctx context.Context, actor string, id int6
 	var out Calendar
 	err := s.configChange(ctx, actor, "import", "calendar", check, func(tx *dbTx) (int64, error) {
 		var name string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM calendars WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM calendars WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&name); err != nil {
 			return id, err
 		}
 		if replace {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM calendar_entries WHERE calendar_id = $1`, id); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM calendar_entries WHERE calendar_id = @calendar_id`, momo.Named("calendar_id", id)); err != nil {
 				return id, err
 			}
 		}
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM calendar_entries WHERE calendar_id = $1`, id).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM calendar_entries WHERE calendar_id = @calendar_id`, momo.Named("calendar_id", id)).Scan(&n); err != nil {
 			return id, err
 		}
 		if n+len(entries) > MaxCalendarEntries {
@@ -483,10 +488,10 @@ func (s *Store) ImportCalendarEntries(ctx context.Context, actor string, id int6
 		if err := insertEntries(ctx, tx, id, entries); err != nil {
 			return id, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE calendars SET updated_at = now() WHERE id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE calendars SET updated_at = now() WHERE id = @id`, momo.Named("id", id)); err != nil {
 			return id, err
 		}
-		cs, err := listCalendars(ctx, tx, ` WHERE c.id = $1`, id)
+		cs, err := listCalendars(ctx, tx, ` WHERE c.id = @id`, momo.Named("id", id))
 		if err == nil && len(cs) == 1 {
 			out = cs[0]
 		}
@@ -499,18 +504,18 @@ func (s *Store) ImportCalendarEntries(ctx context.Context, actor string, id int6
 func (s *Store) DeleteCalendar(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "calendar", check, func(tx *dbTx) (int64, error) {
 		var name string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM calendars WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM calendars WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&name); err != nil {
 			return id, err
 		}
 		refs, err := stringsOf(ctx, tx, `SELECT 'schedule ' || s.name FROM schedule_calendars sc
-			JOIN schedules s ON s.id = sc.schedule_id WHERE sc.calendar_id = $1 ORDER BY s.name`, id)
+			JOIN schedules s ON s.id = sc.schedule_id WHERE sc.calendar_id = @calendar_id ORDER BY s.name`, momo.Named("calendar_id", id))
 		if err != nil {
 			return id, err
 		}
 		if len(refs) > 0 {
 			return id, inUseBy("calendar "+name, refs)
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM calendars WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM calendars WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -589,7 +594,7 @@ func (s *Store) ListTimeConditions(ctx context.Context) ([]TimeCondition, error)
 
 // GetTimeCondition returns one time condition.
 func (s *Store) GetTimeCondition(ctx context.Context, id int64) (TimeCondition, error) {
-	ts, err := listTimeConditions(ctx, s.q(ctx), ` WHERE t.id = $1`, id)
+	ts, err := listTimeConditions(ctx, s.q(ctx), ` WHERE t.id = @id`, momo.Named("id", id))
 	if err != nil {
 		return TimeCondition{}, err
 	}
@@ -606,7 +611,7 @@ func (s *Store) GetTimeCondition(ctx context.Context, id int64) (TimeCondition, 
 // check and the write that names it.
 func requireTimeConditionTx(ctx context.Context, tx *dbTx, path, name string) error {
 	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM time_conditions WHERE name = $1`, name).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM time_conditions WHERE name = @name`, momo.Named("name", name)).Scan(&n); err != nil {
 		return err
 	}
 	if n == 0 {
@@ -637,13 +642,13 @@ func checkTimeCondition(ctx context.Context, tx *dbTx, id int64, in TimeConditio
 	// A taken name is a conflict (409) whatever else the request gets wrong,
 	// as the unique index would report it; checked first so a duplicate is
 	// not reported as, say, its toggle number being in use.
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM time_conditions WHERE name = $1 AND id <> $2`, in.Name, id).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM time_conditions WHERE name = @name AND id <> @id`, momo.Named("name", in.Name), momo.Named("id", id)).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {
 		return fmt.Errorf("%w: time_conditions_name_key", ErrConflict)
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM schedules WHERE id = $1`, in.ScheduleID).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM schedules WHERE id = @id`, momo.Named("id", in.ScheduleID)).Scan(&n); err != nil {
 		return err
 	}
 	if n == 0 {
@@ -670,8 +675,8 @@ func checkTimeCondition(ctx context.Context, tx *dbTx, id int64, in TimeConditio
 		}
 	}
 	if in.ToggleNumber != "" {
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM time_conditions WHERE toggle_number = $1 AND id <> $2`,
-			in.ToggleNumber, id).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM time_conditions WHERE toggle_number = @toggle_number AND id <> @id`,
+			momo.Named("toggle_number", in.ToggleNumber), momo.Named("id", id)).Scan(&n); err != nil {
 			return err
 		}
 		if n > 0 {
@@ -685,7 +690,7 @@ func checkTimeCondition(ctx context.Context, tx *dbTx, id int64, in TimeConditio
 // time conditions leads back to it, whichever branch each takes.
 func checkTimeConditionLoops(ctx context.Context, tx *dbTx, id int64, in TimeConditionInput) error {
 	rows, err := tx.QueryContext(ctx, `SELECT name, open_kind, open_target, closed_kind, closed_target, holiday_kind, holiday_target
-		FROM time_conditions WHERE id <> $1`, id)
+		FROM time_conditions WHERE id <> @id`, momo.Named("id", id))
 	if err != nil {
 		return err
 	}
@@ -761,12 +766,14 @@ func (s *Store) CreateTimeCondition(ctx context.Context, actor string, in TimeCo
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO time_conditions (name, schedule_id, open_kind, open_target, open_then,
 				closed_kind, closed_target, closed_then, holiday_kind, holiday_target, holiday_then, toggle_number)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
-			in.Name, in.ScheduleID, in.Open.Kind, in.Open.Target, in.Open.ThenVoicemail,
-			in.Closed.Kind, in.Closed.Target, in.Closed.ThenVoicemail, hk, ht, hn, in.ToggleNumber).Scan(&id); err != nil {
+			VALUES (@name, @schedule_id, @open_kind, @open_target, @open_then, @closed_kind, @closed_target, @closed_then,
+				@holiday_kind, @holiday_target, @holiday_then, @toggle_number) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("schedule_id", in.ScheduleID), momo.Named("open_kind", in.Open.Kind), momo.Named("open_target", in.Open.Target),
+			momo.Named("open_then", in.Open.ThenVoicemail), momo.Named("closed_kind", in.Closed.Kind), momo.Named("closed_target", in.Closed.Target), momo.Named("closed_then", in.Closed.ThenVoicemail),
+			momo.Named("holiday_kind", hk), momo.Named("holiday_target", ht), momo.Named("holiday_then", hn), momo.Named("toggle_number", in.ToggleNumber)).Scan(&id); err != nil {
 			return 0, err
 		}
-		ts, err := listTimeConditions(ctx, tx, ` WHERE t.id = $1`, id)
+		ts, err := listTimeConditions(ctx, tx, ` WHERE t.id = @id`, momo.Named("id", id))
 		if err == nil && len(ts) == 1 {
 			out = ts[0]
 		}
@@ -783,18 +790,19 @@ func tcReferences(ctx context.Context, tx *dbTx, id int64, name string) ([]strin
 		query, label string
 		args         []any
 	}{
-		{`SELECT name FROM inbound_routes WHERE destination_kind = 'time_condition' AND destination = $1`, "inbound route", []any{name}},
-		{`SELECT name FROM ring_groups WHERE failure_kind = 'time_condition' AND failure_target = $1`, "ring group", []any{name}},
-		{`SELECT code FROM feature_codes WHERE action = 'time_condition' AND argument = $1`, "feature code", []any{name}},
-		{`SELECT m.name FROM ivr_menus m WHERE (m.timeout_kind = 'time_condition' AND m.timeout_target = $1)
-			OR (m.invalid_kind = 'time_condition' AND m.invalid_target = $1)
-			OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind = 'time_condition' AND o.dest_target = $1)`,
-			"IVR menu", []any{name}},
-		{`SELECT name FROM time_conditions WHERE id <> $2 AND (
-			(open_kind = 'time_condition' AND open_target = $1) OR (closed_kind = 'time_condition' AND closed_target = $1)
-			OR (holiday_kind = 'time_condition' AND holiday_target = $1))`, "time condition", []any{name, id}},
-		{`SELECT name FROM queues WHERE (timeout_kind = 'time_condition' AND timeout_target = $1)
-			OR (full_kind = 'time_condition' AND full_target = $1) OR (no_agents_kind = 'time_condition' AND no_agents_target = $1)`, "queue", []any{name}},
+		{`SELECT name FROM inbound_routes WHERE destination_kind = 'time_condition' AND destination = @name`, "inbound route", []any{momo.Named("name", name)}},
+		{`SELECT name FROM ring_groups WHERE failure_kind = 'time_condition' AND failure_target = @name`, "ring group", []any{momo.Named("name", name)}},
+		{`SELECT code FROM feature_codes WHERE action = 'time_condition' AND argument = @name`, "feature code", []any{momo.Named("name", name)}},
+		{`SELECT m.name FROM ivr_menus m WHERE (m.timeout_kind = 'time_condition' AND m.timeout_target = @name::text)
+			OR (m.invalid_kind = 'time_condition' AND m.invalid_target = @name::text)
+			OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind = 'time_condition' AND o.dest_target = @name::text)`,
+			"IVR menu", []any{momo.Named("name", name)}},
+		{`SELECT name FROM time_conditions WHERE id <> @id AND (
+			(open_kind = 'time_condition' AND open_target = @name::text) OR (closed_kind = 'time_condition' AND closed_target = @name::text)
+			OR (holiday_kind = 'time_condition' AND holiday_target = @name::text))`, "time condition", []any{momo.Named("name", name), momo.Named("id", id)}},
+		{`SELECT name FROM queues WHERE (timeout_kind = 'time_condition' AND timeout_target = @name::text)
+			OR (full_kind = 'time_condition' AND full_target = @name::text) OR (no_agents_kind = 'time_condition' AND no_agents_target = @name::text)`,
+			"queue", []any{momo.Named("name", name)}},
 	} {
 		names, err := stringsOf(ctx, tx, q.query, q.args...)
 		if err != nil {
@@ -813,7 +821,7 @@ func (s *Store) UpdateTimeCondition(ctx context.Context, actor string, id int64,
 	var out TimeCondition
 	err := s.configChange(ctx, actor, "update", "time_condition", check, func(tx *dbTx) (int64, error) {
 		var cur string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM time_conditions WHERE id = $1 FOR UPDATE`, id).Scan(&cur); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM time_conditions WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&cur); err != nil {
 			return id, err
 		}
 		if cur != in.Name {
@@ -829,14 +837,18 @@ func (s *Store) UpdateTimeCondition(ctx context.Context, actor string, id int64,
 			return id, err
 		}
 		hk, ht, hn := destCols(in.Holiday)
-		if _, err := tx.ExecContext(ctx, `UPDATE time_conditions SET name = $2, schedule_id = $3, open_kind = $4, open_target = $5,
-				open_then = $6, closed_kind = $7, closed_target = $8, closed_then = $9, holiday_kind = $10, holiday_target = $11,
-				holiday_then = $12, toggle_number = $13, updated_at = now()
-			WHERE id = $1`, id, in.Name, in.ScheduleID, in.Open.Kind, in.Open.Target, in.Open.ThenVoicemail,
-			in.Closed.Kind, in.Closed.Target, in.Closed.ThenVoicemail, hk, ht, hn, in.ToggleNumber); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE time_conditions SET name = @name, schedule_id = @schedule_id, open_kind = @open_kind, open_target = @open_target,
+				open_then = @open_then, closed_kind = @closed_kind, closed_target = @closed_target, closed_then = @closed_then,
+				holiday_kind = @holiday_kind, holiday_target = @holiday_target, holiday_then = @holiday_then,
+				toggle_number = @toggle_number, updated_at = now()
+			WHERE id = @id`,
+			momo.Named("id", id), momo.Named("name", in.Name), momo.Named("schedule_id", in.ScheduleID), momo.Named("open_kind", in.Open.Kind),
+			momo.Named("open_target", in.Open.Target), momo.Named("open_then", in.Open.ThenVoicemail), momo.Named("closed_kind", in.Closed.Kind), momo.Named("closed_target", in.Closed.Target),
+			momo.Named("closed_then", in.Closed.ThenVoicemail), momo.Named("holiday_kind", hk), momo.Named("holiday_target", ht), momo.Named("holiday_then", hn),
+			momo.Named("toggle_number", in.ToggleNumber)); err != nil {
 			return id, err
 		}
-		ts, err := listTimeConditions(ctx, tx, ` WHERE t.id = $1`, id)
+		ts, err := listTimeConditions(ctx, tx, ` WHERE t.id = @id`, momo.Named("id", id))
 		if err == nil && len(ts) == 1 {
 			out = ts[0]
 		}
@@ -849,7 +861,7 @@ func (s *Store) UpdateTimeCondition(ctx context.Context, actor string, id int64,
 func (s *Store) DeleteTimeCondition(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "time_condition", check, func(tx *dbTx) (int64, error) {
 		var name string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM time_conditions WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM time_conditions WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&name); err != nil {
 			return id, err
 		}
 		refs, err := tcReferences(ctx, tx, id, name)
@@ -859,7 +871,7 @@ func (s *Store) DeleteTimeCondition(ctx context.Context, actor string, id int64,
 		if len(refs) > 0 {
 			return id, inUseBy("time condition "+name, refs)
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM time_conditions WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM time_conditions WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -884,7 +896,7 @@ func (s *Store) SetTimeConditionOverride(ctx context.Context, actor string, id i
 		if err := setOverride(ctx, tx, id, actor, mode); err != nil {
 			return id, err
 		}
-		ts, err := listTimeConditions(ctx, tx, ` WHERE t.id = $1`, id)
+		ts, err := listTimeConditions(ctx, tx, ` WHERE t.id = @id`, momo.Named("id", id))
 		if err == nil && len(ts) == 1 {
 			out = ts[0]
 		}
@@ -898,8 +910,8 @@ func setOverride(ctx context.Context, tx *dbTx, id int64, actor, mode string) er
 	if mode != timecond.OverrideAuto {
 		at = time.Now().UTC()
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE time_conditions SET override = $2, override_at = $3, override_by = $4, updated_at = now()
-		WHERE id = $1`, id, mode, at, actor)
+	res, err := tx.ExecContext(ctx, `UPDATE time_conditions SET override = @override, override_at = @override_at, override_by = @override_by, updated_at = now()
+		WHERE id = @id`, momo.Named("id", id), momo.Named("override", mode), momo.Named("override_at", at), momo.Named("override_by", actor))
 	if err != nil {
 		return err
 	}
@@ -923,7 +935,7 @@ func (s *Store) ApplyTimeConditionToggle(ctx context.Context, actor, number, mod
 	}
 	var out TimeCondition
 	err := s.configChange(ctx, actor, "override", "time_condition", nil, func(tx *dbTx) (int64, error) {
-		ts, err := listTimeConditions(ctx, tx, ` WHERE t.toggle_number = $1`, number)
+		ts, err := listTimeConditions(ctx, tx, ` WHERE t.toggle_number = @toggle_number`, momo.Named("toggle_number", number))
 		if err != nil {
 			return 0, err
 		}
@@ -954,7 +966,7 @@ func (s *Store) ApplyTimeConditionToggle(ctx context.Context, actor, number, mod
 		if err := setOverride(ctx, tx, t.ID, actor, mode); err != nil {
 			return t.ID, err
 		}
-		ts, err = listTimeConditions(ctx, tx, ` WHERE t.id = $1`, t.ID)
+		ts, err = listTimeConditions(ctx, tx, ` WHERE t.id = @id`, momo.Named("id", t.ID))
 		if err == nil && len(ts) == 1 {
 			out = ts[0]
 		}
