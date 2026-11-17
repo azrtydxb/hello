@@ -166,7 +166,7 @@ func (s *Service) Restore(ctx context.Context, dest Store, bucket, key string, o
 		}
 	}
 	if m.SchemaVersion < s.BinarySchema && s.Migrate != nil {
-		if err := s.Migrate(ctx); err != nil {
+		if err := s.Migrate(ctx, m.SchemaVersion); err != nil {
 			outcome = "failed-migrate"
 			return rep, fail("migrate", err)
 		}

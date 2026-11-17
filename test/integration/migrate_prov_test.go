@@ -3,33 +3,27 @@ package integration
 import (
 	"context"
 	"database/sql"
-	"os"
 	"strings"
 	"testing"
-
-	"github.com/azrtydxb/hello/internal/migrate"
-	"github.com/azrtydxb/hello/migrations"
-	"github.com/pressly/goose/v3"
 )
 
-// TestMigrateProvisioningRollback fails if 00006_provisioning does not
-// apply, roll back to the Phase 5 schema without leftovers, and apply
-// again; or if the schema accepts an enabled phone with no device, a fetch
-// path still carrying a token, or a fetch result outside the contract.
-func TestMigrateProvisioningRollback(t *testing.T) {
-	dsn := os.Getenv("HELLO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("HELLO_TEST_DATABASE_URL not set")
+// TestProvisioningSchema fails if the provisioning objects (00006 in the
+// frozen goose set, part of momo's init) are missing from a new install or
+// from a database taken over from goose, or if the schema accepts an enabled
+// phone with no device, a fetch path still carrying a token, or a fetch
+// result outside the contract.
+func TestProvisioningSchema(t *testing.T) {
+	for _, b := range schemaBuilds {
+		t.Run(b.name, func(t *testing.T) {
+			db := openScratch(t)
+			b.build(t, db)
+			provisioningChecks(t, db)
+		})
 	}
+}
+
+func provisioningChecks(t *testing.T, db *sql.DB) {
 	ctx := context.Background()
-	db, err := sql.Open("pgx", scratchDatabase(t, ctx, dsn))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-	if _, err := migrate.Up(ctx, db); err != nil {
-		t.Fatal(err)
-	}
 	tables := []string{"phones", "prov_templates", "prov_template_versions", "prov_firmware",
 		"prov_firmware_pins", "prov_firmware_minimums", "prov_redirect_accounts", "prov_redirect_jobs", "prov_fetches"}
 	present := func() (n int) {
@@ -72,23 +66,5 @@ func TestMigrateProvisioningRollback(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, fetch, "/p/****/805ec0000001.cfg", "mac_mismatch"); err != nil {
 		t.Fatalf("a redacted fetch row: %v", err)
-	}
-
-	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.DownTo(ctx, 5); err != nil {
-		t.Fatalf("roll back to 00005: %v", err)
-	}
-	if n := present(); n != 0 {
-		t.Fatalf("after rollback: %d provisioning objects left", n)
-	}
-	if n, err := migrate.Up(ctx, db); err != nil || n != 95 { // 00006 to 00017, 00019, 00026 to 00107
-		t.Fatalf("re-apply = %d, %v; want 95, nil", n, err)
-		t.Fatalf("re-apply = %d, %v; want 93, nil", n, err)
-	}
-	if n := present(); n != len(tables)+1 {
-		t.Fatalf("after re-apply: %d of %d provisioning objects present", n, len(tables)+1)
 	}
 }

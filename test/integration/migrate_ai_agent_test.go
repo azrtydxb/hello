@@ -3,41 +3,42 @@ package integration
 import (
 	"context"
 	"database/sql"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/migrate"
-	"github.com/azrtydxb/hello/migrations"
-	"github.com/pressly/goose/v3"
 )
 
-// TestMigrateAIAgentRollback fails if 00009_ai_agent does not apply, roll
-// back to 00008 without leftovers and apply again, or if the schema accepts
-// a status, severity, outcome or message role outside the contract, a
-// second live finding for one candidate, or loses a CDR's call quality.
-func TestMigrateAIAgentRollback(t *testing.T) {
-	dsn := os.Getenv("HELLO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("HELLO_TEST_DATABASE_URL not set")
+// TestAIAgentSchema fails if 00009_ai_agent's objects are missing from a new
+// install, from a database taken over from goose, or from one taken over at
+// 00008, or if the schema accepts a status, severity, outcome or message role
+// outside the contract, a second live finding for one candidate, or keeps a
+// deleted owner's sessions, tasks or messages.
+func TestAIAgentSchema(t *testing.T) {
+	for _, b := range schemaBuilds {
+		t.Run(b.name, func(t *testing.T) {
+			db := openScratch(t)
+			b.build(t, db)
+			aiAgentChecks(t, db)
+		})
 	}
-	ctx := context.Background()
-	db, err := sql.Open("pgx", scratchDatabase(t, ctx, dsn))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.UpTo(ctx, 8); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := migrate.Up(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("taken over from 00008", func(t *testing.T) {
+		db := openScratch(t)
+		ctx := context.Background()
+		gooseUpTo(t, db, 8)
+		n, err := migrate.Up(ctx, db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := legacyAfter(t, 8) + momoAfterTakeover(t); n != want {
+			t.Fatalf("takeover from 00008 ran %d migrations, want %d", n, want)
+		}
+		aiAgentChecks(t, db)
+	})
+}
 
+func aiAgentChecks(t *testing.T, db *sql.DB) {
+	ctx := context.Background()
 	tables := []string{"ai_usage", "ai_tasks", "ai_agent_runs", "ai_agent_requests", "ai_samples",
 		"ai_findings", "ai_proposals", "ai_sessions", "ai_messages"}
 	columns := []string{"rtp_packets", "rtp_lost", "rtp_jitter_ms"}
@@ -108,19 +109,5 @@ func TestMigrateAIAgentRollback(t *testing.T) {
 	var left int
 	if err := db.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM ai_sessions) + (SELECT count(*) FROM ai_tasks) + (SELECT count(*) FROM ai_messages)`).Scan(&left); err != nil || left != 0 {
 		t.Fatalf("after deleting the owner: %d rows left, %v", left, err)
-	}
-
-	if _, err := p.DownTo(ctx, 8); err != nil {
-		t.Fatalf("roll back to 00008: %v", err)
-	}
-	if n := present(); n != 0 {
-		t.Fatalf("after rollback: %d AI agent objects left", n)
-	}
-	if n, err := migrate.Up(ctx, db); err != nil || n != 92 { // 00009 to 00017, 00019, 00026 to 00107
-		t.Fatalf("re-apply = %d, %v; want 92, nil", n, err)
-		t.Fatalf("re-apply = %d, %v; want 90, nil", n, err)
-	}
-	if n := present(); n != want {
-		t.Fatalf("after re-apply: %d of %d AI agent objects present", n, want)
 	}
 }

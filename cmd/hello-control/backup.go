@@ -100,8 +100,11 @@ func newBackupService(cfg config.Control, st *store.Store, db *sql.DB, vk *api.L
 	}
 	return backup.New(backup.Config{
 		DB: st, Key: key, Live: live, Dest: backupDest(live),
-		Tools:        backup.PGTools{Conn: cfg.Database},
-		Migrate:      func(ctx context.Context) error { _, err := migrate.Up(ctx, db); return err },
+		Tools: backup.PGTools{Conn: cfg.Database},
+		Migrate: func(ctx context.Context, from int64) error {
+			_, err := migrate.UpAfterRestore(ctx, db, from)
+			return err
+		},
 		Maintenance:  &backup.Maintenance{Shared: shared},
 		Tmp:          cfg.Backup.Tmp,
 		HelloVersion: version.Version,

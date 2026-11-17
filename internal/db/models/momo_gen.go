@@ -7,6 +7,7039 @@ import (
 	"github.com/azrtydxb/momo/schema"
 )
 
+func (*APIToken) MomoMeta() *momo.Meta[APIToken] { return &aPITokenMeta }
+
+var aPITokenMeta = momo.Meta[APIToken]{
+	Table: "api_tokens",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "user_id"},
+		{Name: "name"},
+		{Name: "token_hash"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_used_at", Flags: momo.FlagNullable},
+		{Name: "scopes", Flags: momo.FlagNullable},
+		{Name: "expires_at", Flags: momo.FlagNullable},
+		{Name: "revoked_at", Flags: momo.FlagNullable},
+		{Name: "kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *APIToken, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.UserID
+		case 2:
+			return &m.Name
+		case 3:
+			return &m.TokenHash
+		case 4:
+			return &m.CreatedAt
+		case 5:
+			return &m.LastUsedAt
+		case 6:
+			return &m.Scopes
+		case 7:
+			return &m.ExpiresAt
+		case 8:
+			return &m.RevokedAt
+		case 9:
+			return &m.Kind
+		}
+		return nil
+	},
+	Value: func(m *APIToken, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.UserID
+		case 2:
+			return m.Name
+		case 3:
+			return m.TokenHash
+		case 4:
+			return m.CreatedAt
+		case 5:
+			return m.LastUsedAt
+		case 6:
+			return m.Scopes
+		case 7:
+			return m.ExpiresAt
+		case 8:
+			return m.RevokedAt
+		case 9:
+			return m.Kind
+		}
+		return nil
+	},
+	TableSchema: &aPITokenTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var aPITokenTable = schema.Table{
+	Name: "api_tokens",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "token_hash",
+			Type: "bytea",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "last_used_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "scopes",
+			Type:     "text[]",
+			Nullable: true,
+		},
+		{
+			Name:     "expires_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "revoked_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "kind",
+			Type:    "text",
+			Default: "'legacy'::text",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "api_tokens_token_hash_key",
+			Columns: []string{"token_hash"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "api_tokens_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "api_tokens_kind_check",
+			Expr: "\"kind\" IN ('legacy','personal')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"legacy", "personal"},
+			},
+		},
+	},
+}
+
+func (*AiAgentRequest) MomoMeta() *momo.Meta[AiAgentRequest] { return &aiAgentRequestMeta }
+
+var aiAgentRequestMeta = momo.Meta[AiAgentRequest]{
+	Table: "ai_agent_requests",
+	Columns: []momo.ColumnMeta{
+		{Name: "agent", Flags: momo.FlagPK},
+		{Name: "requested_by", Flags: momo.FlagNullable},
+		{Name: "requested_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *AiAgentRequest, i int) any {
+		switch i {
+		case 0:
+			return &m.Agent
+		case 1:
+			return &m.RequestedBy
+		case 2:
+			return &m.RequestedAt
+		}
+		return nil
+	},
+	Value: func(m *AiAgentRequest, i int) any {
+		switch i {
+		case 0:
+			return m.Agent
+		case 1:
+			return m.RequestedBy
+		case 2:
+			return m.RequestedAt
+		}
+		return nil
+	},
+	TableSchema: &aiAgentRequestTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var aiAgentRequestTable = schema.Table{
+	Name: "ai_agent_requests",
+	Columns: []schema.Column{
+		{
+			Name: "agent",
+			Type: "text",
+		},
+		{
+			Name:     "requested_by",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "requested_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"agent"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ai_agent_requests_requested_by_fkey",
+			Columns:    []string{"requested_by"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+}
+
+func (*AiAgentRun) MomoMeta() *momo.Meta[AiAgentRun] { return &aiAgentRunMeta }
+
+var aiAgentRunMeta = momo.Meta[AiAgentRun]{
+	Table: "ai_agent_runs",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "agent"},
+		{Name: "replica"},
+		{Name: "started_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "finished_at", Flags: momo.FlagNullable},
+		{Name: "outcome", Flags: momo.FlagNullable},
+		{Name: "tokens", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "detail", Flags: momo.FlagNullable},
+		{Name: "error", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *AiAgentRun, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Agent
+		case 2:
+			return &m.Replica
+		case 3:
+			return &m.StartedAt
+		case 4:
+			return &m.FinishedAt
+		case 5:
+			return &m.Outcome
+		case 6:
+			return &m.Tokens
+		case 7:
+			return &m.Detail
+		case 8:
+			return &m.Error
+		}
+		return nil
+	},
+	Value: func(m *AiAgentRun, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Agent
+		case 2:
+			return m.Replica
+		case 3:
+			return m.StartedAt
+		case 4:
+			return m.FinishedAt
+		case 5:
+			return m.Outcome
+		case 6:
+			return m.Tokens
+		case 7:
+			return m.Detail
+		case 8:
+			return m.Error
+		}
+		return nil
+	},
+	TableSchema: &aiAgentRunTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var aiAgentRunTable = schema.Table{
+	Name: "ai_agent_runs",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "agent",
+			Type: "text",
+		},
+		{
+			Name: "replica",
+			Type: "text",
+		},
+		{
+			Name:    "started_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "finished_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "outcome",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "tokens",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:     "detail",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:     "error",
+			Type:     "text",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "ai_agent_runs_agent",
+			Parts: []schema.IndexPart{
+				{
+					Column: "agent",
+				},
+				{
+					Column: "started_at",
+					Desc:   true,
+				},
+			},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ai_agent_runs_outcome_check",
+			Expr: "\"outcome\" IN ('failed','no_change','ok','skipped_budget','skipped_locked')",
+			In: &schema.CheckIn{
+				Column: "outcome",
+				Values: []string{"failed", "no_change", "ok", "skipped_budget", "skipped_locked"},
+			},
+		},
+	},
+}
+
+func (*AiFinding) MomoMeta() *momo.Meta[AiFinding] { return &aiFindingMeta }
+
+var aiFindingMeta = momo.Meta[AiFinding]{
+	Table: "ai_findings",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK},
+		{Name: "candidate_id"},
+		{Name: "type"},
+		{Name: "subject"},
+		{Name: "severity"},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "title"},
+		{Name: "evidence", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "explanation", Flags: momo.FlagNullable},
+		{Name: "explained", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "rank", Flags: momo.FlagNullable},
+		{Name: "first_seen", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_seen", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "occurrences", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "severity_history", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "acknowledged_by", Flags: momo.FlagNullable},
+		{Name: "acknowledged_at", Flags: momo.FlagNullable},
+		{Name: "dismissed_by", Flags: momo.FlagNullable},
+		{Name: "dismissed_at", Flags: momo.FlagNullable},
+		{Name: "dismiss_reason", Flags: momo.FlagNullable},
+		{Name: "resolved_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *AiFinding, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.CandidateID
+		case 2:
+			return &m.Type
+		case 3:
+			return &m.Subject
+		case 4:
+			return &m.Severity
+		case 5:
+			return &m.Status
+		case 6:
+			return &m.Title
+		case 7:
+			return &m.Evidence
+		case 8:
+			return &m.Explanation
+		case 9:
+			return &m.Explained
+		case 10:
+			return &m.Rank
+		case 11:
+			return &m.FirstSeen
+		case 12:
+			return &m.LastSeen
+		case 13:
+			return &m.Occurrences
+		case 14:
+			return &m.SeverityHistory
+		case 15:
+			return &m.AcknowledgedBy
+		case 16:
+			return &m.AcknowledgedAt
+		case 17:
+			return &m.DismissedBy
+		case 18:
+			return &m.DismissedAt
+		case 19:
+			return &m.DismissReason
+		case 20:
+			return &m.ResolvedAt
+		}
+		return nil
+	},
+	Value: func(m *AiFinding, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.CandidateID
+		case 2:
+			return m.Type
+		case 3:
+			return m.Subject
+		case 4:
+			return m.Severity
+		case 5:
+			return m.Status
+		case 6:
+			return m.Title
+		case 7:
+			return m.Evidence
+		case 8:
+			return m.Explanation
+		case 9:
+			return m.Explained
+		case 10:
+			return m.Rank
+		case 11:
+			return m.FirstSeen
+		case 12:
+			return m.LastSeen
+		case 13:
+			return m.Occurrences
+		case 14:
+			return m.SeverityHistory
+		case 15:
+			return m.AcknowledgedBy
+		case 16:
+			return m.AcknowledgedAt
+		case 17:
+			return m.DismissedBy
+		case 18:
+			return m.DismissedAt
+		case 19:
+			return m.DismissReason
+		case 20:
+			return m.ResolvedAt
+		}
+		return nil
+	},
+	TableSchema: &aiFindingTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var aiFindingTable = schema.Table{
+	Name: "ai_findings",
+	Columns: []schema.Column{
+		{
+			Name: "id",
+			Type: "uuid",
+		},
+		{
+			Name: "candidate_id",
+			Type: "text",
+		},
+		{
+			Name: "type",
+			Type: "text",
+		},
+		{
+			Name: "subject",
+			Type: "text",
+		},
+		{
+			Name: "severity",
+			Type: "text",
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'open'::text",
+		},
+		{
+			Name: "title",
+			Type: "text",
+		},
+		{
+			Name:    "evidence",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:     "explanation",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:    "explained",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "rank",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:    "first_seen",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "last_seen",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "occurrences",
+			Type:    "bigint",
+			Default: "1",
+		},
+		{
+			Name:    "severity_history",
+			Type:    "jsonb",
+			Default: "'[]'::jsonb",
+		},
+		{
+			Name:     "acknowledged_by",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "acknowledged_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "dismissed_by",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "dismissed_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "dismiss_reason",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "resolved_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "ai_findings_candidate",
+			Parts: []schema.IndexPart{
+				{
+					Column: "candidate_id",
+				},
+				{
+					Column: "last_seen",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name:   "ai_findings_live_candidate",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "candidate_id",
+				},
+			},
+			Where: "(status = ANY (ARRAY['open'::text, 'acknowledged'::text]))",
+		},
+		{
+			Name: "ai_findings_status",
+			Parts: []schema.IndexPart{
+				{
+					Column: "status",
+				},
+				{
+					Column: "severity",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ai_findings_acknowledged_by_fkey",
+			Columns:    []string{"acknowledged_by"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "ai_findings_dismissed_by_fkey",
+			Columns:    []string{"dismissed_by"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ai_findings_severity_check",
+			Expr: "\"severity\" IN ('critical','info','warning')",
+			In: &schema.CheckIn{
+				Column: "severity",
+				Values: []string{"critical", "info", "warning"},
+			},
+		},
+		{
+			Name: "ai_findings_status_check",
+			Expr: "\"status\" IN ('acknowledged','dismissed','open','resolved')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"acknowledged", "dismissed", "open", "resolved"},
+			},
+		},
+	},
+}
+
+func (*AiMessage) MomoMeta() *momo.Meta[AiMessage] { return &aiMessageMeta }
+
+var aiMessageMeta = momo.Meta[AiMessage]{
+	Table: "ai_messages",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "session_id"},
+		{Name: "role"},
+		{Name: "content"},
+		{Name: "tool_calls", Flags: momo.FlagNullable},
+		{Name: "citations", Flags: momo.FlagNullable},
+		{Name: "proposal_id", Flags: momo.FlagNullable},
+		{Name: "task_id", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "context", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *AiMessage, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.SessionID
+		case 2:
+			return &m.Role
+		case 3:
+			return &m.Content
+		case 4:
+			return &m.ToolCalls
+		case 5:
+			return &m.Citations
+		case 6:
+			return &m.ProposalID
+		case 7:
+			return &m.TaskID
+		case 8:
+			return &m.CreatedAt
+		case 9:
+			return &m.Context
+		}
+		return nil
+	},
+	Value: func(m *AiMessage, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.SessionID
+		case 2:
+			return m.Role
+		case 3:
+			return m.Content
+		case 4:
+			return m.ToolCalls
+		case 5:
+			return m.Citations
+		case 6:
+			return m.ProposalID
+		case 7:
+			return m.TaskID
+		case 8:
+			return m.CreatedAt
+		case 9:
+			return m.Context
+		}
+		return nil
+	},
+	TableSchema: &aiMessageTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var aiMessageTable = schema.Table{
+	Name: "ai_messages",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "session_id",
+			Type: "uuid",
+		},
+		{
+			Name: "role",
+			Type: "text",
+		},
+		{
+			Name: "content",
+			Type: "text",
+		},
+		{
+			Name:     "tool_calls",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:     "citations",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:     "proposal_id",
+			Type:     "uuid",
+			Nullable: true,
+		},
+		{
+			Name:     "task_id",
+			Type:     "uuid",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "context",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "ai_messages_session",
+			Parts: []schema.IndexPart{
+				{
+					Column: "session_id",
+				},
+				{
+					Column: "id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ai_messages_proposal_id_fkey",
+			Columns:    []string{"proposal_id"},
+			RefTable:   "ai_proposals",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "ai_messages_session_id_fkey",
+			Columns:    []string{"session_id"},
+			RefTable:   "ai_sessions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "ai_messages_task_id_fkey",
+			Columns:    []string{"task_id"},
+			RefTable:   "ai_tasks",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ai_messages_role_check",
+			Expr: "\"role\" IN ('assistant','user')",
+			In: &schema.CheckIn{
+				Column: "role",
+				Values: []string{"assistant", "user"},
+			},
+		},
+	},
+}
+
+func (*AiMessageRun) MomoMeta() *momo.Meta[AiMessageRun] { return &aiMessageRunMeta }
+
+var aiMessageRunMeta = momo.Meta[AiMessageRun]{
+	Table: "ai_message_runs",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "message_id"},
+		{Name: "conversation_id"},
+		{Name: "kind"},
+		{Name: "state", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "result", Flags: momo.FlagNullable},
+		{Name: "error", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "attempts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "claimed_at", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "finished_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *AiMessageRun, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.MessageID
+		case 2:
+			return &m.ConversationID
+		case 3:
+			return &m.Kind
+		case 4:
+			return &m.State
+		case 5:
+			return &m.Result
+		case 6:
+			return &m.Error
+		case 7:
+			return &m.Attempts
+		case 8:
+			return &m.ClaimedAt
+		case 9:
+			return &m.CreatedAt
+		case 10:
+			return &m.FinishedAt
+		}
+		return nil
+	},
+	Value: func(m *AiMessageRun, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.MessageID
+		case 2:
+			return m.ConversationID
+		case 3:
+			return m.Kind
+		case 4:
+			return m.State
+		case 5:
+			return m.Result
+		case 6:
+			return m.Error
+		case 7:
+			return m.Attempts
+		case 8:
+			return m.ClaimedAt
+		case 9:
+			return m.CreatedAt
+		case 10:
+			return m.FinishedAt
+		}
+		return nil
+	},
+	TableSchema: &aiMessageRunTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var aiMessageRunTable = schema.Table{
+	Name: "ai_message_runs",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "message_id",
+			Type: "bigint",
+		},
+		{
+			Name: "conversation_id",
+			Type: "bigint",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name:    "state",
+			Type:    "text",
+			Default: "'queued'::text",
+		},
+		{
+			Name:     "result",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:    "error",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "attempts",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:     "claimed_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "finished_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "ai_message_runs_message_id_kind_key",
+			Columns: []string{"message_id", "kind"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "ai_message_runs_conv",
+			Parts: []schema.IndexPart{
+				{
+					Column: "conversation_id",
+				},
+				{
+					Column: "kind",
+				},
+				{
+					Column: "id",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name: "ai_message_runs_created",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+				},
+			},
+		},
+		{
+			Name: "ai_message_runs_open",
+			Parts: []schema.IndexPart{
+				{
+					Column: "id",
+				},
+			},
+			Where: "(state = ANY (ARRAY['queued'::text, 'running'::text]))",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ai_message_runs_conversation_id_fkey",
+			Columns:    []string{"conversation_id"},
+			RefTable:   "conversations",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "ai_message_runs_message_id_fkey",
+			Columns:    []string{"message_id"},
+			RefTable:   "conversation_messages",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ai_message_runs_kind_check",
+			Expr: "\"kind\" IN ('autoreply','draft','triage')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"autoreply", "draft", "triage"},
+			},
+		},
+		{
+			Name: "ai_message_runs_state_check",
+			Expr: "\"state\" IN ('done','failed','queued','running','skipped','stale')",
+			In: &schema.CheckIn{
+				Column: "state",
+				Values: []string{"done", "failed", "queued", "running", "skipped", "stale"},
+			},
+		},
+	},
+}
+
+func (*AiProposal) MomoMeta() *momo.Meta[AiProposal] { return &aiProposalMeta }
+
+var aiProposalMeta = momo.Meta[AiProposal]{
+	Table: "ai_proposals",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK},
+		{Name: "source"},
+		{Name: "session_id", Flags: momo.FlagNullable},
+		{Name: "finding_id", Flags: momo.FlagNullable},
+		{Name: "fingerprint"},
+		{Name: "title"},
+		{Name: "rationale", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "actions"},
+		{Name: "config_revision"},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_by", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "applied_by", Flags: momo.FlagNullable},
+		{Name: "applied_at", Flags: momo.FlagNullable},
+		{Name: "dismissed_by", Flags: momo.FlagNullable},
+		{Name: "dismissed_at", Flags: momo.FlagNullable},
+		{Name: "dismiss_reason", Flags: momo.FlagNullable},
+		{Name: "dismiss_text", Flags: momo.FlagNullable},
+		{Name: "failure", Flags: momo.FlagNullable},
+		{Name: "applied_via", Flags: momo.FlagNullable},
+		{Name: "batch_id", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *AiProposal, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Source
+		case 2:
+			return &m.SessionID
+		case 3:
+			return &m.FindingID
+		case 4:
+			return &m.Fingerprint
+		case 5:
+			return &m.Title
+		case 6:
+			return &m.Rationale
+		case 7:
+			return &m.Actions
+		case 8:
+			return &m.ConfigRevision
+		case 9:
+			return &m.Status
+		case 10:
+			return &m.CreatedBy
+		case 11:
+			return &m.CreatedAt
+		case 12:
+			return &m.UpdatedAt
+		case 13:
+			return &m.AppliedBy
+		case 14:
+			return &m.AppliedAt
+		case 15:
+			return &m.DismissedBy
+		case 16:
+			return &m.DismissedAt
+		case 17:
+			return &m.DismissReason
+		case 18:
+			return &m.DismissText
+		case 19:
+			return &m.Failure
+		case 20:
+			return &m.AppliedVia
+		case 21:
+			return &m.BatchID
+		}
+		return nil
+	},
+	Value: func(m *AiProposal, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Source
+		case 2:
+			return m.SessionID
+		case 3:
+			return m.FindingID
+		case 4:
+			return m.Fingerprint
+		case 5:
+			return m.Title
+		case 6:
+			return m.Rationale
+		case 7:
+			return m.Actions
+		case 8:
+			return m.ConfigRevision
+		case 9:
+			return m.Status
+		case 10:
+			return m.CreatedBy
+		case 11:
+			return m.CreatedAt
+		case 12:
+			return m.UpdatedAt
+		case 13:
+			return m.AppliedBy
+		case 14:
+			return m.AppliedAt
+		case 15:
+			return m.DismissedBy
+		case 16:
+			return m.DismissedAt
+		case 17:
+			return m.DismissReason
+		case 18:
+			return m.DismissText
+		case 19:
+			return m.Failure
+		case 20:
+			return m.AppliedVia
+		case 21:
+			return m.BatchID
+		}
+		return nil
+	},
+	TableSchema: &aiProposalTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var aiProposalTable = schema.Table{
+	Name: "ai_proposals",
+	Columns: []schema.Column{
+		{
+			Name: "id",
+			Type: "uuid",
+		},
+		{
+			Name: "source",
+			Type: "text",
+		},
+		{
+			Name:     "session_id",
+			Type:     "uuid",
+			Nullable: true,
+		},
+		{
+			Name:     "finding_id",
+			Type:     "uuid",
+			Nullable: true,
+		},
+		{
+			Name: "fingerprint",
+			Type: "text",
+		},
+		{
+			Name: "title",
+			Type: "text",
+		},
+		{
+			Name:    "rationale",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name: "actions",
+			Type: "jsonb",
+		},
+		{
+			Name: "config_revision",
+			Type: "bigint",
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'open'::text",
+		},
+		{
+			Name:     "created_by",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "applied_by",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "applied_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "dismissed_by",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "dismissed_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "dismiss_reason",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "dismiss_text",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "failure",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:     "applied_via",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "batch_id",
+			Type:     "uuid",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "ai_proposals_fingerprint",
+			Parts: []schema.IndexPart{
+				{
+					Column: "fingerprint",
+				},
+				{
+					Column: "status",
+				},
+			},
+		},
+		{
+			Name: "ai_proposals_status",
+			Parts: []schema.IndexPart{
+				{
+					Column: "status",
+				},
+				{
+					Column: "created_at",
+					Desc:   true,
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ai_proposals_applied_by_fkey",
+			Columns:    []string{"applied_by"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "ai_proposals_batch_id_fkey",
+			Columns:    []string{"batch_id"},
+			RefTable:   "config_batches",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "ai_proposals_created_by_fkey",
+			Columns:    []string{"created_by"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "ai_proposals_dismissed_by_fkey",
+			Columns:    []string{"dismissed_by"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "ai_proposals_finding_id_fkey",
+			Columns:    []string{"finding_id"},
+			RefTable:   "ai_findings",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "ai_proposals_session_id_fkey",
+			Columns:    []string{"session_id"},
+			RefTable:   "ai_sessions",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ai_proposals_status_check",
+			Expr: "\"status\" IN ('applied','dismissed','failed','open','stale','superseded')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"applied", "dismissed", "failed", "open", "stale", "superseded"},
+			},
+		},
+	},
+}
+
+func (*AiSample) MomoMeta() *momo.Meta[AiSample] { return &aiSampleMeta }
+
+var aiSampleMeta = momo.Meta[AiSample]{
+	Table: "ai_samples",
+	Columns: []momo.ColumnMeta{
+		{Name: "kind", Flags: momo.FlagPK},
+		{Name: "subject", Flags: momo.FlagPK},
+		{Name: "at", Flags: momo.FlagPK | momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "value"},
+	},
+	Ptr: func(m *AiSample, i int) any {
+		switch i {
+		case 0:
+			return &m.Kind
+		case 1:
+			return &m.Subject
+		case 2:
+			return &m.At
+		case 3:
+			return &m.Value
+		}
+		return nil
+	},
+	Value: func(m *AiSample, i int) any {
+		switch i {
+		case 0:
+			return m.Kind
+		case 1:
+			return m.Subject
+		case 2:
+			return m.At
+		case 3:
+			return m.Value
+		}
+		return nil
+	},
+	TableSchema: &aiSampleTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1, 2},
+}
+
+var aiSampleTable = schema.Table{
+	Name: "ai_samples",
+	Columns: []schema.Column{
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "subject",
+			Type: "text",
+		},
+		{
+			Name:    "at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name: "value",
+			Type: "jsonb",
+		},
+	},
+	PrimaryKey: []string{"kind", "subject", "at"},
+	Indexes: []schema.Index{
+		{
+			Name: "ai_samples_at",
+			Parts: []schema.IndexPart{
+				{
+					Column: "at",
+				},
+			},
+		},
+	},
+}
+
+func (*AiSession) MomoMeta() *momo.Meta[AiSession] { return &aiSessionMeta }
+
+var aiSessionMeta = momo.Meta[AiSession]{
+	Table: "ai_sessions",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK},
+		{Name: "owner"},
+		{Name: "title", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_active_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *AiSession, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Owner
+		case 2:
+			return &m.Title
+		case 3:
+			return &m.CreatedAt
+		case 4:
+			return &m.LastActiveAt
+		}
+		return nil
+	},
+	Value: func(m *AiSession, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Owner
+		case 2:
+			return m.Title
+		case 3:
+			return m.CreatedAt
+		case 4:
+			return m.LastActiveAt
+		}
+		return nil
+	},
+	TableSchema: &aiSessionTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var aiSessionTable = schema.Table{
+	Name: "ai_sessions",
+	Columns: []schema.Column{
+		{
+			Name: "id",
+			Type: "uuid",
+		},
+		{
+			Name: "owner",
+			Type: "bigint",
+		},
+		{
+			Name:    "title",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "last_active_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "ai_sessions_owner",
+			Parts: []schema.IndexPart{
+				{
+					Column: "owner",
+				},
+				{
+					Column: "last_active_at",
+					Desc:   true,
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ai_sessions_owner_fkey",
+			Columns:    []string{"owner"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*AiTask) MomoMeta() *momo.Meta[AiTask] { return &aiTaskMeta }
+
+var aiTaskMeta = momo.Meta[AiTask]{
+	Table: "ai_tasks",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK},
+		{Name: "kind"},
+		{Name: "requested_by"},
+		{Name: "session_id", Flags: momo.FlagNullable},
+		{Name: "replica"},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "error_code", Flags: momo.FlagNullable},
+		{Name: "error_message", Flags: momo.FlagNullable},
+		{Name: "result", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "started_at", Flags: momo.FlagNullable},
+		{Name: "finished_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *AiTask, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Kind
+		case 2:
+			return &m.RequestedBy
+		case 3:
+			return &m.SessionID
+		case 4:
+			return &m.Replica
+		case 5:
+			return &m.Status
+		case 6:
+			return &m.ErrorCode
+		case 7:
+			return &m.ErrorMessage
+		case 8:
+			return &m.Result
+		case 9:
+			return &m.CreatedAt
+		case 10:
+			return &m.StartedAt
+		case 11:
+			return &m.FinishedAt
+		}
+		return nil
+	},
+	Value: func(m *AiTask, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Kind
+		case 2:
+			return m.RequestedBy
+		case 3:
+			return m.SessionID
+		case 4:
+			return m.Replica
+		case 5:
+			return m.Status
+		case 6:
+			return m.ErrorCode
+		case 7:
+			return m.ErrorMessage
+		case 8:
+			return m.Result
+		case 9:
+			return m.CreatedAt
+		case 10:
+			return m.StartedAt
+		case 11:
+			return m.FinishedAt
+		}
+		return nil
+	},
+	TableSchema: &aiTaskTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var aiTaskTable = schema.Table{
+	Name: "ai_tasks",
+	Columns: []schema.Column{
+		{
+			Name: "id",
+			Type: "uuid",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "requested_by",
+			Type: "bigint",
+		},
+		{
+			Name:     "session_id",
+			Type:     "uuid",
+			Nullable: true,
+		},
+		{
+			Name: "replica",
+			Type: "text",
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'queued'::text",
+		},
+		{
+			Name:     "error_code",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "error_message",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "result",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "started_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "finished_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "ai_tasks_created",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+				},
+			},
+		},
+		{
+			Name: "ai_tasks_status_replica",
+			Parts: []schema.IndexPart{
+				{
+					Column: "status",
+				},
+				{
+					Column: "replica",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ai_tasks_requested_by_fkey",
+			Columns:    []string{"requested_by"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "ai_tasks_session_id_fkey",
+			Columns:    []string{"session_id"},
+			RefTable:   "ai_sessions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ai_tasks_status_check",
+			Expr: "\"status\" IN ('failed','queued','running','succeeded')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"failed", "queued", "running", "succeeded"},
+			},
+		},
+	},
+}
+
+func (*AiUsage) MomoMeta() *momo.Meta[AiUsage] { return &aiUsageMeta }
+
+var aiUsageMeta = momo.Meta[AiUsage]{
+	Table: "ai_usage",
+	Columns: []momo.ColumnMeta{
+		{Name: "day", Flags: momo.FlagPK},
+		{Name: "input_tokens", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "output_tokens", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "reasoning_tokens", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "calls", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *AiUsage, i int) any {
+		switch i {
+		case 0:
+			return &m.Day
+		case 1:
+			return &m.InputTokens
+		case 2:
+			return &m.OutputTokens
+		case 3:
+			return &m.ReasoningTokens
+		case 4:
+			return &m.Calls
+		}
+		return nil
+	},
+	Value: func(m *AiUsage, i int) any {
+		switch i {
+		case 0:
+			return m.Day
+		case 1:
+			return m.InputTokens
+		case 2:
+			return m.OutputTokens
+		case 3:
+			return m.ReasoningTokens
+		case 4:
+			return m.Calls
+		}
+		return nil
+	},
+	TableSchema: &aiUsageTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var aiUsageTable = schema.Table{
+	Name: "ai_usage",
+	Columns: []schema.Column{
+		{
+			Name: "day",
+			Type: "date",
+		},
+		{
+			Name:    "input_tokens",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "output_tokens",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "reasoning_tokens",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "calls",
+			Type:    "bigint",
+			Default: "0",
+		},
+	},
+	PrimaryKey: []string{"day"},
+}
+
+func (*Announcement) MomoMeta() *momo.Meta[Announcement] { return &announcementMeta }
+
+var announcementMeta = momo.Meta[Announcement]{
+	Table: "announcements",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "minio_object"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "source_text", Flags: momo.FlagNullable},
+		{Name: "voice_id", Flags: momo.FlagNullable},
+		{Name: "model_id", Flags: momo.FlagNullable},
+		{Name: "generated_at", Flags: momo.FlagNullable},
+		{Name: "text_hash", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *Announcement, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.MinioObject
+		case 3:
+			return &m.CreatedAt
+		case 4:
+			return &m.UpdatedAt
+		case 5:
+			return &m.SourceText
+		case 6:
+			return &m.VoiceID
+		case 7:
+			return &m.ModelID
+		case 8:
+			return &m.GeneratedAt
+		case 9:
+			return &m.TextHash
+		}
+		return nil
+	},
+	Value: func(m *Announcement, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.MinioObject
+		case 3:
+			return m.CreatedAt
+		case 4:
+			return m.UpdatedAt
+		case 5:
+			return m.SourceText
+		case 6:
+			return m.VoiceID
+		case 7:
+			return m.ModelID
+		case 8:
+			return m.GeneratedAt
+		case 9:
+			return m.TextHash
+		}
+		return nil
+	},
+	TableSchema: &announcementTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var announcementTable = schema.Table{
+	Name: "announcements",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "minio_object",
+			Type: "text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "source_text",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "voice_id",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "model_id",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "generated_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "text_hash",
+			Type:     "text",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "announcements_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "announcements_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._-]{1,64}$'::text)",
+		},
+	},
+}
+
+func (*AuditEvent) MomoMeta() *momo.Meta[AuditEvent] { return &auditEventMeta }
+
+var auditEventMeta = momo.Meta[AuditEvent]{
+	Table: "audit_events",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "actor"},
+		{Name: "action"},
+		{Name: "resource"},
+		{Name: "resource_id"},
+		{Name: "at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "via", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *AuditEvent, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Actor
+		case 2:
+			return &m.Action
+		case 3:
+			return &m.Resource
+		case 4:
+			return &m.ResourceID
+		case 5:
+			return &m.At
+		case 6:
+			return &m.Via
+		}
+		return nil
+	},
+	Value: func(m *AuditEvent, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Actor
+		case 2:
+			return m.Action
+		case 3:
+			return m.Resource
+		case 4:
+			return m.ResourceID
+		case 5:
+			return m.At
+		case 6:
+			return m.Via
+		}
+		return nil
+	},
+	TableSchema: &auditEventTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var auditEventTable = schema.Table{
+	Name: "audit_events",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "actor",
+			Type: "text",
+		},
+		{
+			Name: "action",
+			Type: "text",
+		},
+		{
+			Name: "resource",
+			Type: "text",
+		},
+		{
+			Name: "resource_id",
+			Type: "text",
+		},
+		{
+			Name:    "at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "via",
+			Type:     "text",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "audit_events_supervisor_view",
+			Parts: []schema.IndexPart{
+				{
+					Column: "at",
+				},
+			},
+			Where: "(action = 'supervisor_view'::text)",
+		},
+	},
+}
+
+func (*AuthMfaChallenge) MomoMeta() *momo.Meta[AuthMfaChallenge] { return &authMfaChallengeMeta }
+
+var authMfaChallengeMeta = momo.Meta[AuthMfaChallenge]{
+	Table: "auth_mfa_challenges",
+	Columns: []momo.ColumnMeta{
+		{Name: "token_hash", Flags: momo.FlagPK},
+		{Name: "user_id"},
+		{Name: "expires_at"},
+		{Name: "attempts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *AuthMfaChallenge, i int) any {
+		switch i {
+		case 0:
+			return &m.TokenHash
+		case 1:
+			return &m.UserID
+		case 2:
+			return &m.ExpiresAt
+		case 3:
+			return &m.Attempts
+		}
+		return nil
+	},
+	Value: func(m *AuthMfaChallenge, i int) any {
+		switch i {
+		case 0:
+			return m.TokenHash
+		case 1:
+			return m.UserID
+		case 2:
+			return m.ExpiresAt
+		case 3:
+			return m.Attempts
+		}
+		return nil
+	},
+	TableSchema: &authMfaChallengeTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var authMfaChallengeTable = schema.Table{
+	Name: "auth_mfa_challenges",
+	Columns: []schema.Column{
+		{
+			Name: "token_hash",
+			Type: "bytea",
+		},
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name: "expires_at",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:    "attempts",
+			Type:    "integer",
+			Default: "0",
+		},
+	},
+	PrimaryKey: []string{"token_hash"},
+	Indexes: []schema.Index{
+		{
+			Name: "auth_mfa_challenges_expires",
+			Parts: []schema.IndexPart{
+				{
+					Column: "expires_at",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "auth_mfa_challenges_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*AuthMfaFailure) MomoMeta() *momo.Meta[AuthMfaFailure] { return &authMfaFailureMeta }
+
+var authMfaFailureMeta = momo.Meta[AuthMfaFailure]{
+	Table: "auth_mfa_failures",
+	Columns: []momo.ColumnMeta{
+		{Name: "user_id"},
+		{Name: "at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *AuthMfaFailure, i int) any {
+		switch i {
+		case 0:
+			return &m.UserID
+		case 1:
+			return &m.At
+		}
+		return nil
+	},
+	Value: func(m *AuthMfaFailure, i int) any {
+		switch i {
+		case 0:
+			return m.UserID
+		case 1:
+			return m.At
+		}
+		return nil
+	},
+	TableSchema: &authMfaFailureTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{},
+}
+
+var authMfaFailureTable = schema.Table{
+	Name: "auth_mfa_failures",
+	Columns: []schema.Column{
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "auth_mfa_failures_user",
+			Parts: []schema.IndexPart{
+				{
+					Column: "user_id",
+				},
+				{
+					Column: "at",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "auth_mfa_failures_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*AuthSetting) MomoMeta() *momo.Meta[AuthSetting] { return &authSettingMeta }
+
+var authSettingMeta = momo.Meta[AuthSetting]{
+	Table: "auth_settings",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "require_2fa_roles", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "sso_required", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *AuthSetting, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Require2faRoles
+		case 2:
+			return &m.SsoRequired
+		}
+		return nil
+	},
+	Value: func(m *AuthSetting, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Require2faRoles
+		case 2:
+			return m.SsoRequired
+		}
+		return nil
+	},
+	TableSchema: &authSettingTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var authSettingTable = schema.Table{
+	Name: "auth_settings",
+	Columns: []schema.Column{
+		{
+			Name:    "id",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "require_2fa_roles",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:    "sso_required",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Checks: []schema.Check{
+		{
+			Name: "auth_settings_id_check",
+			Expr: "id",
+		},
+	},
+}
+
+func (*BackupRun) MomoMeta() *momo.Meta[BackupRun] { return &backupRunMeta }
+
+var backupRunMeta = momo.Meta[BackupRun]{
+	Table: "backup_runs",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "kind"},
+		{Name: "status"},
+		{Name: "attempt", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "started_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "finished_at", Flags: momo.FlagNullable},
+		{Name: "db_bytes", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "object_count", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "object_bytes", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "archive_bytes", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "object_key", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "error_class", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *BackupRun, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Kind
+		case 2:
+			return &m.Status
+		case 3:
+			return &m.Attempt
+		case 4:
+			return &m.StartedAt
+		case 5:
+			return &m.FinishedAt
+		case 6:
+			return &m.DbBytes
+		case 7:
+			return &m.ObjectCount
+		case 8:
+			return &m.ObjectBytes
+		case 9:
+			return &m.ArchiveBytes
+		case 10:
+			return &m.ObjectKey
+		case 11:
+			return &m.ErrorClass
+		}
+		return nil
+	},
+	Value: func(m *BackupRun, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Kind
+		case 2:
+			return m.Status
+		case 3:
+			return m.Attempt
+		case 4:
+			return m.StartedAt
+		case 5:
+			return m.FinishedAt
+		case 6:
+			return m.DbBytes
+		case 7:
+			return m.ObjectCount
+		case 8:
+			return m.ObjectBytes
+		case 9:
+			return m.ArchiveBytes
+		case 10:
+			return m.ObjectKey
+		case 11:
+			return m.ErrorClass
+		}
+		return nil
+	},
+	TableSchema: &backupRunTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var backupRunTable = schema.Table{
+	Name: "backup_runs",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "status",
+			Type: "text",
+		},
+		{
+			Name:    "attempt",
+			Type:    "integer",
+			Default: "1",
+		},
+		{
+			Name:    "started_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "finished_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "db_bytes",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "object_count",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "object_bytes",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "archive_bytes",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "object_key",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "error_class",
+			Type:    "text",
+			Default: "''::text",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "backup_runs_key",
+			Parts: []schema.IndexPart{
+				{
+					Column: "object_key",
+				},
+			},
+		},
+		{
+			Name: "backup_runs_started",
+			Parts: []schema.IndexPart{
+				{
+					Column: "started_at",
+					Desc:   true,
+				},
+			},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "backup_runs_kind_check",
+			Expr: "\"kind\" IN ('manual','scheduled')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"manual", "scheduled"},
+			},
+		},
+		{
+			Name: "backup_runs_status_check",
+			Expr: "\"status\" IN ('failed','running','succeeded')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"failed", "running", "succeeded"},
+			},
+		},
+	},
+}
+
+func (*BackupSetting) MomoMeta() *momo.Meta[BackupSetting] { return &backupSettingMeta }
+
+var backupSettingMeta = momo.Meta[BackupSetting]{
+	Table: "backup_settings",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "cron", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "s3_endpoint", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "s3_bucket", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "s3_region", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "s3_path_style", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "s3_keys_sealed", Flags: momo.FlagNullable},
+		{Name: "keep_count", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "notify_email", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *BackupSetting, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Enabled
+		case 2:
+			return &m.Cron
+		case 3:
+			return &m.Kind
+		case 4:
+			return &m.S3Endpoint
+		case 5:
+			return &m.S3Bucket
+		case 6:
+			return &m.S3Region
+		case 7:
+			return &m.S3PathStyle
+		case 8:
+			return &m.S3KeysSealed
+		case 9:
+			return &m.KeepCount
+		case 10:
+			return &m.NotifyEmail
+		case 11:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *BackupSetting, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Enabled
+		case 2:
+			return m.Cron
+		case 3:
+			return m.Kind
+		case 4:
+			return m.S3Endpoint
+		case 5:
+			return m.S3Bucket
+		case 6:
+			return m.S3Region
+		case 7:
+			return m.S3PathStyle
+		case 8:
+			return m.S3KeysSealed
+		case 9:
+			return m.KeepCount
+		case 10:
+			return m.NotifyEmail
+		case 11:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &backupSettingTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var backupSettingTable = schema.Table{
+	Name: "backup_settings",
+	Columns: []schema.Column{
+		{
+			Name:    "id",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "cron",
+			Type:    "text",
+			Default: "'0 2 * * *'::text",
+		},
+		{
+			Name:    "kind",
+			Type:    "text",
+			Default: "'minio'::text",
+		},
+		{
+			Name:    "s3_endpoint",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "s3_bucket",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "s3_region",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "s3_path_style",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "s3_keys_sealed",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "keep_count",
+			Type:    "integer",
+			Default: "14",
+		},
+		{
+			Name:    "notify_email",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Checks: []schema.Check{
+		{
+			Name: "backup_settings_id_check",
+			Expr: "id",
+		},
+		{
+			Name: "backup_settings_keep_count_check",
+			Expr: "((keep_count >= 1) AND (keep_count <= 365))",
+		},
+		{
+			Name: "backup_settings_kind_check",
+			Expr: "\"kind\" IN ('minio','s3')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"minio", "s3"},
+			},
+		},
+	},
+}
+
+func (*BossLink) MomoMeta() *momo.Meta[BossLink] { return &bossLinkMeta }
+
+var bossLinkMeta = momo.Meta[BossLink]{
+	Table: "boss_links",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "boss_extension_id"},
+		{Name: "assistant_extension_id"},
+		{Name: "ring_mode", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "screening", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "divert_on", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "outbound_as_boss", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *BossLink, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.BossExtensionID
+		case 2:
+			return &m.AssistantExtensionID
+		case 3:
+			return &m.RingMode
+		case 4:
+			return &m.Screening
+		case 5:
+			return &m.Enabled
+		case 6:
+			return &m.DivertOn
+		case 7:
+			return &m.OutboundAsBoss
+		case 8:
+			return &m.CreatedAt
+		case 9:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *BossLink, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.BossExtensionID
+		case 2:
+			return m.AssistantExtensionID
+		case 3:
+			return m.RingMode
+		case 4:
+			return m.Screening
+		case 5:
+			return m.Enabled
+		case 6:
+			return m.DivertOn
+		case 7:
+			return m.OutboundAsBoss
+		case 8:
+			return m.CreatedAt
+		case 9:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &bossLinkTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var bossLinkTable = schema.Table{
+	Name: "boss_links",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "boss_extension_id",
+			Type: "bigint",
+		},
+		{
+			Name: "assistant_extension_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "ring_mode",
+			Type:    "text",
+			Default: "'both'::text",
+		},
+		{
+			Name:    "screening",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "divert_on",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "outbound_as_boss",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "boss_links_boss_extension_id_key",
+			Columns: []string{"boss_extension_id"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "boss_links_assistant",
+			Parts: []schema.IndexPart{
+				{
+					Column: "assistant_extension_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "boss_links_assistant_extension_id_fkey",
+			Columns:    []string{"assistant_extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "boss_links_boss_extension_id_fkey",
+			Columns:    []string{"boss_extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "boss_links_check",
+			Expr: "(boss_extension_id <> assistant_extension_id)",
+		},
+		{
+			Name: "boss_links_ring_mode_check",
+			Expr: "\"ring_mode\" IN ('assistant_first','both')",
+			In: &schema.CheckIn{
+				Column: "ring_mode",
+				Values: []string{"assistant_first", "both"},
+			},
+		},
+	},
+}
+
+func (*Calendar) MomoMeta() *momo.Meta[Calendar] { return &calendarMeta }
+
+var calendarMeta = momo.Meta[Calendar]{
+	Table: "calendars",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "description", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Calendar, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Description
+		case 3:
+			return &m.CreatedAt
+		case 4:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *Calendar, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Description
+		case 3:
+			return m.CreatedAt
+		case 4:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &calendarTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var calendarTable = schema.Table{
+	Name: "calendars",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "description",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "calendars_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "calendars_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._-]{1,64}$'::text)",
+		},
+	},
+}
+
+func (*CalendarEntry) MomoMeta() *momo.Meta[CalendarEntry] { return &calendarEntryMeta }
+
+var calendarEntryMeta = momo.Meta[CalendarEntry]{
+	Table: "calendar_entries",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "calendar_id"},
+		{Name: "label", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "start_date"},
+		{Name: "end_date"},
+		{Name: "yearly", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "all_day", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "start_time", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "end_time", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "mode", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "open_hours", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *CalendarEntry, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.CalendarID
+		case 2:
+			return &m.Label
+		case 3:
+			return &m.StartDate
+		case 4:
+			return &m.EndDate
+		case 5:
+			return &m.Yearly
+		case 6:
+			return &m.AllDay
+		case 7:
+			return &m.StartTime
+		case 8:
+			return &m.EndTime
+		case 9:
+			return &m.Mode
+		case 10:
+			return &m.OpenHours
+		}
+		return nil
+	},
+	Value: func(m *CalendarEntry, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.CalendarID
+		case 2:
+			return m.Label
+		case 3:
+			return m.StartDate
+		case 4:
+			return m.EndDate
+		case 5:
+			return m.Yearly
+		case 6:
+			return m.AllDay
+		case 7:
+			return m.StartTime
+		case 8:
+			return m.EndTime
+		case 9:
+			return m.Mode
+		case 10:
+			return m.OpenHours
+		}
+		return nil
+	},
+	TableSchema: &calendarEntryTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var calendarEntryTable = schema.Table{
+	Name: "calendar_entries",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "calendar_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "label",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name: "start_date",
+			Type: "date",
+		},
+		{
+			Name: "end_date",
+			Type: "date",
+		},
+		{
+			Name:    "yearly",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "all_day",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "start_time",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "end_time",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "mode",
+			Type:    "text",
+			Default: "'closed'::text",
+		},
+		{
+			Name:    "open_hours",
+			Type:    "jsonb",
+			Default: "'[]'::jsonb",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "calendar_entries_calendar",
+			Parts: []schema.IndexPart{
+				{
+					Column: "calendar_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "calendar_entries_calendar_id_fkey",
+			Columns:    []string{"calendar_id"},
+			RefTable:   "calendars",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "calendar_entries_check",
+			Expr: "(yearly OR (end_date >= start_date))",
+		},
+		{
+			Name: "calendar_entries_check1",
+			Expr: "(all_day OR ((start_time <> ''::text) AND (end_time <> ''::text) AND (start_time <> end_time)))",
+		},
+		{
+			Name: "calendar_entries_end_time_check",
+			Expr: "(end_time ~ '^((([01][0-9]|2[0-3]):[0-5][0-9])|24:00)?$'::text)",
+		},
+		{
+			Name: "calendar_entries_label_check",
+			Expr: "(length(label) <= 120)",
+		},
+		{
+			Name: "calendar_entries_mode_check",
+			Expr: "\"mode\" IN ('closed','open')",
+			In: &schema.CheckIn{
+				Column: "mode",
+				Values: []string{"closed", "open"},
+			},
+		},
+		{
+			Name: "calendar_entries_start_time_check",
+			Expr: "(start_time ~ '^(([01][0-9]|2[0-3]):[0-5][0-9])?$'::text)",
+		},
+	},
+}
+
+func (*CallBlocklist) MomoMeta() *momo.Meta[CallBlocklist] { return &callBlocklistMeta }
+
+var callBlocklistMeta = momo.Meta[CallBlocklist]{
+	Table: "call_blocklist",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "pattern"},
+		{Name: "match", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "action", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "trunk_id", Flags: momo.FlagNullable},
+		{Name: "reason", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "announcement_id", Flags: momo.FlagNullable},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *CallBlocklist, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Pattern
+		case 2:
+			return &m.Match
+		case 3:
+			return &m.Action
+		case 4:
+			return &m.TrunkID
+		case 5:
+			return &m.Reason
+		case 6:
+			return &m.AnnouncementID
+		case 7:
+			return &m.Enabled
+		case 8:
+			return &m.CreatedAt
+		case 9:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *CallBlocklist, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Pattern
+		case 2:
+			return m.Match
+		case 3:
+			return m.Action
+		case 4:
+			return m.TrunkID
+		case 5:
+			return m.Reason
+		case 6:
+			return m.AnnouncementID
+		case 7:
+			return m.Enabled
+		case 8:
+			return m.CreatedAt
+		case 9:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &callBlocklistTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var callBlocklistTable = schema.Table{
+	Name: "call_blocklist",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "pattern",
+			Type: "text",
+		},
+		{
+			Name:    "match",
+			Type:    "text",
+			Default: "'exact'::text",
+		},
+		{
+			Name:    "action",
+			Type:    "text",
+			Default: "'block'::text",
+		},
+		{
+			Name:     "trunk_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "reason",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "announcement_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name:   "call_blocklist_pattern",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "pattern",
+				},
+				{
+					Column: "match",
+				},
+				{
+					Expr: "coalesce(trunk_id, 0::bigint)",
+				},
+			},
+		},
+		{
+			Name: "call_blocklist_trunk",
+			Parts: []schema.IndexPart{
+				{
+					Column: "trunk_id",
+				},
+			},
+			Where: "(trunk_id IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "call_blocklist_announcement_id_fkey",
+			Columns:    []string{"announcement_id"},
+			RefTable:   "announcements",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "call_blocklist_trunk_id_fkey",
+			Columns:    []string{"trunk_id"},
+			RefTable:   "trunks",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "call_blocklist_action_check",
+			Expr: "\"action\" IN ('allow','block')",
+			In: &schema.CheckIn{
+				Column: "action",
+				Values: []string{"allow", "block"},
+			},
+		},
+		{
+			Name: "call_blocklist_match_check",
+			Expr: "\"match\" IN ('exact','prefix')",
+			In: &schema.CheckIn{
+				Column: "match",
+				Values: []string{"exact", "prefix"},
+			},
+		},
+		{
+			Name: "call_blocklist_pattern_check",
+			Expr: "((char_length(pattern) >= 1) AND (char_length(pattern) <= 40))",
+		},
+		{
+			Name: "call_blocklist_reason_check",
+			Expr: "(char_length(reason) <= 120)",
+		},
+	},
+}
+
+func (*Cdr) MomoMeta() *momo.Meta[Cdr] { return &cdrMeta }
+
+var cdrMeta = momo.Meta[Cdr]{
+	Table: "cdrs",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "correlation_id"},
+		{Name: "sip_call_id"},
+		{Name: "source"},
+		{Name: "destination"},
+		{Name: "start_time"},
+		{Name: "ring_time", Flags: momo.FlagNullable},
+		{Name: "answer_time", Flags: momo.FlagNullable},
+		{Name: "end_time"},
+		{Name: "duration_ms"},
+		{Name: "billable_ms"},
+		{Name: "sip_node"},
+		{Name: "media_mode", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "final_status"},
+		{Name: "termination_side"},
+		{Name: "failure_reason", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "direction", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "original_destination", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "rewritten_destination", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "route_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "trunk_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "trace", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "rtp_packets", Flags: momo.FlagNullable},
+		{Name: "rtp_lost", Flags: momo.FlagNullable},
+		{Name: "rtp_jitter_ms", Flags: momo.FlagNullable},
+		{Name: "kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ring_tag", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ring_rule", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "caller_codec", Flags: momo.FlagNullable},
+		{Name: "callee_codec", Flags: momo.FlagNullable},
+		{Name: "origin", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "origin_client", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "answered_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "peer_call_id", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "srtp", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "srtp_keyex", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ice", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "video", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Cdr, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.CorrelationID
+		case 2:
+			return &m.SipCallID
+		case 3:
+			return &m.Source
+		case 4:
+			return &m.Destination
+		case 5:
+			return &m.StartTime
+		case 6:
+			return &m.RingTime
+		case 7:
+			return &m.AnswerTime
+		case 8:
+			return &m.EndTime
+		case 9:
+			return &m.DurationMs
+		case 10:
+			return &m.BillableMs
+		case 11:
+			return &m.SipNode
+		case 12:
+			return &m.MediaMode
+		case 13:
+			return &m.FinalStatus
+		case 14:
+			return &m.TerminationSide
+		case 15:
+			return &m.FailureReason
+		case 16:
+			return &m.Direction
+		case 17:
+			return &m.OriginalDestination
+		case 18:
+			return &m.RewrittenDestination
+		case 19:
+			return &m.RouteName
+		case 20:
+			return &m.TrunkName
+		case 21:
+			return &m.Trace
+		case 22:
+			return &m.RtpPackets
+		case 23:
+			return &m.RtpLost
+		case 24:
+			return &m.RtpJitterMs
+		case 25:
+			return &m.Kind
+		case 26:
+			return &m.RingTag
+		case 27:
+			return &m.RingRule
+		case 28:
+			return &m.CallerCodec
+		case 29:
+			return &m.CalleeCodec
+		case 30:
+			return &m.Origin
+		case 31:
+			return &m.OriginClient
+		case 32:
+			return &m.AnsweredBy
+		case 33:
+			return &m.PeerCallID
+		case 34:
+			return &m.Srtp
+		case 35:
+			return &m.SrtpKeyex
+		case 36:
+			return &m.Ice
+		case 37:
+			return &m.Video
+		}
+		return nil
+	},
+	Value: func(m *Cdr, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.CorrelationID
+		case 2:
+			return m.SipCallID
+		case 3:
+			return m.Source
+		case 4:
+			return m.Destination
+		case 5:
+			return m.StartTime
+		case 6:
+			return m.RingTime
+		case 7:
+			return m.AnswerTime
+		case 8:
+			return m.EndTime
+		case 9:
+			return m.DurationMs
+		case 10:
+			return m.BillableMs
+		case 11:
+			return m.SipNode
+		case 12:
+			return m.MediaMode
+		case 13:
+			return m.FinalStatus
+		case 14:
+			return m.TerminationSide
+		case 15:
+			return m.FailureReason
+		case 16:
+			return m.Direction
+		case 17:
+			return m.OriginalDestination
+		case 18:
+			return m.RewrittenDestination
+		case 19:
+			return m.RouteName
+		case 20:
+			return m.TrunkName
+		case 21:
+			return m.Trace
+		case 22:
+			return m.RtpPackets
+		case 23:
+			return m.RtpLost
+		case 24:
+			return m.RtpJitterMs
+		case 25:
+			return m.Kind
+		case 26:
+			return m.RingTag
+		case 27:
+			return m.RingRule
+		case 28:
+			return m.CallerCodec
+		case 29:
+			return m.CalleeCodec
+		case 30:
+			return m.Origin
+		case 31:
+			return m.OriginClient
+		case 32:
+			return m.AnsweredBy
+		case 33:
+			return m.PeerCallID
+		case 34:
+			return m.Srtp
+		case 35:
+			return m.SrtpKeyex
+		case 36:
+			return m.Ice
+		case 37:
+			return m.Video
+		}
+		return nil
+	},
+	TableSchema: &cdrTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var cdrTable = schema.Table{
+	Name: "cdrs",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "correlation_id",
+			Type: "text",
+		},
+		{
+			Name: "sip_call_id",
+			Type: "text",
+		},
+		{
+			Name: "source",
+			Type: "text",
+		},
+		{
+			Name: "destination",
+			Type: "text",
+		},
+		{
+			Name: "start_time",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:     "ring_time",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "answer_time",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name: "end_time",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name: "duration_ms",
+			Type: "bigint",
+		},
+		{
+			Name: "billable_ms",
+			Type: "bigint",
+		},
+		{
+			Name: "sip_node",
+			Type: "text",
+		},
+		{
+			Name:    "media_mode",
+			Type:    "text",
+			Default: "'direct'::text",
+		},
+		{
+			Name: "final_status",
+			Type: "integer",
+		},
+		{
+			Name: "termination_side",
+			Type: "text",
+		},
+		{
+			Name:    "failure_reason",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "direction",
+			Type:    "text",
+			Default: "'internal'::text",
+		},
+		{
+			Name:    "original_destination",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "rewritten_destination",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "route_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "trunk_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "trace",
+			Type:    "jsonb",
+			Default: "'[]'::jsonb",
+		},
+		{
+			Name:     "rtp_packets",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "rtp_lost",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "rtp_jitter_ms",
+			Type:     "real",
+			Nullable: true,
+		},
+		{
+			Name:    "kind",
+			Type:    "text",
+			Default: "'call'::text",
+		},
+		{
+			Name:    "ring_tag",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "ring_rule",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "caller_codec",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "callee_codec",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "origin",
+			Type:    "text",
+			Default: "'phone'::text",
+		},
+		{
+			Name:    "origin_client",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "answered_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "peer_call_id",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "srtp",
+			Type:    "text",
+			Default: "'none'::text",
+		},
+		{
+			Name:    "srtp_keyex",
+			Type:    "text",
+			Default: "'none'::text",
+		},
+		{
+			Name:    "ice",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "video",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "cdrs_correlation_id_key",
+			Columns: []string{"correlation_id"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "cdrs_peer_call_id_idx",
+			Parts: []schema.IndexPart{
+				{
+					Column: "peer_call_id",
+				},
+			},
+			Where: "(peer_call_id <> ''::text)",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "cdrs_direction_check",
+			Expr: "\"direction\" IN ('inbound','internal','outbound')",
+			In: &schema.CheckIn{
+				Column: "direction",
+				Values: []string{"inbound", "internal", "outbound"},
+			},
+		},
+		{
+			Name: "cdrs_kind_check",
+			Expr: "\"kind\" IN ('alarm','call','callback','conference','door','fax','intercom','page')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"alarm", "call", "callback", "conference", "door", "fax", "intercom", "page"},
+			},
+		},
+		{
+			Name: "cdrs_origin_check",
+			Expr: "\"origin\" IN ('api','phone')",
+			In: &schema.CheckIn{
+				Column: "origin",
+				Values: []string{"api", "phone"},
+			},
+		},
+		{
+			Name: "cdrs_srtp_check",
+			Expr: "\"srtp\" IN ('both','callee','caller','none')",
+			In: &schema.CheckIn{
+				Column: "srtp",
+				Values: []string{"both", "callee", "caller", "none"},
+			},
+		},
+		{
+			Name: "cdrs_srtp_keyex_check",
+			Expr: "\"srtp_keyex\" IN ('dtls','mixed','none','sdes')",
+			In: &schema.CheckIn{
+				Column: "srtp_keyex",
+				Values: []string{"dtls", "mixed", "none", "sdes"},
+			},
+		},
+	},
+}
+
+func (*CdrClientQuality) MomoMeta() *momo.Meta[CdrClientQuality] { return &cdrClientQualityMeta }
+
+var cdrClientQualityMeta = momo.Meta[CdrClientQuality]{
+	Table: "cdr_client_quality",
+	Columns: []momo.ColumnMeta{
+		{Name: "call_id", Flags: momo.FlagPK},
+		{Name: "device_id", Flags: momo.FlagPK},
+		{Name: "user_id"},
+		{Name: "codec", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "loss_pct", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "jitter_ms", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "rtt_ms", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "candidate_local", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "candidate_remote", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "video_width", Flags: momo.FlagNullable},
+		{Name: "video_height", Flags: momo.FlagNullable},
+		{Name: "video_fps", Flags: momo.FlagNullable},
+		{Name: "video_codec", Flags: momo.FlagNullable},
+		{Name: "duration_ms", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "reported_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *CdrClientQuality, i int) any {
+		switch i {
+		case 0:
+			return &m.CallID
+		case 1:
+			return &m.DeviceID
+		case 2:
+			return &m.UserID
+		case 3:
+			return &m.Codec
+		case 4:
+			return &m.LossPct
+		case 5:
+			return &m.JitterMs
+		case 6:
+			return &m.RttMs
+		case 7:
+			return &m.CandidateLocal
+		case 8:
+			return &m.CandidateRemote
+		case 9:
+			return &m.VideoWidth
+		case 10:
+			return &m.VideoHeight
+		case 11:
+			return &m.VideoFps
+		case 12:
+			return &m.VideoCodec
+		case 13:
+			return &m.DurationMs
+		case 14:
+			return &m.ReportedAt
+		}
+		return nil
+	},
+	Value: func(m *CdrClientQuality, i int) any {
+		switch i {
+		case 0:
+			return m.CallID
+		case 1:
+			return m.DeviceID
+		case 2:
+			return m.UserID
+		case 3:
+			return m.Codec
+		case 4:
+			return m.LossPct
+		case 5:
+			return m.JitterMs
+		case 6:
+			return m.RttMs
+		case 7:
+			return m.CandidateLocal
+		case 8:
+			return m.CandidateRemote
+		case 9:
+			return m.VideoWidth
+		case 10:
+			return m.VideoHeight
+		case 11:
+			return m.VideoFps
+		case 12:
+			return m.VideoCodec
+		case 13:
+			return m.DurationMs
+		case 14:
+			return m.ReportedAt
+		}
+		return nil
+	},
+	TableSchema: &cdrClientQualityTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var cdrClientQualityTable = schema.Table{
+	Name: "cdr_client_quality",
+	Columns: []schema.Column{
+		{
+			Name: "call_id",
+			Type: "text",
+		},
+		{
+			Name: "device_id",
+			Type: "bigint",
+		},
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "codec",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "loss_pct",
+			Type:    "real",
+			Default: "0",
+		},
+		{
+			Name:    "jitter_ms",
+			Type:    "real",
+			Default: "0",
+		},
+		{
+			Name:    "rtt_ms",
+			Type:    "real",
+			Default: "0",
+		},
+		{
+			Name:    "candidate_local",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "candidate_remote",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "video_width",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:     "video_height",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:     "video_fps",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:     "video_codec",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "duration_ms",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "reported_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"call_id", "device_id"},
+	Indexes: []schema.Index{
+		{
+			Name: "cdr_client_quality_reported_at_idx",
+			Parts: []schema.IndexPart{
+				{
+					Column: "reported_at",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "cdr_client_quality_device_id_fkey",
+			Columns:    []string{"device_id"},
+			RefTable:   "devices",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "cdr_client_quality_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "cdr_client_quality_call_id_check",
+			Expr: "((length(call_id) >= 1) AND (length(call_id) <= 256))",
+		},
+		{
+			Name: "cdr_client_quality_candidate_local_check",
+			Expr: "(length(candidate_local) <= 16)",
+		},
+		{
+			Name: "cdr_client_quality_candidate_remote_check",
+			Expr: "(length(candidate_remote) <= 16)",
+		},
+		{
+			Name: "cdr_client_quality_codec_check",
+			Expr: "(length(codec) <= 32)",
+		},
+		{
+			Name: "cdr_client_quality_duration_ms_check",
+			Expr: "(duration_ms >= 0)",
+		},
+		{
+			Name: "cdr_client_quality_jitter_ms_check",
+			Expr: "(jitter_ms >= (0)::double precision)",
+		},
+		{
+			Name: "cdr_client_quality_loss_pct_check",
+			Expr: "((loss_pct >= (0)::double precision) AND (loss_pct <= (100)::double precision))",
+		},
+		{
+			Name: "cdr_client_quality_rtt_ms_check",
+			Expr: "(rtt_ms >= (0)::double precision)",
+		},
+		{
+			Name: "cdr_client_quality_video_codec_check",
+			Expr: "(length(video_codec) <= 32)",
+		},
+		{
+			Name: "cdr_client_quality_video_fps_check",
+			Expr: "((video_fps >= 0) AND (video_fps <= 1000))",
+		},
+		{
+			Name: "cdr_client_quality_video_height_check",
+			Expr: "((video_height >= 0) AND (video_height <= 16384))",
+		},
+		{
+			Name: "cdr_client_quality_video_width_check",
+			Expr: "((video_width >= 0) AND (video_width <= 16384))",
+		},
+	},
+}
+
+func (*CdrLeg) MomoMeta() *momo.Meta[CdrLeg] { return &cdrLegMeta }
+
+var cdrLegMeta = momo.Meta[CdrLeg]{
+	Table: "cdr_legs",
+	Columns: []momo.ColumnMeta{
+		{Name: "cdr_id", Flags: momo.FlagPK},
+		{Name: "position", Flags: momo.FlagPK},
+		{Name: "role"},
+		{Name: "extension", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "trunk", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "codec", Flags: momo.FlagNullable},
+		{Name: "payload_type", Flags: momo.FlagNullable},
+		{Name: "result", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "target_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *CdrLeg, i int) any {
+		switch i {
+		case 0:
+			return &m.CdrID
+		case 1:
+			return &m.Position
+		case 2:
+			return &m.Role
+		case 3:
+			return &m.Extension
+		case 4:
+			return &m.Trunk
+		case 5:
+			return &m.Codec
+		case 6:
+			return &m.PayloadType
+		case 7:
+			return &m.Result
+		case 8:
+			return &m.TargetKind
+		}
+		return nil
+	},
+	Value: func(m *CdrLeg, i int) any {
+		switch i {
+		case 0:
+			return m.CdrID
+		case 1:
+			return m.Position
+		case 2:
+			return m.Role
+		case 3:
+			return m.Extension
+		case 4:
+			return m.Trunk
+		case 5:
+			return m.Codec
+		case 6:
+			return m.PayloadType
+		case 7:
+			return m.Result
+		case 8:
+			return m.TargetKind
+		}
+		return nil
+	},
+	TableSchema: &cdrLegTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var cdrLegTable = schema.Table{
+	Name: "cdr_legs",
+	Columns: []schema.Column{
+		{
+			Name: "cdr_id",
+			Type: "bigint",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+		{
+			Name: "role",
+			Type: "text",
+		},
+		{
+			Name:    "extension",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "trunk",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "codec",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "payload_type",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:    "result",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "target_kind",
+			Type:    "text",
+			Default: "''::text",
+		},
+	},
+	PrimaryKey: []string{"cdr_id", "position"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "cdr_legs_cdr_id_fkey",
+			Columns:    []string{"cdr_id"},
+			RefTable:   "cdrs",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*CdrPageLeg) MomoMeta() *momo.Meta[CdrPageLeg] { return &cdrPageLegMeta }
+
+var cdrPageLegMeta = momo.Meta[CdrPageLeg]{
+	Table: "cdr_page_legs",
+	Columns: []momo.ColumnMeta{
+		{Name: "cdr_id", Flags: momo.FlagPK},
+		{Name: "position", Flags: momo.FlagPK},
+		{Name: "extension"},
+		{Name: "device", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "result"},
+	},
+	Ptr: func(m *CdrPageLeg, i int) any {
+		switch i {
+		case 0:
+			return &m.CdrID
+		case 1:
+			return &m.Position
+		case 2:
+			return &m.Extension
+		case 3:
+			return &m.Device
+		case 4:
+			return &m.Result
+		}
+		return nil
+	},
+	Value: func(m *CdrPageLeg, i int) any {
+		switch i {
+		case 0:
+			return m.CdrID
+		case 1:
+			return m.Position
+		case 2:
+			return m.Extension
+		case 3:
+			return m.Device
+		case 4:
+			return m.Result
+		}
+		return nil
+	},
+	TableSchema: &cdrPageLegTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var cdrPageLegTable = schema.Table{
+	Name: "cdr_page_legs",
+	Columns: []schema.Column{
+		{
+			Name: "cdr_id",
+			Type: "bigint",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+		{
+			Name: "extension",
+			Type: "text",
+		},
+		{
+			Name:    "device",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name: "result",
+			Type: "text",
+		},
+	},
+	PrimaryKey: []string{"cdr_id", "position"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "cdr_page_legs_cdr_id_fkey",
+			Columns:    []string{"cdr_id"},
+			RefTable:   "cdrs",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "cdr_page_legs_result_check",
+			Expr: "\"result\" IN ('answered','busy','dnd','no_answer','no_registration')",
+			In: &schema.CheckIn{
+				Column: "result",
+				Values: []string{"answered", "busy", "dnd", "no_answer", "no_registration"},
+			},
+		},
+	},
+}
+
+func (*CdrQueueLeg) MomoMeta() *momo.Meta[CdrQueueLeg] { return &cdrQueueLegMeta }
+
+var cdrQueueLegMeta = momo.Meta[CdrQueueLeg]{
+	Table: "cdr_queue_legs",
+	Columns: []momo.ColumnMeta{
+		{Name: "cdr_id", Flags: momo.FlagPK},
+		{Name: "position", Flags: momo.FlagPK},
+		{Name: "event"},
+		{Name: "queue"},
+		{Name: "extension", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "wait_ms", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "result", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "at"},
+	},
+	Ptr: func(m *CdrQueueLeg, i int) any {
+		switch i {
+		case 0:
+			return &m.CdrID
+		case 1:
+			return &m.Position
+		case 2:
+			return &m.Event
+		case 3:
+			return &m.Queue
+		case 4:
+			return &m.Extension
+		case 5:
+			return &m.WaitMs
+		case 6:
+			return &m.Result
+		case 7:
+			return &m.At
+		}
+		return nil
+	},
+	Value: func(m *CdrQueueLeg, i int) any {
+		switch i {
+		case 0:
+			return m.CdrID
+		case 1:
+			return m.Position
+		case 2:
+			return m.Event
+		case 3:
+			return m.Queue
+		case 4:
+			return m.Extension
+		case 5:
+			return m.WaitMs
+		case 6:
+			return m.Result
+		case 7:
+			return m.At
+		}
+		return nil
+	},
+	TableSchema: &cdrQueueLegTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var cdrQueueLegTable = schema.Table{
+	Name: "cdr_queue_legs",
+	Columns: []schema.Column{
+		{
+			Name: "cdr_id",
+			Type: "bigint",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+		{
+			Name: "event",
+			Type: "text",
+		},
+		{
+			Name: "queue",
+			Type: "text",
+		},
+		{
+			Name:    "extension",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "wait_ms",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "result",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name: "at",
+			Type: "timestamp with time zone",
+		},
+	},
+	PrimaryKey: []string{"cdr_id", "position"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "cdr_queue_legs_cdr_id_fkey",
+			Columns:    []string{"cdr_id"},
+			RefTable:   "cdrs",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "cdr_queue_legs_event_check",
+			Expr: "\"event\" IN ('abandon','agent','answered','callback_connected','callback_dialled','callback_failed','callback_requested','enter','exit','wait')",
+			In: &schema.CheckIn{
+				Column: "event",
+				Values: []string{"abandon", "agent", "answered", "callback_connected", "callback_dialled", "callback_failed", "callback_requested", "enter", "exit", "wait"},
+			},
+		},
+	},
+}
+
+func (*CdrRtcpxr) MomoMeta() *momo.Meta[CdrRtcpxr] { return &cdrRtcpxrMeta }
+
+var cdrRtcpxrMeta = momo.Meta[CdrRtcpxr]{
+	Table: "cdr_rtcpxr",
+	Columns: []momo.ColumnMeta{
+		{Name: "call_id", Flags: momo.FlagPK},
+		{Name: "device", Flags: momo.FlagPK},
+		{Name: "extension", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "final", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "mos_lq", Flags: momo.FlagNullable},
+		{Name: "mos_cq", Flags: momo.FlagNullable},
+		{Name: "jitter_ms", Flags: momo.FlagNullable},
+		{Name: "loss_pct", Flags: momo.FlagNullable},
+		{Name: "discard_pct", Flags: momo.FlagNullable},
+		{Name: "rtt_ms", Flags: momo.FlagNullable},
+		{Name: "reported_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *CdrRtcpxr, i int) any {
+		switch i {
+		case 0:
+			return &m.CallID
+		case 1:
+			return &m.Device
+		case 2:
+			return &m.Extension
+		case 3:
+			return &m.Final
+		case 4:
+			return &m.MosLq
+		case 5:
+			return &m.MosCq
+		case 6:
+			return &m.JitterMs
+		case 7:
+			return &m.LossPct
+		case 8:
+			return &m.DiscardPct
+		case 9:
+			return &m.RttMs
+		case 10:
+			return &m.ReportedAt
+		}
+		return nil
+	},
+	Value: func(m *CdrRtcpxr, i int) any {
+		switch i {
+		case 0:
+			return m.CallID
+		case 1:
+			return m.Device
+		case 2:
+			return m.Extension
+		case 3:
+			return m.Final
+		case 4:
+			return m.MosLq
+		case 5:
+			return m.MosCq
+		case 6:
+			return m.JitterMs
+		case 7:
+			return m.LossPct
+		case 8:
+			return m.DiscardPct
+		case 9:
+			return m.RttMs
+		case 10:
+			return m.ReportedAt
+		}
+		return nil
+	},
+	TableSchema: &cdrRtcpxrTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var cdrRtcpxrTable = schema.Table{
+	Name: "cdr_rtcpxr",
+	Columns: []schema.Column{
+		{
+			Name: "call_id",
+			Type: "text",
+		},
+		{
+			Name: "device",
+			Type: "text",
+		},
+		{
+			Name:    "extension",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "final",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "mos_lq",
+			Type:     "real",
+			Nullable: true,
+		},
+		{
+			Name:     "mos_cq",
+			Type:     "real",
+			Nullable: true,
+		},
+		{
+			Name:     "jitter_ms",
+			Type:     "real",
+			Nullable: true,
+		},
+		{
+			Name:     "loss_pct",
+			Type:     "real",
+			Nullable: true,
+		},
+		{
+			Name:     "discard_pct",
+			Type:     "real",
+			Nullable: true,
+		},
+		{
+			Name:     "rtt_ms",
+			Type:     "real",
+			Nullable: true,
+		},
+		{
+			Name:    "reported_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"call_id", "device"},
+	Indexes: []schema.Index{
+		{
+			Name: "cdr_rtcpxr_reported_at_idx",
+			Parts: []schema.IndexPart{
+				{
+					Column: "reported_at",
+				},
+			},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "cdr_rtcpxr_call_id_check",
+			Expr: "((length(call_id) >= 1) AND (length(call_id) <= 256))",
+		},
+		{
+			Name: "cdr_rtcpxr_discard_pct_check",
+			Expr: "((discard_pct >= (0)::double precision) AND (discard_pct <= (100)::double precision))",
+		},
+		{
+			Name: "cdr_rtcpxr_jitter_ms_check",
+			Expr: "(jitter_ms >= (0)::double precision)",
+		},
+		{
+			Name: "cdr_rtcpxr_loss_pct_check",
+			Expr: "((loss_pct >= (0)::double precision) AND (loss_pct <= (100)::double precision))",
+		},
+		{
+			Name: "cdr_rtcpxr_mos_cq_check",
+			Expr: "((mos_cq >= (0)::double precision) AND (mos_cq <= (5)::double precision))",
+		},
+		{
+			Name: "cdr_rtcpxr_mos_lq_check",
+			Expr: "((mos_lq >= (0)::double precision) AND (mos_lq <= (5)::double precision))",
+		},
+		{
+			Name: "cdr_rtcpxr_rtt_ms_check",
+			Expr: "(rtt_ms >= (0)::double precision)",
+		},
+	},
+}
+
+func (*ChatBlock) MomoMeta() *momo.Meta[ChatBlock] { return &chatBlockMeta }
+
+var chatBlockMeta = momo.Meta[ChatBlock]{
+	Table: "chat_blocks",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "site_id"},
+		{Name: "visitor_id", Flags: momo.FlagNullable},
+		{Name: "ip_hash", Flags: momo.FlagNullable},
+		{Name: "until"},
+		{Name: "by_user_id", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ChatBlock, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.SiteID
+		case 2:
+			return &m.VisitorID
+		case 3:
+			return &m.IPHash
+		case 4:
+			return &m.Until
+		case 5:
+			return &m.ByUserID
+		case 6:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *ChatBlock, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.SiteID
+		case 2:
+			return m.VisitorID
+		case 3:
+			return m.IPHash
+		case 4:
+			return m.Until
+		case 5:
+			return m.ByUserID
+		case 6:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &chatBlockTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var chatBlockTable = schema.Table{
+	Name: "chat_blocks",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "site_id",
+			Type: "bigint",
+		},
+		{
+			Name:     "visitor_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "ip_hash",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name: "until",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:     "by_user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "chat_blocks_site",
+			Parts: []schema.IndexPart{
+				{
+					Column: "site_id",
+				},
+				{
+					Column: "until",
+				},
+			},
+		},
+		{
+			Name: "chat_blocks_visitor",
+			Parts: []schema.IndexPart{
+				{
+					Column: "visitor_id",
+				},
+			},
+			Where: "(visitor_id IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "chat_blocks_by_user_id_fkey",
+			Columns:    []string{"by_user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "chat_blocks_site_id_fkey",
+			Columns:    []string{"site_id"},
+			RefTable:   "chat_sites",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "chat_blocks_visitor_id_fkey",
+			Columns:    []string{"visitor_id"},
+			RefTable:   "chat_visitors",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "chat_blocks_check",
+			Expr: "((visitor_id IS NOT NULL) OR (ip_hash IS NOT NULL))",
+		},
+	},
+}
+
+func (*ChatEvent) MomoMeta() *momo.Meta[ChatEvent] { return &chatEventMeta }
+
+var chatEventMeta = momo.Meta[ChatEvent]{
+	Table: "chat_events",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "visitor_id"},
+		{Name: "type"},
+		{Name: "message_id", Flags: momo.FlagNullable},
+		{Name: "at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ChatEvent, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.VisitorID
+		case 2:
+			return &m.Type
+		case 3:
+			return &m.MessageID
+		case 4:
+			return &m.At
+		}
+		return nil
+	},
+	Value: func(m *ChatEvent, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.VisitorID
+		case 2:
+			return m.Type
+		case 3:
+			return m.MessageID
+		case 4:
+			return m.At
+		}
+		return nil
+	},
+	TableSchema: &chatEventTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var chatEventTable = schema.Table{
+	Name: "chat_events",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "visitor_id",
+			Type: "bigint",
+		},
+		{
+			Name: "type",
+			Type: "text",
+		},
+		{
+			Name:     "message_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "chat_events_at",
+			Parts: []schema.IndexPart{
+				{
+					Column: "at",
+				},
+			},
+		},
+		{
+			Name: "chat_events_visitor",
+			Parts: []schema.IndexPart{
+				{
+					Column: "visitor_id",
+				},
+				{
+					Column: "id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "chat_events_visitor_id_fkey",
+			Columns:    []string{"visitor_id"},
+			RefTable:   "chat_visitors",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*ChatSite) MomoMeta() *momo.Meta[ChatSite] { return &chatSiteMeta }
+
+var chatSiteMeta = momo.Meta[ChatSite]{
+	Table: "chat_sites",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "channel_id"},
+		{Name: "address_id"},
+		{Name: "site_key"},
+		{Name: "allowed_origins", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "greeting", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "accent", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "position", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "collect", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "offline_mode", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "privacy_url", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "challenge", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "pow_bits", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "turnstile_site_key", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "turnstile_secret_enc", Flags: momo.FlagNullable},
+		{Name: "strip_links", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "max_open_unassigned", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "transcripts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "retention_days", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "attachments", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "logo_type", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "logo_updated_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *ChatSite, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ChannelID
+		case 2:
+			return &m.AddressID
+		case 3:
+			return &m.SiteKey
+		case 4:
+			return &m.AllowedOrigins
+		case 5:
+			return &m.Greeting
+		case 6:
+			return &m.Accent
+		case 7:
+			return &m.Position
+		case 8:
+			return &m.Collect
+		case 9:
+			return &m.OfflineMode
+		case 10:
+			return &m.PrivacyURL
+		case 11:
+			return &m.Challenge
+		case 12:
+			return &m.PowBits
+		case 13:
+			return &m.TurnstileSiteKey
+		case 14:
+			return &m.TurnstileSecretEnc
+		case 15:
+			return &m.StripLinks
+		case 16:
+			return &m.MaxOpenUnassigned
+		case 17:
+			return &m.Transcripts
+		case 18:
+			return &m.RetentionDays
+		case 19:
+			return &m.CreatedAt
+		case 20:
+			return &m.UpdatedAt
+		case 21:
+			return &m.Attachments
+		case 22:
+			return &m.LogoType
+		case 23:
+			return &m.LogoUpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *ChatSite, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ChannelID
+		case 2:
+			return m.AddressID
+		case 3:
+			return m.SiteKey
+		case 4:
+			return m.AllowedOrigins
+		case 5:
+			return m.Greeting
+		case 6:
+			return m.Accent
+		case 7:
+			return m.Position
+		case 8:
+			return m.Collect
+		case 9:
+			return m.OfflineMode
+		case 10:
+			return m.PrivacyURL
+		case 11:
+			return m.Challenge
+		case 12:
+			return m.PowBits
+		case 13:
+			return m.TurnstileSiteKey
+		case 14:
+			return m.TurnstileSecretEnc
+		case 15:
+			return m.StripLinks
+		case 16:
+			return m.MaxOpenUnassigned
+		case 17:
+			return m.Transcripts
+		case 18:
+			return m.RetentionDays
+		case 19:
+			return m.CreatedAt
+		case 20:
+			return m.UpdatedAt
+		case 21:
+			return m.Attachments
+		case 22:
+			return m.LogoType
+		case 23:
+			return m.LogoUpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &chatSiteTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var chatSiteTable = schema.Table{
+	Name: "chat_sites",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "channel_id",
+			Type: "bigint",
+		},
+		{
+			Name: "address_id",
+			Type: "bigint",
+		},
+		{
+			Name: "site_key",
+			Type: "text",
+		},
+		{
+			Name:    "allowed_origins",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:    "greeting",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "accent",
+			Type:    "text",
+			Default: "'#2563eb'::text",
+		},
+		{
+			Name:    "position",
+			Type:    "text",
+			Default: "'right'::text",
+		},
+		{
+			Name:    "collect",
+			Type:    "text",
+			Default: "'off'::text",
+		},
+		{
+			Name:    "offline_mode",
+			Type:    "text",
+			Default: "'collect'::text",
+		},
+		{
+			Name:    "privacy_url",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "challenge",
+			Type:    "text",
+			Default: "'pow'::text",
+		},
+		{
+			Name:    "pow_bits",
+			Type:    "integer",
+			Default: "16",
+		},
+		{
+			Name:    "turnstile_site_key",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "turnstile_secret_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "strip_links",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "max_open_unassigned",
+			Type:    "integer",
+			Default: "200",
+		},
+		{
+			Name:    "transcripts",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "retention_days",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "attachments",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "logo_type",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "logo_updated_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "chat_sites_address_id_key",
+			Columns: []string{"address_id"},
+		},
+		{
+			Name:    "chat_sites_channel_id_key",
+			Columns: []string{"channel_id"},
+		},
+		{
+			Name:    "chat_sites_site_key_key",
+			Columns: []string{"site_key"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "chat_sites_address_id_fkey",
+			Columns:    []string{"address_id"},
+			RefTable:   "msg_addresses",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "chat_sites_channel_id_fkey",
+			Columns:    []string{"channel_id"},
+			RefTable:   "msg_channels",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "chat_sites_accent_check",
+			Expr: "(accent ~ '^#[0-9a-fA-F]{6}$'::text)",
+		},
+		{
+			Name: "chat_sites_challenge_check",
+			Expr: "\"challenge\" IN ('none','pow','turnstile')",
+			In: &schema.CheckIn{
+				Column: "challenge",
+				Values: []string{"none", "pow", "turnstile"},
+			},
+		},
+		{
+			Name: "chat_sites_collect_check",
+			Expr: "\"collect\" IN ('off','optional','required')",
+			In: &schema.CheckIn{
+				Column: "collect",
+				Values: []string{"off", "optional", "required"},
+			},
+		},
+		{
+			Name: "chat_sites_greeting_check",
+			Expr: "(length(greeting) <= 500)",
+		},
+		{
+			Name: "chat_sites_logo_type_check",
+			Expr: "\"logo_type\" IN ('','image/gif','image/jpeg','image/png','image/webp')",
+			In: &schema.CheckIn{
+				Column: "logo_type",
+				Values: []string{"", "image/gif", "image/jpeg", "image/png", "image/webp"},
+			},
+		},
+		{
+			Name: "chat_sites_max_open_unassigned_check",
+			Expr: "((max_open_unassigned >= 1) AND (max_open_unassigned <= 100000))",
+		},
+		{
+			Name: "chat_sites_offline_mode_check",
+			Expr: "\"offline_mode\" IN ('collect','hidden')",
+			In: &schema.CheckIn{
+				Column: "offline_mode",
+				Values: []string{"collect", "hidden"},
+			},
+		},
+		{
+			Name: "chat_sites_position_check",
+			Expr: "\"position\" IN ('left','right')",
+			In: &schema.CheckIn{
+				Column: "position",
+				Values: []string{"left", "right"},
+			},
+		},
+		{
+			Name: "chat_sites_pow_bits_check",
+			Expr: "((pow_bits >= 14) AND (pow_bits <= 22))",
+		},
+		{
+			Name: "chat_sites_privacy_url_check",
+			Expr: "(length(privacy_url) <= 500)",
+		},
+		{
+			Name: "chat_sites_retention_days_check",
+			Expr: "((retention_days >= 1) AND (retention_days <= 3650))",
+		},
+		{
+			Name: "chat_sites_site_key_check",
+			Expr: "(site_key ~ '^[0-9a-f]{24}$'::text)",
+		},
+		{
+			Name: "chat_sites_turnstile_site_key_check",
+			Expr: "(length(turnstile_site_key) <= 100)",
+		},
+	},
+}
+
+func (*ChatVisitor) MomoMeta() *momo.Meta[ChatVisitor] { return &chatVisitorMeta }
+
+var chatVisitorMeta = momo.Meta[ChatVisitor]{
+	Table: "chat_visitors",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "site_id"},
+		{Name: "token_hash"},
+		{Name: "name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "email", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "consent_to_store", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ip_hash", Flags: momo.FlagNullable},
+		{Name: "ua_family", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "page", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "first_seen", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_seen", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ChatVisitor, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.SiteID
+		case 2:
+			return &m.TokenHash
+		case 3:
+			return &m.Name
+		case 4:
+			return &m.Email
+		case 5:
+			return &m.ConsentToStore
+		case 6:
+			return &m.IPHash
+		case 7:
+			return &m.UaFamily
+		case 8:
+			return &m.Page
+		case 9:
+			return &m.FirstSeen
+		case 10:
+			return &m.LastSeen
+		}
+		return nil
+	},
+	Value: func(m *ChatVisitor, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.SiteID
+		case 2:
+			return m.TokenHash
+		case 3:
+			return m.Name
+		case 4:
+			return m.Email
+		case 5:
+			return m.ConsentToStore
+		case 6:
+			return m.IPHash
+		case 7:
+			return m.UaFamily
+		case 8:
+			return m.Page
+		case 9:
+			return m.FirstSeen
+		case 10:
+			return m.LastSeen
+		}
+		return nil
+	},
+	TableSchema: &chatVisitorTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var chatVisitorTable = schema.Table{
+	Name: "chat_visitors",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "site_id",
+			Type: "bigint",
+		},
+		{
+			Name: "token_hash",
+			Type: "bytea",
+		},
+		{
+			Name:    "name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "email",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "consent_to_store",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "ip_hash",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "ua_family",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "page",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "first_seen",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "last_seen",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "chat_visitors_token_hash_key",
+			Columns: []string{"token_hash"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "chat_visitors_site",
+			Parts: []schema.IndexPart{
+				{
+					Column: "site_id",
+				},
+				{
+					Column: "last_seen",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "chat_visitors_site_id_fkey",
+			Columns:    []string{"site_id"},
+			RefTable:   "chat_sites",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "chat_visitors_email_check",
+			Expr: "(length(email) <= 254)",
+		},
+		{
+			Name: "chat_visitors_name_check",
+			Expr: "(length(name) <= 100)",
+		},
+		{
+			Name: "chat_visitors_page_check",
+			Expr: "(length(page) <= 500)",
+		},
+		{
+			Name: "chat_visitors_ua_family_check",
+			Expr: "(length(ua_family) <= 32)",
+		},
+	},
+}
+
+func (*ConferenceRoom) MomoMeta() *momo.Meta[ConferenceRoom] { return &conferenceRoomMeta }
+
+var conferenceRoomMeta = momo.Meta[ConferenceRoom]{
+	Table: "conference_rooms",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "number"},
+		{Name: "user_pin_enc", Flags: momo.FlagNullable},
+		{Name: "leader_pin_enc", Flags: momo.FlagNullable},
+		{Name: "max_participants", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "wait_for_leader", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "mute_on_entry", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "entry_exit", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "entry_announcement", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "exit_announcement", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "record", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "video", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ConferenceRoom, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Number
+		case 3:
+			return &m.UserPinEnc
+		case 4:
+			return &m.LeaderPinEnc
+		case 5:
+			return &m.MaxParticipants
+		case 6:
+			return &m.WaitForLeader
+		case 7:
+			return &m.MuteOnEntry
+		case 8:
+			return &m.EntryExit
+		case 9:
+			return &m.EntryAnnouncement
+		case 10:
+			return &m.ExitAnnouncement
+		case 11:
+			return &m.Record
+		case 12:
+			return &m.Enabled
+		case 13:
+			return &m.CreatedAt
+		case 14:
+			return &m.UpdatedAt
+		case 15:
+			return &m.Video
+		}
+		return nil
+	},
+	Value: func(m *ConferenceRoom, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Number
+		case 3:
+			return m.UserPinEnc
+		case 4:
+			return m.LeaderPinEnc
+		case 5:
+			return m.MaxParticipants
+		case 6:
+			return m.WaitForLeader
+		case 7:
+			return m.MuteOnEntry
+		case 8:
+			return m.EntryExit
+		case 9:
+			return m.EntryAnnouncement
+		case 10:
+			return m.ExitAnnouncement
+		case 11:
+			return m.Record
+		case 12:
+			return m.Enabled
+		case 13:
+			return m.CreatedAt
+		case 14:
+			return m.UpdatedAt
+		case 15:
+			return m.Video
+		}
+		return nil
+	},
+	TableSchema: &conferenceRoomTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var conferenceRoomTable = schema.Table{
+	Name: "conference_rooms",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "number",
+			Type: "text",
+		},
+		{
+			Name:     "user_pin_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:     "leader_pin_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "max_participants",
+			Type:    "integer",
+			Default: "10",
+		},
+		{
+			Name:    "wait_for_leader",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "mute_on_entry",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "entry_exit",
+			Type:    "text",
+			Default: "'tone'::text",
+		},
+		{
+			Name:    "entry_announcement",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "exit_announcement",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "record",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "video",
+			Type:    "boolean",
+			Default: "true",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "conference_rooms_name_key",
+			Columns: []string{"name"},
+		},
+		{
+			Name:    "conference_rooms_number_key",
+			Columns: []string{"number"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "conference_rooms_entry_exit_check",
+			Expr: "\"entry_exit\" IN ('announcement','none','tone')",
+			In: &schema.CheckIn{
+				Column: "entry_exit",
+				Values: []string{"announcement", "none", "tone"},
+			},
+		},
+		{
+			Name: "conference_rooms_max_participants_check",
+			Expr: "((max_participants >= 2) AND (max_participants <= 50))",
+		},
+		{
+			Name: "conference_rooms_name_check",
+			Expr: "((length(name) >= 1) AND (length(name) <= 64))",
+		},
+		{
+			Name: "conference_rooms_number_check",
+			Expr: "(number ~ '^[0-9]{2,10}$'::text)",
+		},
+	},
+}
+
+func (*ConfigBatch) MomoMeta() *momo.Meta[ConfigBatch] { return &configBatchMeta }
+
+var configBatchMeta = momo.Meta[ConfigBatch]{
+	Table: "config_batches",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK},
+		{Name: "actor"},
+		{Name: "via", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "base_revision"},
+		{Name: "revision"},
+		{Name: "ops"},
+		{Name: "results"},
+		{Name: "reverts", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ConfigBatch, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Actor
+		case 2:
+			return &m.Via
+		case 3:
+			return &m.BaseRevision
+		case 4:
+			return &m.Revision
+		case 5:
+			return &m.Ops
+		case 6:
+			return &m.Results
+		case 7:
+			return &m.Reverts
+		case 8:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *ConfigBatch, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Actor
+		case 2:
+			return m.Via
+		case 3:
+			return m.BaseRevision
+		case 4:
+			return m.Revision
+		case 5:
+			return m.Ops
+		case 6:
+			return m.Results
+		case 7:
+			return m.Reverts
+		case 8:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &configBatchTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var configBatchTable = schema.Table{
+	Name: "config_batches",
+	Columns: []schema.Column{
+		{
+			Name: "id",
+			Type: "uuid",
+		},
+		{
+			Name: "actor",
+			Type: "text",
+		},
+		{
+			Name:    "via",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name: "base_revision",
+			Type: "bigint",
+		},
+		{
+			Name: "revision",
+			Type: "bigint",
+		},
+		{
+			Name: "ops",
+			Type: "jsonb",
+		},
+		{
+			Name: "results",
+			Type: "jsonb",
+		},
+		{
+			Name:     "reverts",
+			Type:     "uuid",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "config_batches_created",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name: "config_batches_reverts",
+			Parts: []schema.IndexPart{
+				{
+					Column: "reverts",
+				},
+			},
+			Where: "(reverts IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "config_batches_reverts_fkey",
+			Columns:    []string{"reverts"},
+			RefTable:   "config_batches",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+}
+
+func (*Conversation) MomoMeta() *momo.Meta[Conversation] { return &conversationMeta }
+
+var conversationMeta = momo.Meta[Conversation]{
+	Table: "conversations",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "channel_id"},
+		{Name: "address_id"},
+		{Name: "peer_key"},
+		{Name: "peer_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "peer_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "peer_name_source", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "snoozed_until", Flags: momo.FlagNullable},
+		{Name: "assignee_user_id", Flags: momo.FlagNullable},
+		{Name: "priority", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "tags", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_message_id", Flags: momo.FlagNullable},
+		{Name: "last_message_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_inbound_at", Flags: momo.FlagNullable},
+		{Name: "first_response_at", Flags: momo.FlagNullable},
+		{Name: "resolved_at", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "origin", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_by_user_id", Flags: momo.FlagNullable},
+		{Name: "consent_note", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "offline", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "queue_id", Flags: momo.FlagNullable},
+		{Name: "ring_group_id", Flags: momo.FlagNullable},
+		{Name: "routed_at", Flags: momo.FlagNullable},
+		{Name: "assigned_at", Flags: momo.FlagNullable},
+		{Name: "frt_counted", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_triage", Flags: momo.FlagNullable},
+		{Name: "ai_applied", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_spam", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_handoff_at", Flags: momo.FlagNullable},
+		{Name: "ai_handoff_reason", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Conversation, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ChannelID
+		case 2:
+			return &m.AddressID
+		case 3:
+			return &m.PeerKey
+		case 4:
+			return &m.PeerKind
+		case 5:
+			return &m.PeerName
+		case 6:
+			return &m.PeerNameSource
+		case 7:
+			return &m.Status
+		case 8:
+			return &m.SnoozedUntil
+		case 9:
+			return &m.AssigneeUserID
+		case 10:
+			return &m.Priority
+		case 11:
+			return &m.Tags
+		case 12:
+			return &m.LastMessageID
+		case 13:
+			return &m.LastMessageAt
+		case 14:
+			return &m.LastInboundAt
+		case 15:
+			return &m.FirstResponseAt
+		case 16:
+			return &m.ResolvedAt
+		case 17:
+			return &m.CreatedAt
+		case 18:
+			return &m.Origin
+		case 19:
+			return &m.CreatedByUserID
+		case 20:
+			return &m.ConsentNote
+		case 21:
+			return &m.Offline
+		case 22:
+			return &m.QueueID
+		case 23:
+			return &m.RingGroupID
+		case 24:
+			return &m.RoutedAt
+		case 25:
+			return &m.AssignedAt
+		case 26:
+			return &m.FrtCounted
+		case 27:
+			return &m.AiTriage
+		case 28:
+			return &m.AiApplied
+		case 29:
+			return &m.AiSpam
+		case 30:
+			return &m.AiHandoffAt
+		case 31:
+			return &m.AiHandoffReason
+		}
+		return nil
+	},
+	Value: func(m *Conversation, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ChannelID
+		case 2:
+			return m.AddressID
+		case 3:
+			return m.PeerKey
+		case 4:
+			return m.PeerKind
+		case 5:
+			return m.PeerName
+		case 6:
+			return m.PeerNameSource
+		case 7:
+			return m.Status
+		case 8:
+			return m.SnoozedUntil
+		case 9:
+			return m.AssigneeUserID
+		case 10:
+			return m.Priority
+		case 11:
+			return m.Tags
+		case 12:
+			return m.LastMessageID
+		case 13:
+			return m.LastMessageAt
+		case 14:
+			return m.LastInboundAt
+		case 15:
+			return m.FirstResponseAt
+		case 16:
+			return m.ResolvedAt
+		case 17:
+			return m.CreatedAt
+		case 18:
+			return m.Origin
+		case 19:
+			return m.CreatedByUserID
+		case 20:
+			return m.ConsentNote
+		case 21:
+			return m.Offline
+		case 22:
+			return m.QueueID
+		case 23:
+			return m.RingGroupID
+		case 24:
+			return m.RoutedAt
+		case 25:
+			return m.AssignedAt
+		case 26:
+			return m.FrtCounted
+		case 27:
+			return m.AiTriage
+		case 28:
+			return m.AiApplied
+		case 29:
+			return m.AiSpam
+		case 30:
+			return m.AiHandoffAt
+		case 31:
+			return m.AiHandoffReason
+		}
+		return nil
+	},
+	TableSchema: &conversationTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var conversationTable = schema.Table{
+	Name: "conversations",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "channel_id",
+			Type: "bigint",
+		},
+		{
+			Name: "address_id",
+			Type: "bigint",
+		},
+		{
+			Name: "peer_key",
+			Type: "text",
+		},
+		{
+			Name:    "peer_kind",
+			Type:    "text",
+			Default: "'phone'::text",
+		},
+		{
+			Name:    "peer_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "peer_name_source",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'open'::text",
+		},
+		{
+			Name:     "snoozed_until",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "assignee_user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "priority",
+			Type:    "text",
+			Default: "'normal'::text",
+		},
+		{
+			Name:    "tags",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:     "last_message_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "last_message_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "last_inbound_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "first_response_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "resolved_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "origin",
+			Type:    "text",
+			Default: "'inbound'::text",
+		},
+		{
+			Name:     "created_by_user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "consent_note",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "offline",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "queue_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "ring_group_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "routed_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "assigned_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "frt_counted",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "ai_triage",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:    "ai_applied",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "ai_spam",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "ai_handoff_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "ai_handoff_reason",
+			Type:    "text",
+			Default: "''::text",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "conversations_assignee",
+			Parts: []schema.IndexPart{
+				{
+					Column: "assignee_user_id",
+				},
+				{
+					Column: "status",
+				},
+				{
+					Column: "last_message_at",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name: "conversations_created",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+				},
+			},
+		},
+		{
+			Name: "conversations_frt",
+			Parts: []schema.IndexPart{
+				{
+					Column: "id",
+				},
+			},
+			Where: "((NOT frt_counted) AND (first_response_at IS NOT NULL))",
+		},
+		{
+			Name:   "conversations_open_peer",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "address_id",
+				},
+				{
+					Column: "peer_key",
+				},
+			},
+			Where: "(status <> ALL (ARRAY['resolved'::text, 'spam'::text]))",
+		},
+		{
+			Name: "conversations_outbound_recent",
+			Parts: []schema.IndexPart{
+				{
+					Column: "address_id",
+				},
+				{
+					Column: "created_at",
+				},
+			},
+			Where: "(origin = 'outbound'::text)",
+		},
+		{
+			Name: "conversations_outbound_user",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_by_user_id",
+				},
+				{
+					Column: "created_at",
+				},
+			},
+			Where: "(origin = 'outbound'::text)",
+		},
+		{
+			Name: "conversations_peer",
+			Parts: []schema.IndexPart{
+				{
+					Column: "peer_key",
+				},
+			},
+		},
+		{
+			Name: "conversations_pool",
+			Parts: []schema.IndexPart{
+				{
+					Column: "status",
+				},
+				{
+					Column: "last_message_at",
+				},
+			},
+			Where: "(assignee_user_id IS NULL)",
+		},
+		{
+			Name: "conversations_queue_waiting",
+			Parts: []schema.IndexPart{
+				{
+					Column: "queue_id",
+				},
+				{
+					Column: "routed_at",
+				},
+				{
+					Column: "id",
+				},
+			},
+			Where: "((queue_id IS NOT NULL) AND (assignee_user_id IS NULL) AND (status = ANY (ARRAY['open'::text, 'pending'::text])))",
+		},
+		{
+			Name: "conversations_recent",
+			Parts: []schema.IndexPart{
+				{
+					Column: "last_message_at",
+					Desc:   true,
+				},
+				{
+					Column: "id",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name: "conversations_ring_group",
+			Parts: []schema.IndexPart{
+				{
+					Column: "ring_group_id",
+				},
+			},
+			Where: "((ring_group_id IS NOT NULL) AND (assignee_user_id IS NULL))",
+		},
+		{
+			Name: "conversations_snoozed",
+			Parts: []schema.IndexPart{
+				{
+					Column: "snoozed_until",
+				},
+			},
+			Where: "(status = 'snoozed'::text)",
+		},
+		{
+			Name: "conversations_unrouted",
+			Parts: []schema.IndexPart{
+				{
+					Column: "id",
+				},
+			},
+			Where: "(routed_at IS NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "conversations_address_id_fkey",
+			Columns:    []string{"address_id"},
+			RefTable:   "msg_addresses",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "conversations_assignee_user_id_fkey",
+			Columns:    []string{"assignee_user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "conversations_channel_id_fkey",
+			Columns:    []string{"channel_id"},
+			RefTable:   "msg_channels",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "conversations_created_by_user_id_fkey",
+			Columns:    []string{"created_by_user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "conversations_queue_id_fkey",
+			Columns:    []string{"queue_id"},
+			RefTable:   "queues",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "conversations_ring_group_id_fkey",
+			Columns:    []string{"ring_group_id"},
+			RefTable:   "ring_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "conversations_consent_note_check",
+			Expr: "(length(consent_note) <= 500)",
+		},
+		{
+			Name: "conversations_origin_check",
+			Expr: "\"origin\" IN ('inbound','outbound')",
+			In: &schema.CheckIn{
+				Column: "origin",
+				Values: []string{"inbound", "outbound"},
+			},
+		},
+		{
+			Name: "conversations_peer_kind_check",
+			Expr: "\"peer_kind\" IN ('phone','visitor')",
+			In: &schema.CheckIn{
+				Column: "peer_kind",
+				Values: []string{"phone", "visitor"},
+			},
+		},
+		{
+			Name: "conversations_peer_name_source_check",
+			Expr: "\"peer_name_source\" IN ('','company','extensions','named','provider','visitor')",
+			In: &schema.CheckIn{
+				Column: "peer_name_source",
+				Values: []string{"", "company", "extensions", "named", "provider", "visitor"},
+			},
+		},
+		{
+			Name: "conversations_priority_check",
+			Expr: "\"priority\" IN ('high','low','normal')",
+			In: &schema.CheckIn{
+				Column: "priority",
+				Values: []string{"high", "low", "normal"},
+			},
+		},
+		{
+			Name: "conversations_status_check",
+			Expr: "\"status\" IN ('open','pending','resolved','snoozed','spam')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"open", "pending", "resolved", "snoozed", "spam"},
+			},
+		},
+	},
+}
+
+func (*ConversationAssignment) MomoMeta() *momo.Meta[ConversationAssignment] {
+	return &conversationAssignmentMeta
+}
+
+var conversationAssignmentMeta = momo.Meta[ConversationAssignment]{
+	Table: "conversation_assignments",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "conversation_id"},
+		{Name: "from_user_id", Flags: momo.FlagNullable},
+		{Name: "to_user_id", Flags: momo.FlagNullable},
+		{Name: "reason", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ConversationAssignment, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ConversationID
+		case 2:
+			return &m.FromUserID
+		case 3:
+			return &m.ToUserID
+		case 4:
+			return &m.Reason
+		case 5:
+			return &m.At
+		}
+		return nil
+	},
+	Value: func(m *ConversationAssignment, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ConversationID
+		case 2:
+			return m.FromUserID
+		case 3:
+			return m.ToUserID
+		case 4:
+			return m.Reason
+		case 5:
+			return m.At
+		}
+		return nil
+	},
+	TableSchema: &conversationAssignmentTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var conversationAssignmentTable = schema.Table{
+	Name: "conversation_assignments",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "conversation_id",
+			Type: "bigint",
+		},
+		{
+			Name:     "from_user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "to_user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "reason",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "conversation_assignments_conv",
+			Parts: []schema.IndexPart{
+				{
+					Column: "conversation_id",
+				},
+				{
+					Column: "id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "conversation_assignments_conversation_id_fkey",
+			Columns:    []string{"conversation_id"},
+			RefTable:   "conversations",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "conversation_assignments_from_user_id_fkey",
+			Columns:    []string{"from_user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "conversation_assignments_to_user_id_fkey",
+			Columns:    []string{"to_user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+}
+
+func (*ConversationEvent) MomoMeta() *momo.Meta[ConversationEvent] { return &conversationEventMeta }
+
+var conversationEventMeta = momo.Meta[ConversationEvent]{
+	Table: "conversation_events",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "user_id"},
+		{Name: "type"},
+		{Name: "conversation_id"},
+		{Name: "message_id", Flags: momo.FlagNullable},
+		{Name: "at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "notified", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ConversationEvent, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.UserID
+		case 2:
+			return &m.Type
+		case 3:
+			return &m.ConversationID
+		case 4:
+			return &m.MessageID
+		case 5:
+			return &m.At
+		case 6:
+			return &m.Notified
+		}
+		return nil
+	},
+	Value: func(m *ConversationEvent, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.UserID
+		case 2:
+			return m.Type
+		case 3:
+			return m.ConversationID
+		case 4:
+			return m.MessageID
+		case 5:
+			return m.At
+		case 6:
+			return m.Notified
+		}
+		return nil
+	},
+	TableSchema: &conversationEventTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var conversationEventTable = schema.Table{
+	Name: "conversation_events",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name: "type",
+			Type: "text",
+		},
+		{
+			Name: "conversation_id",
+			Type: "bigint",
+		},
+		{
+			Name:     "message_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "notified",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "conversation_events_at",
+			Parts: []schema.IndexPart{
+				{
+					Column: "at",
+				},
+			},
+		},
+		{
+			Name: "conversation_events_unnotified",
+			Parts: []schema.IndexPart{
+				{
+					Column: "at",
+				},
+			},
+			Where: "(NOT notified)",
+		},
+		{
+			Name: "conversation_events_user",
+			Parts: []schema.IndexPart{
+				{
+					Column: "user_id",
+				},
+				{
+					Column: "id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "conversation_events_conversation_id_fkey",
+			Columns:    []string{"conversation_id"},
+			RefTable:   "conversations",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "conversation_events_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*ConversationMessage) MomoMeta() *momo.Meta[ConversationMessage] {
+	return &conversationMessageMeta
+}
+
+var conversationMessageMeta = momo.Meta[ConversationMessage]{
+	Table: "conversation_messages",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "conversation_id"},
+		{Name: "channel_id"},
+		{Name: "direction"},
+		{Name: "kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "sender_kind"},
+		{Name: "sender_user_id", Flags: momo.FlagNullable},
+		{Name: "sender_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "body"},
+		{Name: "content_type", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "error_code", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "provider_message_id", Flags: momo.FlagNullable},
+		{Name: "client_msg_id", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "sent_at", Flags: momo.FlagNullable},
+		{Name: "delivered_at", Flags: momo.FlagNullable},
+		{Name: "read_at", Flags: momo.FlagNullable},
+		{Name: "attempt_id", Flags: momo.FlagNullable},
+		{Name: "claimed_at", Flags: momo.FlagNullable},
+		{Name: "next_poll_at", Flags: momo.FlagNullable},
+		{Name: "poll_count", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_run_id", Flags: momo.FlagNullable},
+		{Name: "redacted_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *ConversationMessage, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ConversationID
+		case 2:
+			return &m.ChannelID
+		case 3:
+			return &m.Direction
+		case 4:
+			return &m.Kind
+		case 5:
+			return &m.SenderKind
+		case 6:
+			return &m.SenderUserID
+		case 7:
+			return &m.SenderName
+		case 8:
+			return &m.Body
+		case 9:
+			return &m.ContentType
+		case 10:
+			return &m.Status
+		case 11:
+			return &m.ErrorCode
+		case 12:
+			return &m.ProviderMessageID
+		case 13:
+			return &m.ClientMsgID
+		case 14:
+			return &m.CreatedAt
+		case 15:
+			return &m.SentAt
+		case 16:
+			return &m.DeliveredAt
+		case 17:
+			return &m.ReadAt
+		case 18:
+			return &m.AttemptID
+		case 19:
+			return &m.ClaimedAt
+		case 20:
+			return &m.NextPollAt
+		case 21:
+			return &m.PollCount
+		case 22:
+			return &m.AiRunID
+		case 23:
+			return &m.RedactedAt
+		}
+		return nil
+	},
+	Value: func(m *ConversationMessage, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ConversationID
+		case 2:
+			return m.ChannelID
+		case 3:
+			return m.Direction
+		case 4:
+			return m.Kind
+		case 5:
+			return m.SenderKind
+		case 6:
+			return m.SenderUserID
+		case 7:
+			return m.SenderName
+		case 8:
+			return m.Body
+		case 9:
+			return m.ContentType
+		case 10:
+			return m.Status
+		case 11:
+			return m.ErrorCode
+		case 12:
+			return m.ProviderMessageID
+		case 13:
+			return m.ClientMsgID
+		case 14:
+			return m.CreatedAt
+		case 15:
+			return m.SentAt
+		case 16:
+			return m.DeliveredAt
+		case 17:
+			return m.ReadAt
+		case 18:
+			return m.AttemptID
+		case 19:
+			return m.ClaimedAt
+		case 20:
+			return m.NextPollAt
+		case 21:
+			return m.PollCount
+		case 22:
+			return m.AiRunID
+		case 23:
+			return m.RedactedAt
+		}
+		return nil
+	},
+	TableSchema: &conversationMessageTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var conversationMessageTable = schema.Table{
+	Name: "conversation_messages",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "conversation_id",
+			Type: "bigint",
+		},
+		{
+			Name: "channel_id",
+			Type: "bigint",
+		},
+		{
+			Name: "direction",
+			Type: "text",
+		},
+		{
+			Name:    "kind",
+			Type:    "text",
+			Default: "'message'::text",
+		},
+		{
+			Name: "sender_kind",
+			Type: "text",
+		},
+		{
+			Name:     "sender_user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "sender_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name: "body",
+			Type: "text",
+		},
+		{
+			Name:    "content_type",
+			Type:    "text",
+			Default: "'text/plain'::text",
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'delivered'::text",
+		},
+		{
+			Name:    "error_code",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "provider_message_id",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "client_msg_id",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "sent_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "delivered_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "read_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "attempt_id",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "claimed_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "next_poll_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "poll_count",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:     "ai_run_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "redacted_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "conversation_messages_channel_id_provider_message_id_key",
+			Columns: []string{"channel_id", "provider_message_id"},
+		},
+		{
+			Name:    "conversation_messages_conversation_id_client_msg_id_key",
+			Columns: []string{"conversation_id", "client_msg_id"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "conversation_messages_ai",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+				},
+			},
+			Where: "(sender_kind = 'ai'::text)",
+		},
+		{
+			Name: "conversation_messages_claimed",
+			Parts: []schema.IndexPart{
+				{
+					Column: "claimed_at",
+				},
+			},
+			Where: "(claimed_at IS NOT NULL)",
+		},
+		{
+			Name: "conversation_messages_created",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+				},
+			},
+			Where: "(kind = 'message'::text)",
+		},
+		{
+			Name: "conversation_messages_open",
+			Parts: []schema.IndexPart{
+				{
+					Column: "id",
+				},
+			},
+			Where: "(status = ANY (ARRAY['queued'::text, 'sending'::text]))",
+		},
+		{
+			Name: "conversation_messages_poll",
+			Parts: []schema.IndexPart{
+				{
+					Column: "next_poll_at",
+				},
+			},
+			Where: "(next_poll_at IS NOT NULL)",
+		},
+		{
+			Name: "conversation_messages_search",
+			Parts: []schema.IndexPart{
+				{
+					Expr: "to_tsvector('simple', body)",
+				},
+			},
+			Method: "gin",
+		},
+		{
+			Name: "conversation_messages_thread",
+			Parts: []schema.IndexPart{
+				{
+					Column: "conversation_id",
+				},
+				{
+					Column: "id",
+					Desc:   true,
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "conversation_messages_ai_run_id_fkey",
+			Columns:    []string{"ai_run_id"},
+			RefTable:   "ai_message_runs",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "conversation_messages_conversation_id_fkey",
+			Columns:    []string{"conversation_id"},
+			RefTable:   "conversations",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "conversation_messages_sender_user_id_fkey",
+			Columns:    []string{"sender_user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "conversation_messages_direction_check",
+			Expr: "\"direction\" IN ('in','out')",
+			In: &schema.CheckIn{
+				Column: "direction",
+				Values: []string{"in", "out"},
+			},
+		},
+		{
+			Name: "conversation_messages_kind_check",
+			Expr: "\"kind\" IN ('message','note','system')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"message", "note", "system"},
+			},
+		},
+		{
+			Name: "conversation_messages_sender_kind_check",
+			Expr: "\"sender_kind\" IN ('ai','customer','system','user')",
+			In: &schema.CheckIn{
+				Column: "sender_kind",
+				Values: []string{"ai", "customer", "system", "user"},
+			},
+		},
+		{
+			Name: "conversation_messages_status_check",
+			Expr: "\"status\" IN ('delivered','failed','queued','read','sending','sent','unknown')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"delivered", "failed", "queued", "read", "sending", "sent", "unknown"},
+			},
+		},
+	},
+}
+
+func (*ConversationNotify) MomoMeta() *momo.Meta[ConversationNotify] { return &conversationNotifyMeta }
+
+var conversationNotifyMeta = momo.Meta[ConversationNotify]{
+	Table: "conversation_notify",
+	Columns: []momo.ColumnMeta{
+		{Name: "user_id", Flags: momo.FlagPK},
+		{Name: "conversation_id", Flags: momo.FlagPK},
+		{Name: "last_email_at"},
+	},
+	Ptr: func(m *ConversationNotify, i int) any {
+		switch i {
+		case 0:
+			return &m.UserID
+		case 1:
+			return &m.ConversationID
+		case 2:
+			return &m.LastEmailAt
+		}
+		return nil
+	},
+	Value: func(m *ConversationNotify, i int) any {
+		switch i {
+		case 0:
+			return m.UserID
+		case 1:
+			return m.ConversationID
+		case 2:
+			return m.LastEmailAt
+		}
+		return nil
+	},
+	TableSchema: &conversationNotifyTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var conversationNotifyTable = schema.Table{
+	Name: "conversation_notify",
+	Columns: []schema.Column{
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name: "conversation_id",
+			Type: "bigint",
+		},
+		{
+			Name: "last_email_at",
+			Type: "timestamp with time zone",
+		},
+	},
+	PrimaryKey: []string{"user_id", "conversation_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "conversation_notify_conversation_id_fkey",
+			Columns:    []string{"conversation_id"},
+			RefTable:   "conversations",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "conversation_notify_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*ConversationRead) MomoMeta() *momo.Meta[ConversationRead] { return &conversationReadMeta }
+
+var conversationReadMeta = momo.Meta[ConversationRead]{
+	Table: "conversation_reads",
+	Columns: []momo.ColumnMeta{
+		{Name: "user_id", Flags: momo.FlagPK},
+		{Name: "conversation_id", Flags: momo.FlagPK},
+		{Name: "last_read_message_id", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ConversationRead, i int) any {
+		switch i {
+		case 0:
+			return &m.UserID
+		case 1:
+			return &m.ConversationID
+		case 2:
+			return &m.LastReadMessageID
+		case 3:
+			return &m.At
+		}
+		return nil
+	},
+	Value: func(m *ConversationRead, i int) any {
+		switch i {
+		case 0:
+			return m.UserID
+		case 1:
+			return m.ConversationID
+		case 2:
+			return m.LastReadMessageID
+		case 3:
+			return m.At
+		}
+		return nil
+	},
+	TableSchema: &conversationReadTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var conversationReadTable = schema.Table{
+	Name: "conversation_reads",
+	Columns: []schema.Column{
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name: "conversation_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "last_read_message_id",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"user_id", "conversation_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "conversation_reads_conversation_id_fkey",
+			Columns:    []string{"conversation_id"},
+			RefTable:   "conversations",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "conversation_reads_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
 func (*CrmCallLog) MomoMeta() *momo.Meta[CrmCallLog] { return &crmCallLogMeta }
 
 var crmCallLogMeta = momo.Meta[CrmCallLog]{
@@ -484,6 +7517,13 @@ var crmConnectionTable = schema.Table{
 			RefColumns: []string{"id"},
 			OnDelete:   "CASCADE",
 		},
+		{
+			Name:       "crm_connections_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
 	},
 	Checks: []schema.Check{
 		{
@@ -821,6 +7861,13 @@ var crmUserMapTable = schema.Table{
 			RefColumns: []string{"id"},
 			OnDelete:   "CASCADE",
 		},
+		{
+			Name:       "crm_user_map_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
 	},
 	Checks: []schema.Check{
 		{
@@ -830,6 +7877,20447 @@ var crmUserMapTable = schema.Table{
 				Column: "source",
 				Values: []string{"email", "manual"},
 			},
+		},
+	},
+}
+
+func (*Device) MomoMeta() *momo.Meta[Device] { return &deviceMeta }
+
+var deviceMeta = momo.Meta[Device]{
+	Table: "devices",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "extension_id"},
+		{Name: "sip_username"},
+		{Name: "realm"},
+		{Name: "ha1_md5", Flags: momo.FlagNullable},
+		{Name: "ha1_sha256", Flags: momo.FlagNullable},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "secret_enc", Flags: momo.FlagNullable},
+		{Name: "kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "user_id", Flags: momo.FlagNullable},
+		{Name: "label", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "platform", Flags: momo.FlagNullable},
+		{Name: "app_version", Flags: momo.FlagNullable},
+		{Name: "last_seen_at", Flags: momo.FlagNullable},
+		{Name: "auth_mode", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "srtp", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "srtp_keyex", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "media_ice", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "disabled_by_directory", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Device, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ExtensionID
+		case 2:
+			return &m.SipUsername
+		case 3:
+			return &m.Realm
+		case 4:
+			return &m.Ha1Md5
+		case 5:
+			return &m.Ha1Sha256
+		case 6:
+			return &m.Enabled
+		case 7:
+			return &m.CreatedAt
+		case 8:
+			return &m.UpdatedAt
+		case 9:
+			return &m.SecretEnc
+		case 10:
+			return &m.Kind
+		case 11:
+			return &m.UserID
+		case 12:
+			return &m.Label
+		case 13:
+			return &m.Platform
+		case 14:
+			return &m.AppVersion
+		case 15:
+			return &m.LastSeenAt
+		case 16:
+			return &m.AuthMode
+		case 17:
+			return &m.Srtp
+		case 18:
+			return &m.SrtpKeyex
+		case 19:
+			return &m.MediaIce
+		case 20:
+			return &m.DisabledByDirectory
+		}
+		return nil
+	},
+	Value: func(m *Device, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ExtensionID
+		case 2:
+			return m.SipUsername
+		case 3:
+			return m.Realm
+		case 4:
+			return m.Ha1Md5
+		case 5:
+			return m.Ha1Sha256
+		case 6:
+			return m.Enabled
+		case 7:
+			return m.CreatedAt
+		case 8:
+			return m.UpdatedAt
+		case 9:
+			return m.SecretEnc
+		case 10:
+			return m.Kind
+		case 11:
+			return m.UserID
+		case 12:
+			return m.Label
+		case 13:
+			return m.Platform
+		case 14:
+			return m.AppVersion
+		case 15:
+			return m.LastSeenAt
+		case 16:
+			return m.AuthMode
+		case 17:
+			return m.Srtp
+		case 18:
+			return m.SrtpKeyex
+		case 19:
+			return m.MediaIce
+		case 20:
+			return m.DisabledByDirectory
+		}
+		return nil
+	},
+	TableSchema: &deviceTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var deviceTable = schema.Table{
+	Name: "devices",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+		{
+			Name: "sip_username",
+			Type: "text",
+		},
+		{
+			Name: "realm",
+			Type: "text",
+		},
+		{
+			Name:     "ha1_md5",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "ha1_sha256",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "secret_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "kind",
+			Type:    "text",
+			Default: "'desk'::text",
+		},
+		{
+			Name:     "user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "label",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "platform",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "app_version",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "last_seen_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "auth_mode",
+			Type:    "text",
+			Default: "'digest'::text",
+		},
+		{
+			Name:    "srtp",
+			Type:    "text",
+			Default: "'optional'::text",
+		},
+		{
+			Name:    "srtp_keyex",
+			Type:    "text",
+			Default: "'sdes'::text",
+		},
+		{
+			Name:    "media_ice",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "disabled_by_directory",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "devices_sip_username_key",
+			Columns: []string{"sip_username"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "devices_extension_id",
+			Parts: []schema.IndexPart{
+				{
+					Column: "extension_id",
+				},
+			},
+		},
+		{
+			Name: "devices_user_id",
+			Parts: []schema.IndexPart{
+				{
+					Column: "user_id",
+				},
+			},
+			Where: "(user_id IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "devices_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "devices_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "devices_auth_mode_check",
+			Expr: "\"auth_mode\" IN ('derived','digest')",
+			In: &schema.CheckIn{
+				Column: "auth_mode",
+				Values: []string{"derived", "digest"},
+			},
+		},
+		{
+			Name: "devices_client_derived",
+			Expr: "((kind = 'desk'::text) OR (auth_mode = 'derived'::text))",
+		},
+		{
+			Name: "devices_client_owner",
+			Expr: "((kind = 'desk'::text) OR (user_id IS NOT NULL))",
+		},
+		{
+			Name: "devices_ha1_present",
+			Expr: "((auth_mode = 'derived'::text) OR ((ha1_md5 IS NOT NULL) AND (ha1_sha256 IS NOT NULL)))",
+		},
+		{
+			Name: "devices_kind_check",
+			Expr: "\"kind\" IN ('desk','mobile','web')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"desk", "mobile", "web"},
+			},
+		},
+		{
+			Name: "devices_sip_username_check",
+			Expr: "(sip_username ~ '^[A-Za-z0-9._-]{1,64}$'::text)",
+		},
+		{
+			Name: "devices_srtp_check",
+			Expr: "\"srtp\" IN ('off','optional','required')",
+			In: &schema.CheckIn{
+				Column: "srtp",
+				Values: []string{"off", "optional", "required"},
+			},
+		},
+		{
+			Name: "devices_srtp_keyex_check",
+			Expr: "\"srtp_keyex\" IN ('dtls','sdes')",
+			In: &schema.CheckIn{
+				Column: "srtp_keyex",
+				Values: []string{"dtls", "sdes"},
+			},
+		},
+	},
+}
+
+func (*DirectoryConnector) MomoMeta() *momo.Meta[DirectoryConnector] { return &directoryConnectorMeta }
+
+var directoryConnectorMeta = momo.Meta[DirectoryConnector]{
+	Table: "directory_connectors",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "kind"},
+		{Name: "name"},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "mode", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "schedule_minutes", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "config", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "mappings", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "group_rules", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "options", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "auto_provision", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "credential_enc", Flags: momo.FlagNullable},
+		{Name: "credential_fp", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "sync_mark", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "sync_fingerprint", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_full_run_at", Flags: momo.FlagNullable},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_run_at", Flags: momo.FlagNullable},
+		{Name: "last_success_at", Flags: momo.FlagNullable},
+		{Name: "last_error_code", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_error_detail", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "consecutive_failures", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "paused_at", Flags: momo.FlagNullable},
+		{Name: "guard_since", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *DirectoryConnector, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Kind
+		case 2:
+			return &m.Name
+		case 3:
+			return &m.Enabled
+		case 4:
+			return &m.Mode
+		case 5:
+			return &m.ScheduleMinutes
+		case 6:
+			return &m.Config
+		case 7:
+			return &m.Mappings
+		case 8:
+			return &m.GroupRules
+		case 9:
+			return &m.Options
+		case 10:
+			return &m.AutoProvision
+		case 11:
+			return &m.CredentialEnc
+		case 12:
+			return &m.CredentialFp
+		case 13:
+			return &m.SyncMark
+		case 14:
+			return &m.SyncFingerprint
+		case 15:
+			return &m.LastFullRunAt
+		case 16:
+			return &m.Status
+		case 17:
+			return &m.LastRunAt
+		case 18:
+			return &m.LastSuccessAt
+		case 19:
+			return &m.LastErrorCode
+		case 20:
+			return &m.LastErrorDetail
+		case 21:
+			return &m.ConsecutiveFailures
+		case 22:
+			return &m.CreatedAt
+		case 23:
+			return &m.UpdatedAt
+		case 24:
+			return &m.PausedAt
+		case 25:
+			return &m.GuardSince
+		}
+		return nil
+	},
+	Value: func(m *DirectoryConnector, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Kind
+		case 2:
+			return m.Name
+		case 3:
+			return m.Enabled
+		case 4:
+			return m.Mode
+		case 5:
+			return m.ScheduleMinutes
+		case 6:
+			return m.Config
+		case 7:
+			return m.Mappings
+		case 8:
+			return m.GroupRules
+		case 9:
+			return m.Options
+		case 10:
+			return m.AutoProvision
+		case 11:
+			return m.CredentialEnc
+		case 12:
+			return m.CredentialFp
+		case 13:
+			return m.SyncMark
+		case 14:
+			return m.SyncFingerprint
+		case 15:
+			return m.LastFullRunAt
+		case 16:
+			return m.Status
+		case 17:
+			return m.LastRunAt
+		case 18:
+			return m.LastSuccessAt
+		case 19:
+			return m.LastErrorCode
+		case 20:
+			return m.LastErrorDetail
+		case 21:
+			return m.ConsecutiveFailures
+		case 22:
+			return m.CreatedAt
+		case 23:
+			return m.UpdatedAt
+		case 24:
+			return m.PausedAt
+		case 25:
+			return m.GuardSince
+		}
+		return nil
+	},
+	TableSchema: &directoryConnectorTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var directoryConnectorTable = schema.Table{
+	Name: "directory_connectors",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "mode",
+			Type:    "text",
+			Default: "'authoritative'::text",
+		},
+		{
+			Name:    "schedule_minutes",
+			Type:    "integer",
+			Default: "60",
+		},
+		{
+			Name:    "config",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "mappings",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "group_rules",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "options",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "auto_provision",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:     "credential_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "credential_fp",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "sync_mark",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "sync_fingerprint",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "last_full_run_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'new'::text",
+		},
+		{
+			Name:     "last_run_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "last_success_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "last_error_code",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "last_error_detail",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "consecutive_failures",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "paused_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "guard_since",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name:   "directory_connectors_name",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Expr: "lower(name)",
+				},
+			},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "directory_connectors_kind_check",
+			Expr: "\"kind\" IN ('entra','google','ldap','scim')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"entra", "google", "ldap", "scim"},
+			},
+		},
+		{
+			Name: "directory_connectors_mode_check",
+			Expr: "\"mode\" IN ('authoritative','create_only','link_only')",
+			In: &schema.CheckIn{
+				Column: "mode",
+				Values: []string{"authoritative", "create_only", "link_only"},
+			},
+		},
+		{
+			Name: "directory_connectors_name_check",
+			Expr: "((char_length(name) >= 1) AND (char_length(name) <= 100))",
+		},
+		{
+			Name: "directory_connectors_schedule_minutes_check",
+			Expr: "((schedule_minutes = 0) OR ((schedule_minutes >= 5) AND (schedule_minutes <= 10080)))",
+		},
+		{
+			Name: "directory_connectors_status_check",
+			Expr: "\"status\" IN ('failing','new','ok')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"failing", "new", "ok"},
+			},
+		},
+	},
+}
+
+func (*DirectorySyncChange) MomoMeta() *momo.Meta[DirectorySyncChange] {
+	return &directorySyncChangeMeta
+}
+
+var directorySyncChangeMeta = momo.Meta[DirectorySyncChange]{
+	Table: "directory_sync_changes",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "run_id"},
+		{Name: "action"},
+		{Name: "user_id", Flags: momo.FlagNullable},
+		{Name: "external_id", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "username", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "field_diffs", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "reason", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *DirectorySyncChange, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.RunID
+		case 2:
+			return &m.Action
+		case 3:
+			return &m.UserID
+		case 4:
+			return &m.ExternalID
+		case 5:
+			return &m.Username
+		case 6:
+			return &m.FieldDiffs
+		case 7:
+			return &m.Reason
+		case 8:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *DirectorySyncChange, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.RunID
+		case 2:
+			return m.Action
+		case 3:
+			return m.UserID
+		case 4:
+			return m.ExternalID
+		case 5:
+			return m.Username
+		case 6:
+			return m.FieldDiffs
+		case 7:
+			return m.Reason
+		case 8:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &directorySyncChangeTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var directorySyncChangeTable = schema.Table{
+	Name: "directory_sync_changes",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "run_id",
+			Type: "bigint",
+		},
+		{
+			Name: "action",
+			Type: "text",
+		},
+		{
+			Name:     "user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "external_id",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "username",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "field_diffs",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "reason",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "directory_sync_changes_age",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+				},
+			},
+		},
+		{
+			Name: "directory_sync_changes_run",
+			Parts: []schema.IndexPart{
+				{
+					Column: "run_id",
+				},
+				{
+					Column: "id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "directory_sync_changes_run_id_fkey",
+			Columns:    []string{"run_id"},
+			RefTable:   "directory_sync_runs",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "directory_sync_changes_action_check",
+			Expr: "\"action\" IN ('adopt','conflict','create','disable','enable','error','link','skip','update')",
+			In: &schema.CheckIn{
+				Column: "action",
+				Values: []string{"adopt", "conflict", "create", "disable", "enable", "error", "link", "skip", "update"},
+			},
+		},
+	},
+}
+
+func (*DirectorySyncRun) MomoMeta() *momo.Meta[DirectorySyncRun] { return &directorySyncRunMeta }
+
+var directorySyncRunMeta = momo.Meta[DirectorySyncRun]{
+	Table: "directory_sync_runs",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "connector_id"},
+		{Name: "kind"},
+		{Name: "status"},
+		{Name: "requested_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "started_at", Flags: momo.FlagNullable},
+		{Name: "finished_at", Flags: momo.FlagNullable},
+		{Name: "replica", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "counts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "diff_hash", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "delta_token", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "incremental", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "full_reason", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "error_code", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "error_detail", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *DirectorySyncRun, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ConnectorID
+		case 2:
+			return &m.Kind
+		case 3:
+			return &m.Status
+		case 4:
+			return &m.RequestedBy
+		case 5:
+			return &m.CreatedAt
+		case 6:
+			return &m.StartedAt
+		case 7:
+			return &m.FinishedAt
+		case 8:
+			return &m.Replica
+		case 9:
+			return &m.Counts
+		case 10:
+			return &m.DiffHash
+		case 11:
+			return &m.DeltaToken
+		case 12:
+			return &m.Incremental
+		case 13:
+			return &m.FullReason
+		case 14:
+			return &m.ErrorCode
+		case 15:
+			return &m.ErrorDetail
+		}
+		return nil
+	},
+	Value: func(m *DirectorySyncRun, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ConnectorID
+		case 2:
+			return m.Kind
+		case 3:
+			return m.Status
+		case 4:
+			return m.RequestedBy
+		case 5:
+			return m.CreatedAt
+		case 6:
+			return m.StartedAt
+		case 7:
+			return m.FinishedAt
+		case 8:
+			return m.Replica
+		case 9:
+			return m.Counts
+		case 10:
+			return m.DiffHash
+		case 11:
+			return m.DeltaToken
+		case 12:
+			return m.Incremental
+		case 13:
+			return m.FullReason
+		case 14:
+			return m.ErrorCode
+		case 15:
+			return m.ErrorDetail
+		}
+		return nil
+	},
+	TableSchema: &directorySyncRunTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var directorySyncRunTable = schema.Table{
+	Name: "directory_sync_runs",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "connector_id",
+			Type: "bigint",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "status",
+			Type: "text",
+		},
+		{
+			Name:    "requested_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "started_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "finished_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "replica",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "counts",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "diff_hash",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "delta_token",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "incremental",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "full_reason",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "error_code",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "error_detail",
+			Type:    "text",
+			Default: "''::text",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "directory_sync_runs_connector",
+			Parts: []schema.IndexPart{
+				{
+					Column: "connector_id",
+				},
+				{
+					Column: "id",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name: "directory_sync_runs_open",
+			Parts: []schema.IndexPart{
+				{
+					Column: "connector_id",
+				},
+				{
+					Column: "status",
+				},
+			},
+			Where: "(status = ANY (ARRAY['queued'::text, 'running'::text]))",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "directory_sync_runs_connector_id_fkey",
+			Columns:    []string{"connector_id"},
+			RefTable:   "directory_connectors",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "directory_sync_runs_kind_check",
+			Expr: "\"kind\" IN ('apply','preview','scheduled','scim')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"apply", "preview", "scheduled", "scim"},
+			},
+		},
+		{
+			Name: "directory_sync_runs_status_check",
+			Expr: "\"status\" IN ('failed','needs_confirmation','preview','queued','running','stale','succeeded')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"failed", "needs_confirmation", "preview", "queued", "running", "stale", "succeeded"},
+			},
+		},
+	},
+}
+
+func (*DoorCamera) MomoMeta() *momo.Meta[DoorCamera] { return &doorCameraMeta }
+
+var doorCameraMeta = momo.Meta[DoorCamera]{
+	Table: "door_cameras",
+	Columns: []momo.ColumnMeta{
+		{Name: "extension_id", Flags: momo.FlagPK},
+		{Name: "kind"},
+		{Name: "url"},
+		{Name: "username", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "password_enc", Flags: momo.FlagNullable},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *DoorCamera, i int) any {
+		switch i {
+		case 0:
+			return &m.ExtensionID
+		case 1:
+			return &m.Kind
+		case 2:
+			return &m.URL
+		case 3:
+			return &m.Username
+		case 4:
+			return &m.PasswordEnc
+		case 5:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *DoorCamera, i int) any {
+		switch i {
+		case 0:
+			return m.ExtensionID
+		case 1:
+			return m.Kind
+		case 2:
+			return m.URL
+		case 3:
+			return m.Username
+		case 4:
+			return m.PasswordEnc
+		case 5:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &doorCameraTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var doorCameraTable = schema.Table{
+	Name: "door_cameras",
+	Columns: []schema.Column{
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "url",
+			Type: "text",
+		},
+		{
+			Name:    "username",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "password_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"extension_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "door_cameras_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "door_cameras_kind_check",
+			Expr: "\"kind\" IN ('mjpeg','snapshot')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"mjpeg", "snapshot"},
+			},
+		},
+		{
+			Name: "door_cameras_url_check",
+			Expr: "((length(url) >= 8) AND (length(url) <= 2048))",
+		},
+		{
+			Name: "door_cameras_username_check",
+			Expr: "(length(username) <= 128)",
+		},
+	},
+}
+
+func (*DoorOpen) MomoMeta() *momo.Meta[DoorOpen] { return &doorOpenMeta }
+
+var doorOpenMeta = momo.Meta[DoorOpen]{
+	Table: "door_open",
+	Columns: []momo.ColumnMeta{
+		{Name: "extension_id", Flags: momo.FlagPK},
+		{Name: "code_enc", Flags: momo.FlagNullable},
+		{Name: "hangup_after_open", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *DoorOpen, i int) any {
+		switch i {
+		case 0:
+			return &m.ExtensionID
+		case 1:
+			return &m.CodeEnc
+		case 2:
+			return &m.HangupAfterOpen
+		case 3:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *DoorOpen, i int) any {
+		switch i {
+		case 0:
+			return m.ExtensionID
+		case 1:
+			return m.CodeEnc
+		case 2:
+			return m.HangupAfterOpen
+		case 3:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &doorOpenTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var doorOpenTable = schema.Table{
+	Name: "door_open",
+	Columns: []schema.Column{
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+		{
+			Name:     "code_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "hangup_after_open",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"extension_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "door_open_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*DoorWebhook) MomoMeta() *momo.Meta[DoorWebhook] { return &doorWebhookMeta }
+
+var doorWebhookMeta = momo.Meta[DoorWebhook]{
+	Table: "door_webhooks",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "secret_enc"},
+		{Name: "action"},
+		{Name: "ring_group_id", Flags: momo.FlagNullable},
+		{Name: "paging_group_id", Flags: momo.FlagNullable},
+		{Name: "announcement_id", Flags: momo.FlagNullable},
+		{Name: "rate_limit", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_triggered_at", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *DoorWebhook, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.SecretEnc
+		case 3:
+			return &m.Action
+		case 4:
+			return &m.RingGroupID
+		case 5:
+			return &m.PagingGroupID
+		case 6:
+			return &m.AnnouncementID
+		case 7:
+			return &m.RateLimit
+		case 8:
+			return &m.Enabled
+		case 9:
+			return &m.LastTriggeredAt
+		case 10:
+			return &m.CreatedAt
+		case 11:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *DoorWebhook, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.SecretEnc
+		case 3:
+			return m.Action
+		case 4:
+			return m.RingGroupID
+		case 5:
+			return m.PagingGroupID
+		case 6:
+			return m.AnnouncementID
+		case 7:
+			return m.RateLimit
+		case 8:
+			return m.Enabled
+		case 9:
+			return m.LastTriggeredAt
+		case 10:
+			return m.CreatedAt
+		case 11:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &doorWebhookTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var doorWebhookTable = schema.Table{
+	Name: "door_webhooks",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "secret_enc",
+			Type: "bytea",
+		},
+		{
+			Name: "action",
+			Type: "text",
+		},
+		{
+			Name:     "ring_group_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "paging_group_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "announcement_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "rate_limit",
+			Type:    "integer",
+			Default: "11",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:     "last_triggered_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "door_webhooks_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "door_webhooks_announcement_id_fkey",
+			Columns:    []string{"announcement_id"},
+			RefTable:   "announcements",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "door_webhooks_paging_group_id_fkey",
+			Columns:    []string{"paging_group_id"},
+			RefTable:   "paging_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "door_webhooks_ring_group_id_fkey",
+			Columns:    []string{"ring_group_id"},
+			RefTable:   "ring_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "door_webhooks_action_check",
+			Expr: "\"action\" IN ('chime_page','ring_door')",
+			In: &schema.CheckIn{
+				Column: "action",
+				Values: []string{"chime_page", "ring_door"},
+			},
+		},
+		{
+			Name: "door_webhooks_check",
+			Expr: "((action = 'chime_page'::text) OR (paging_group_id IS NULL))",
+		},
+		{
+			Name: "door_webhooks_check1",
+			Expr: "((action = 'ring_door'::text) OR (ring_group_id IS NULL))",
+		},
+		{
+			Name: "door_webhooks_check2",
+			Expr: "((action <> 'chime_page'::text) OR (paging_group_id IS NOT NULL))",
+		},
+		{
+			Name: "door_webhooks_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._ -]{1,64}$'::text)",
+		},
+		{
+			Name: "door_webhooks_rate_limit_check",
+			Expr: "((rate_limit >= 1) AND (rate_limit <= 600))",
+		},
+	},
+}
+
+func (*Dot1xProfile) MomoMeta() *momo.Meta[Dot1xProfile] { return &dot1xProfileMeta }
+
+var dot1xProfileMeta = momo.Meta[Dot1xProfile]{
+	Table: "dot1x_profiles",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "method"},
+		{Name: "identity"},
+		{Name: "anonymous_identity", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "password_enc", Flags: momo.FlagNullable},
+		{Name: "ca_cert_pem", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "server_domain", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Dot1xProfile, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Method
+		case 3:
+			return &m.Identity
+		case 4:
+			return &m.AnonymousIdentity
+		case 5:
+			return &m.PasswordEnc
+		case 6:
+			return &m.CaCertPem
+		case 7:
+			return &m.ServerDomain
+		case 8:
+			return &m.CreatedAt
+		case 9:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *Dot1xProfile, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Method
+		case 3:
+			return m.Identity
+		case 4:
+			return m.AnonymousIdentity
+		case 5:
+			return m.PasswordEnc
+		case 6:
+			return m.CaCertPem
+		case 7:
+			return m.ServerDomain
+		case 8:
+			return m.CreatedAt
+		case 9:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &dot1xProfileTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var dot1xProfileTable = schema.Table{
+	Name: "dot1x_profiles",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "method",
+			Type: "text",
+		},
+		{
+			Name: "identity",
+			Type: "text",
+		},
+		{
+			Name:    "anonymous_identity",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "password_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "ca_cert_pem",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "server_domain",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name:   "dot1x_profiles_name",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Expr: "lower(name)",
+				},
+			},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "dot1x_profiles_anonymous_identity_check",
+			Expr: "(char_length(anonymous_identity) <= 64)",
+		},
+		{
+			Name: "dot1x_profiles_ca_cert_pem_check",
+			Expr: "((ca_cert_pem = ''::text) OR (ca_cert_pem ~~ '-----BEGIN CERTIFICATE-----%'::text))",
+		},
+		{
+			Name: "dot1x_profiles_identity_check",
+			Expr: "((char_length(identity) >= 1) AND (char_length(identity) <= 64))",
+		},
+		{
+			Name: "dot1x_profiles_method_check",
+			Expr: "\"method\" IN ('eap-md5','eap-tls','peap')",
+			In: &schema.CheckIn{
+				Column: "method",
+				Values: []string{"eap-md5", "eap-tls", "peap"},
+			},
+		},
+		{
+			Name: "dot1x_profiles_name_check",
+			Expr: "((char_length(name) >= 1) AND (char_length(name) <= 64))",
+		},
+		{
+			Name: "dot1x_profiles_server_domain_check",
+			Expr: "(char_length(server_domain) <= 253)",
+		},
+	},
+}
+
+func (*EmergencySetting) MomoMeta() *momo.Meta[EmergencySetting] { return &emergencySettingMeta }
+
+var emergencySettingMeta = momo.Meta[EmergencySetting]{
+	Table: "emergency_settings",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "notify_group", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *EmergencySetting, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.NotifyGroup
+		case 2:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *EmergencySetting, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.NotifyGroup
+		case 2:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &emergencySettingTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var emergencySettingTable = schema.Table{
+	Name: "emergency_settings",
+	Columns: []schema.Column{
+		{
+			Name:    "id",
+			Type:    "smallint",
+			Default: "1",
+		},
+		{
+			Name:    "notify_group",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Checks: []schema.Check{
+		{
+			Name: "emergency_settings_id_check",
+			Expr: "(id = 1)",
+		},
+		{
+			Name: "emergency_settings_notify_group_check",
+			Expr: "(notify_group ~ '^[0-9A-Za-z._-]{0,64}$'::text)",
+		},
+	},
+}
+
+func (*Extension) MomoMeta() *momo.Meta[Extension] { return &extensionMeta }
+
+var extensionMeta = momo.Meta[Extension]{
+	Table: "extensions",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "number"},
+		{Name: "name"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "external_number", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "dnd", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "forward_always", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "forward_busy", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "forward_no_answer", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "voicemail_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "record_default", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "directory_hidden", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "allow_intercom", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "call_waiting", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "moh_class_id", Flags: momo.FlagNullable},
+		{Name: "no_answer_rings", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "door_targets", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "anonymous_outbound", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "phone_send_anonymous", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "location_id", Flags: momo.FlagNullable},
+		{Name: "dnd_source", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "video_allowed", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "record_video", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "provisioned_by", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *Extension, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Number
+		case 2:
+			return &m.Name
+		case 3:
+			return &m.CreatedAt
+		case 4:
+			return &m.UpdatedAt
+		case 5:
+			return &m.ExternalNumber
+		case 6:
+			return &m.Dnd
+		case 7:
+			return &m.ForwardAlways
+		case 8:
+			return &m.ForwardBusy
+		case 9:
+			return &m.ForwardNoAnswer
+		case 10:
+			return &m.VoicemailEnabled
+		case 11:
+			return &m.RecordDefault
+		case 12:
+			return &m.DirectoryHidden
+		case 13:
+			return &m.AllowIntercom
+		case 14:
+			return &m.CallWaiting
+		case 15:
+			return &m.MohClassID
+		case 16:
+			return &m.NoAnswerRings
+		case 17:
+			return &m.Kind
+		case 18:
+			return &m.DoorTargets
+		case 19:
+			return &m.AnonymousOutbound
+		case 20:
+			return &m.PhoneSendAnonymous
+		case 21:
+			return &m.LocationID
+		case 22:
+			return &m.DndSource
+		case 23:
+			return &m.VideoAllowed
+		case 24:
+			return &m.RecordVideo
+		case 25:
+			return &m.ProvisionedBy
+		}
+		return nil
+	},
+	Value: func(m *Extension, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Number
+		case 2:
+			return m.Name
+		case 3:
+			return m.CreatedAt
+		case 4:
+			return m.UpdatedAt
+		case 5:
+			return m.ExternalNumber
+		case 6:
+			return m.Dnd
+		case 7:
+			return m.ForwardAlways
+		case 8:
+			return m.ForwardBusy
+		case 9:
+			return m.ForwardNoAnswer
+		case 10:
+			return m.VoicemailEnabled
+		case 11:
+			return m.RecordDefault
+		case 12:
+			return m.DirectoryHidden
+		case 13:
+			return m.AllowIntercom
+		case 14:
+			return m.CallWaiting
+		case 15:
+			return m.MohClassID
+		case 16:
+			return m.NoAnswerRings
+		case 17:
+			return m.Kind
+		case 18:
+			return m.DoorTargets
+		case 19:
+			return m.AnonymousOutbound
+		case 20:
+			return m.PhoneSendAnonymous
+		case 21:
+			return m.LocationID
+		case 22:
+			return m.DndSource
+		case 23:
+			return m.VideoAllowed
+		case 24:
+			return m.RecordVideo
+		case 25:
+			return m.ProvisionedBy
+		}
+		return nil
+	},
+	TableSchema: &extensionTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var extensionTable = schema.Table{
+	Name: "extensions",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "number",
+			Type: "text",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "external_number",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "dnd",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "forward_always",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "forward_busy",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "forward_no_answer",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "voicemail_enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "record_default",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "directory_hidden",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "allow_intercom",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "call_waiting",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:     "moh_class_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "no_answer_rings",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "kind",
+			Type:    "text",
+			Default: "'user'::text",
+		},
+		{
+			Name:    "door_targets",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "anonymous_outbound",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "phone_send_anonymous",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "location_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "dnd_source",
+			Type:    "text",
+			Default: "'manual'::text",
+		},
+		{
+			Name:    "video_allowed",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "record_video",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:     "provisioned_by",
+			Type:     "bigint",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "extensions_number_key",
+			Columns: []string{"number"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "extensions_location",
+			Parts: []schema.IndexPart{
+				{
+					Column: "location_id",
+				},
+			},
+			Where: "(location_id IS NOT NULL)",
+		},
+		{
+			Name: "extensions_provisioned_by",
+			Parts: []schema.IndexPart{
+				{
+					Column: "provisioned_by",
+				},
+			},
+			Where: "(provisioned_by IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "extensions_location_id_fkey",
+			Columns:    []string{"location_id"},
+			RefTable:   "locations",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "extensions_moh_class_id_fkey",
+			Columns:    []string{"moh_class_id"},
+			RefTable:   "moh_classes",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "extensions_provisioned_by_fkey",
+			Columns:    []string{"provisioned_by"},
+			RefTable:   "directory_connectors",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "extensions_dnd_source_check",
+			Expr: "\"dnd_source\" IN ('calendar','manual')",
+			In: &schema.CheckIn{
+				Column: "dnd_source",
+				Values: []string{"calendar", "manual"},
+			},
+		},
+		{
+			Name: "extensions_external_number_check",
+			Expr: "(external_number ~ '^(\\+?[0-9]{2,20})?$'::text)",
+		},
+		{
+			Name: "extensions_kind_check",
+			Expr: "\"kind\" IN ('door','user')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"door", "user"},
+			},
+		},
+		{
+			Name: "extensions_no_answer_rings_check",
+			Expr: "((no_answer_rings >= 0) AND (no_answer_rings <= 20))",
+		},
+		{
+			Name: "extensions_number_check",
+			Expr: "(number ~ '^[0-9]{2,10}$'::text)",
+		},
+	},
+}
+
+func (*Fax) MomoMeta() *momo.Meta[Fax] { return &faxMeta }
+
+var faxMeta = momo.Meta[Fax]{
+	Table: "faxes",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "direction"},
+		{Name: "status"},
+		{Name: "peer_number", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "local_number", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "destination_id", Flags: momo.FlagNullable},
+		{Name: "owner_extension", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "pages", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "mode", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "bit_rate", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "result_code", Flags: momo.FlagNullable},
+		{Name: "result_text", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "object_key", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "correlation_id", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "finished_at", Flags: momo.FlagNullable},
+		{Name: "trunk_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "attempts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "next_attempt_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "claimed_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "lease_until", Flags: momo.FlagNullable},
+		{Name: "mail_to", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "mail_status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "mail_attempts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "mail_next_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "mail_error", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Fax, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Direction
+		case 2:
+			return &m.Status
+		case 3:
+			return &m.PeerNumber
+		case 4:
+			return &m.LocalNumber
+		case 5:
+			return &m.DestinationID
+		case 6:
+			return &m.OwnerExtension
+		case 7:
+			return &m.Pages
+		case 8:
+			return &m.Mode
+		case 9:
+			return &m.BitRate
+		case 10:
+			return &m.ResultCode
+		case 11:
+			return &m.ResultText
+		case 12:
+			return &m.ObjectKey
+		case 13:
+			return &m.CorrelationID
+		case 14:
+			return &m.CreatedBy
+		case 15:
+			return &m.CreatedAt
+		case 16:
+			return &m.FinishedAt
+		case 17:
+			return &m.TrunkName
+		case 18:
+			return &m.Attempts
+		case 19:
+			return &m.NextAttemptAt
+		case 20:
+			return &m.ClaimedBy
+		case 21:
+			return &m.LeaseUntil
+		case 22:
+			return &m.MailTo
+		case 23:
+			return &m.MailStatus
+		case 24:
+			return &m.MailAttempts
+		case 25:
+			return &m.MailNextAt
+		case 26:
+			return &m.MailError
+		}
+		return nil
+	},
+	Value: func(m *Fax, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Direction
+		case 2:
+			return m.Status
+		case 3:
+			return m.PeerNumber
+		case 4:
+			return m.LocalNumber
+		case 5:
+			return m.DestinationID
+		case 6:
+			return m.OwnerExtension
+		case 7:
+			return m.Pages
+		case 8:
+			return m.Mode
+		case 9:
+			return m.BitRate
+		case 10:
+			return m.ResultCode
+		case 11:
+			return m.ResultText
+		case 12:
+			return m.ObjectKey
+		case 13:
+			return m.CorrelationID
+		case 14:
+			return m.CreatedBy
+		case 15:
+			return m.CreatedAt
+		case 16:
+			return m.FinishedAt
+		case 17:
+			return m.TrunkName
+		case 18:
+			return m.Attempts
+		case 19:
+			return m.NextAttemptAt
+		case 20:
+			return m.ClaimedBy
+		case 21:
+			return m.LeaseUntil
+		case 22:
+			return m.MailTo
+		case 23:
+			return m.MailStatus
+		case 24:
+			return m.MailAttempts
+		case 25:
+			return m.MailNextAt
+		case 26:
+			return m.MailError
+		}
+		return nil
+	},
+	TableSchema: &faxTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var faxTable = schema.Table{
+	Name: "faxes",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "direction",
+			Type: "text",
+		},
+		{
+			Name: "status",
+			Type: "text",
+		},
+		{
+			Name:    "peer_number",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "local_number",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "destination_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "owner_extension",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "pages",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "mode",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "bit_rate",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:     "result_code",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:    "result_text",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "object_key",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "correlation_id",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "finished_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "trunk_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "attempts",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "next_attempt_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "claimed_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "lease_until",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "mail_to",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "mail_status",
+			Type:    "text",
+			Default: "'none'::text",
+		},
+		{
+			Name:    "mail_attempts",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "mail_next_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "mail_error",
+			Type:    "text",
+			Default: "''::text",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "faxes_corr_idx",
+			Parts: []schema.IndexPart{
+				{
+					Column: "correlation_id",
+				},
+			},
+			Where: "(correlation_id <> ''::text)",
+		},
+		{
+			Name: "faxes_created_idx",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+					Desc:   true,
+				},
+				{
+					Column: "id",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name: "faxes_mail_idx",
+			Parts: []schema.IndexPart{
+				{
+					Column: "mail_next_at",
+				},
+			},
+			Where: "(mail_status = ANY (ARRAY['pending'::text, 'sending'::text]))",
+		},
+		{
+			Name: "faxes_owner_idx",
+			Parts: []schema.IndexPart{
+				{
+					Column: "owner_extension",
+				},
+				{
+					Column: "created_at",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name: "faxes_queue_idx",
+			Parts: []schema.IndexPart{
+				{
+					Column: "next_attempt_at",
+				},
+			},
+			Where: "(status = 'queued'::text)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "faxes_destination_id_fkey",
+			Columns:    []string{"destination_id"},
+			RefTable:   "fax_destinations",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "faxes_attempts_check",
+			Expr: "((attempts >= 0) AND (attempts <= 3))",
+		},
+		{
+			Name: "faxes_direction_check",
+			Expr: "\"direction\" IN ('inbound','outbound')",
+			In: &schema.CheckIn{
+				Column: "direction",
+				Values: []string{"inbound", "outbound"},
+			},
+		},
+		{
+			Name: "faxes_local_number_check",
+			Expr: "(length(local_number) <= 40)",
+		},
+		{
+			Name: "faxes_mail_error_check",
+			Expr: "(length(mail_error) <= 200)",
+		},
+		{
+			Name: "faxes_mail_status_check",
+			Expr: "\"mail_status\" IN ('failed','none','pending','sending','sent')",
+			In: &schema.CheckIn{
+				Column: "mail_status",
+				Values: []string{"failed", "none", "pending", "sending", "sent"},
+			},
+		},
+		{
+			Name: "faxes_mode_check",
+			Expr: "\"mode\" IN ('','g711','t38')",
+			In: &schema.CheckIn{
+				Column: "mode",
+				Values: []string{"", "g711", "t38"},
+			},
+		},
+		{
+			Name: "faxes_owner_extension_check",
+			Expr: "(length(owner_extension) <= 10)",
+		},
+		{
+			Name: "faxes_pages_check",
+			Expr: "(pages >= 0)",
+		},
+		{
+			Name: "faxes_peer_number_check",
+			Expr: "(length(peer_number) <= 40)",
+		},
+		{
+			Name: "faxes_result_text_check",
+			Expr: "(length(result_text) <= 200)",
+		},
+		{
+			Name: "faxes_status_check",
+			Expr: "\"status\" IN ('cancelled','failed','partial','queued','received','receiving','sending','sent')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"cancelled", "failed", "partial", "queued", "received", "receiving", "sending", "sent"},
+			},
+		},
+	},
+}
+
+func (*FaxDestination) MomoMeta() *momo.Meta[FaxDestination] { return &faxDestinationMeta }
+
+var faxDestinationMeta = momo.Meta[FaxDestination]{
+	Table: "fax_destinations",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "extension_id"},
+		{Name: "email", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *FaxDestination, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.ExtensionID
+		case 3:
+			return &m.Email
+		case 4:
+			return &m.CreatedAt
+		case 5:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *FaxDestination, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.ExtensionID
+		case 3:
+			return m.Email
+		case 4:
+			return m.CreatedAt
+		case 5:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &faxDestinationTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var faxDestinationTable = schema.Table{
+	Name: "fax_destinations",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "email",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "fax_destinations_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "fax_destinations_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "fax_destinations_email_check",
+			Expr: "(length(email) <= 254)",
+		},
+		{
+			Name: "fax_destinations_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._-]{1,40}$'::text)",
+		},
+	},
+}
+
+func (*FeatureCode) MomoMeta() *momo.Meta[FeatureCode] { return &featureCodeMeta }
+
+var featureCodeMeta = momo.Meta[FeatureCode]{
+	Table: "feature_codes",
+	Columns: []momo.ColumnMeta{
+		{Name: "code", Flags: momo.FlagPK},
+		{Name: "action"},
+		{Name: "argument", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *FeatureCode, i int) any {
+		switch i {
+		case 0:
+			return &m.Code
+		case 1:
+			return &m.Action
+		case 2:
+			return &m.Argument
+		}
+		return nil
+	},
+	Value: func(m *FeatureCode, i int) any {
+		switch i {
+		case 0:
+			return m.Code
+		case 1:
+			return m.Action
+		case 2:
+			return m.Argument
+		}
+		return nil
+	},
+	TableSchema: &featureCodeTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var featureCodeTable = schema.Table{
+	Name: "feature_codes",
+	Columns: []schema.Column{
+		{
+			Name: "code",
+			Type: "text",
+		},
+		{
+			Name: "action",
+			Type: "text",
+		},
+		{
+			Name:    "argument",
+			Type:    "text",
+			Default: "''::text",
+		},
+	},
+	PrimaryKey: []string{"code"},
+	Checks: []schema.Check{
+		{
+			Name: "feature_codes_action_check",
+			Expr: "\"action\" IN ('announcement','attended_transfer','blind_transfer','boss_divert','call_waiting_off','call_waiting_on','directory','dnd_off','dnd_on','follow_me_off','follow_me_on','forward_always','forward_busy','forward_no_answer','intercom','ivr','page','park','park_retrieve','pickup_directed','pickup_group','queue_login','queue_logout','queue_pause','queue_unpause','tc_override','time_condition','voicemail','voicemail_broadcast')",
+			In: &schema.CheckIn{
+				Column: "action",
+				Values: []string{"announcement", "attended_transfer", "blind_transfer", "boss_divert", "call_waiting_off", "call_waiting_on", "directory", "dnd_off", "dnd_on", "follow_me_off", "follow_me_on", "forward_always", "forward_busy", "forward_no_answer", "intercom", "ivr", "page", "park", "park_retrieve", "pickup_directed", "pickup_group", "queue_login", "queue_logout", "queue_pause", "queue_unpause", "tc_override", "time_condition", "voicemail", "voicemail_broadcast"},
+			},
+		},
+		{
+			Name: "feature_codes_code_check",
+			Expr: "(code ~ '^\\*[0-9]{2,4}$|^##$'::text)",
+		},
+	},
+}
+
+func (*FlowCanvas) MomoMeta() *momo.Meta[FlowCanvas] { return &flowCanvasMeta }
+
+var flowCanvasMeta = momo.Meta[FlowCanvas]{
+	Table: "flow_canvases",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "description", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "viewport", Flags: momo.FlagNullable},
+		{Name: "layout_version", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *FlowCanvas, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Description
+		case 3:
+			return &m.Viewport
+		case 4:
+			return &m.LayoutVersion
+		case 5:
+			return &m.CreatedBy
+		case 6:
+			return &m.CreatedAt
+		case 7:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *FlowCanvas, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Description
+		case 3:
+			return m.Viewport
+		case 4:
+			return m.LayoutVersion
+		case 5:
+			return m.CreatedBy
+		case 6:
+			return m.CreatedAt
+		case 7:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &flowCanvasTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var flowCanvasTable = schema.Table{
+	Name: "flow_canvases",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "description",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "viewport",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:    "layout_version",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "created_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "flow_canvases_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "flow_canvases_description_check",
+			Expr: "(char_length(description) <= 500)",
+		},
+		{
+			Name: "flow_canvases_name_check",
+			Expr: "((char_length(name) >= 1) AND (char_length(name) <= 64))",
+		},
+	},
+}
+
+func (*FlowCanvasNode) MomoMeta() *momo.Meta[FlowCanvasNode] { return &flowCanvasNodeMeta }
+
+var flowCanvasNodeMeta = momo.Meta[FlowCanvasNode]{
+	Table: "flow_canvas_nodes",
+	Columns: []momo.ColumnMeta{
+		{Name: "canvas_id", Flags: momo.FlagPK},
+		{Name: "node_id", Flags: momo.FlagPK},
+		{Name: "x"},
+		{Name: "y"},
+		{Name: "collapsed", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *FlowCanvasNode, i int) any {
+		switch i {
+		case 0:
+			return &m.CanvasID
+		case 1:
+			return &m.NodeID
+		case 2:
+			return &m.X
+		case 3:
+			return &m.Y
+		case 4:
+			return &m.Collapsed
+		}
+		return nil
+	},
+	Value: func(m *FlowCanvasNode, i int) any {
+		switch i {
+		case 0:
+			return m.CanvasID
+		case 1:
+			return m.NodeID
+		case 2:
+			return m.X
+		case 3:
+			return m.Y
+		case 4:
+			return m.Collapsed
+		}
+		return nil
+	},
+	TableSchema: &flowCanvasNodeTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var flowCanvasNodeTable = schema.Table{
+	Name: "flow_canvas_nodes",
+	Columns: []schema.Column{
+		{
+			Name: "canvas_id",
+			Type: "bigint",
+		},
+		{
+			Name: "node_id",
+			Type: "text",
+		},
+		{
+			Name: "x",
+			Type: "real",
+		},
+		{
+			Name: "y",
+			Type: "real",
+		},
+		{
+			Name:    "collapsed",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"canvas_id", "node_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "flow_canvas_nodes_canvas_id_fkey",
+			Columns:    []string{"canvas_id"},
+			RefTable:   "flow_canvases",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "flow_canvas_nodes_node_id_check",
+			Expr: "(node_id ~ '^[A-Za-z]+:.{1,200}$'::text)",
+		},
+	},
+}
+
+func (*FollowMe) MomoMeta() *momo.Meta[FollowMe] { return &followMeMeta }
+
+var followMeMeta = momo.Meta[FollowMe]{
+	Table: "follow_me",
+	Columns: []momo.ColumnMeta{
+		{Name: "extension_id", Flags: momo.FlagPK},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "strategy", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ring_own_devices", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "timeout_seconds", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "confirm_external", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "dnd_blocks", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *FollowMe, i int) any {
+		switch i {
+		case 0:
+			return &m.ExtensionID
+		case 1:
+			return &m.Enabled
+		case 2:
+			return &m.Strategy
+		case 3:
+			return &m.RingOwnDevices
+		case 4:
+			return &m.TimeoutSeconds
+		case 5:
+			return &m.ConfirmExternal
+		case 6:
+			return &m.DndBlocks
+		case 7:
+			return &m.CreatedAt
+		case 8:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *FollowMe, i int) any {
+		switch i {
+		case 0:
+			return m.ExtensionID
+		case 1:
+			return m.Enabled
+		case 2:
+			return m.Strategy
+		case 3:
+			return m.RingOwnDevices
+		case 4:
+			return m.TimeoutSeconds
+		case 5:
+			return m.ConfirmExternal
+		case 6:
+			return m.DndBlocks
+		case 7:
+			return m.CreatedAt
+		case 8:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &followMeTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var followMeTable = schema.Table{
+	Name: "follow_me",
+	Columns: []schema.Column{
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "strategy",
+			Type:    "text",
+			Default: "'simultaneous'::text",
+		},
+		{
+			Name:    "ring_own_devices",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "timeout_seconds",
+			Type:    "integer",
+			Default: "30",
+		},
+		{
+			Name:    "confirm_external",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "dnd_blocks",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"extension_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "follow_me_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "follow_me_strategy_check",
+			Expr: "\"strategy\" IN ('sequential','simultaneous')",
+			In: &schema.CheckIn{
+				Column: "strategy",
+				Values: []string{"sequential", "simultaneous"},
+			},
+		},
+		{
+			Name: "follow_me_timeout_seconds_check",
+			Expr: "((timeout_seconds >= 5) AND (timeout_seconds <= 120))",
+		},
+	},
+}
+
+func (*FollowMeTarget) MomoMeta() *momo.Meta[FollowMeTarget] { return &followMeTargetMeta }
+
+var followMeTargetMeta = momo.Meta[FollowMeTarget]{
+	Table: "follow_me_targets",
+	Columns: []momo.ColumnMeta{
+		{Name: "extension_id", Flags: momo.FlagPK},
+		{Name: "position", Flags: momo.FlagPK},
+		{Name: "kind"},
+		{Name: "target"},
+		{Name: "delay_seconds", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *FollowMeTarget, i int) any {
+		switch i {
+		case 0:
+			return &m.ExtensionID
+		case 1:
+			return &m.Position
+		case 2:
+			return &m.Kind
+		case 3:
+			return &m.Target
+		case 4:
+			return &m.DelaySeconds
+		}
+		return nil
+	},
+	Value: func(m *FollowMeTarget, i int) any {
+		switch i {
+		case 0:
+			return m.ExtensionID
+		case 1:
+			return m.Position
+		case 2:
+			return m.Kind
+		case 3:
+			return m.Target
+		case 4:
+			return m.DelaySeconds
+		}
+		return nil
+	},
+	TableSchema: &followMeTargetTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var followMeTargetTable = schema.Table{
+	Name: "follow_me_targets",
+	Columns: []schema.Column{
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+		{
+			Name: "position",
+			Type: "smallint",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "target",
+			Type: "text",
+		},
+		{
+			Name:    "delay_seconds",
+			Type:    "integer",
+			Default: "0",
+		},
+	},
+	PrimaryKey: []string{"extension_id", "position"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "follow_me_targets_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "follow_me",
+			RefColumns: []string{"extension_id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "follow_me_targets_delay_seconds_check",
+			Expr: "((delay_seconds >= 0) AND (delay_seconds <= 60))",
+		},
+		{
+			Name: "follow_me_targets_kind_check",
+			Expr: "\"kind\" IN ('extension','external','ring_group')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"extension", "external", "ring_group"},
+			},
+		},
+		{
+			Name: "follow_me_targets_position_check",
+			Expr: "((\"position\" >= 1) AND (\"position\" <= 5))",
+		},
+		{
+			Name: "follow_me_targets_target_check",
+			Expr: "((target <> ''::text) AND (length(target) <= 64))",
+		},
+	},
+}
+
+func (*InboundRoute) MomoMeta() *momo.Meta[InboundRoute] { return &inboundRouteMeta }
+
+var inboundRouteMeta = momo.Meta[InboundRoute]{
+	Table: "inbound_routes",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "position"},
+		{Name: "name"},
+		{Name: "did_kind"},
+		{Name: "did", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "trunk_id", Flags: momo.FlagNullable},
+		{Name: "sip_domain", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "header_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "header_regex", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "schedule", Flags: momo.FlagNullable},
+		{Name: "callerid_transform", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "destination_kind"},
+		{Name: "destination"},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "moh_class_id", Flags: momo.FlagNullable},
+		{Name: "moh_ringback", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *InboundRoute, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Position
+		case 2:
+			return &m.Name
+		case 3:
+			return &m.DidKind
+		case 4:
+			return &m.Did
+		case 5:
+			return &m.TrunkID
+		case 6:
+			return &m.SipDomain
+		case 7:
+			return &m.HeaderName
+		case 8:
+			return &m.HeaderRegex
+		case 9:
+			return &m.Schedule
+		case 10:
+			return &m.CalleridTransform
+		case 11:
+			return &m.DestinationKind
+		case 12:
+			return &m.Destination
+		case 13:
+			return &m.Enabled
+		case 14:
+			return &m.MohClassID
+		case 15:
+			return &m.MohRingback
+		}
+		return nil
+	},
+	Value: func(m *InboundRoute, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Position
+		case 2:
+			return m.Name
+		case 3:
+			return m.DidKind
+		case 4:
+			return m.Did
+		case 5:
+			return m.TrunkID
+		case 6:
+			return m.SipDomain
+		case 7:
+			return m.HeaderName
+		case 8:
+			return m.HeaderRegex
+		case 9:
+			return m.Schedule
+		case 10:
+			return m.CalleridTransform
+		case 11:
+			return m.DestinationKind
+		case 12:
+			return m.Destination
+		case 13:
+			return m.Enabled
+		case 14:
+			return m.MohClassID
+		case 15:
+			return m.MohRingback
+		}
+		return nil
+	},
+	TableSchema: &inboundRouteTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var inboundRouteTable = schema.Table{
+	Name: "inbound_routes",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "did_kind",
+			Type: "text",
+		},
+		{
+			Name:    "did",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "trunk_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "sip_domain",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "header_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "header_regex",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "schedule",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:    "callerid_transform",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name: "destination_kind",
+			Type: "text",
+		},
+		{
+			Name: "destination",
+			Type: "text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:     "moh_class_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "moh_ringback",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "inbound_routes_position",
+			Columns: []string{"position"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "inbound_routes_moh_class_id_fkey",
+			Columns:    []string{"moh_class_id"},
+			RefTable:   "moh_classes",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "inbound_routes_trunk_id_fkey",
+			Columns:    []string{"trunk_id"},
+			RefTable:   "trunks",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "inbound_routes_destination_kind_check",
+			Expr: "\"destination_kind\" IN ('announcement','conference','directory','extension','external','fax','internal','ivr','paging','queue','ring_group','sip_uri','time_condition','voicemail','voicemail_group')",
+			In: &schema.CheckIn{
+				Column: "destination_kind",
+				Values: []string{"announcement", "conference", "directory", "extension", "external", "fax", "internal", "ivr", "paging", "queue", "ring_group", "sip_uri", "time_condition", "voicemail", "voicemail_group"},
+			},
+		},
+		{
+			Name: "inbound_routes_did_check",
+			Expr: "(length(did) <= 500)",
+		},
+		{
+			Name: "inbound_routes_did_kind_check",
+			Expr: "\"did_kind\" IN ('any','exact','prefix','regex')",
+			In: &schema.CheckIn{
+				Column: "did_kind",
+				Values: []string{"any", "exact", "prefix", "regex"},
+			},
+		},
+		{
+			Name: "inbound_routes_header_regex_check",
+			Expr: "(length(header_regex) <= 500)",
+		},
+	},
+}
+
+func (*InboxPresence) MomoMeta() *momo.Meta[InboxPresence] { return &inboxPresenceMeta }
+
+var inboxPresenceMeta = momo.Meta[InboxPresence]{
+	Table: "inbox_presence",
+	Columns: []momo.ColumnMeta{
+		{Name: "user_id", Flags: momo.FlagPK},
+		{Name: "seen_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *InboxPresence, i int) any {
+		switch i {
+		case 0:
+			return &m.UserID
+		case 1:
+			return &m.SeenAt
+		}
+		return nil
+	},
+	Value: func(m *InboxPresence, i int) any {
+		switch i {
+		case 0:
+			return m.UserID
+		case 1:
+			return m.SeenAt
+		}
+		return nil
+	},
+	TableSchema: &inboxPresenceTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var inboxPresenceTable = schema.Table{
+	Name: "inbox_presence",
+	Columns: []schema.Column{
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "seen_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"user_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "inbox_presence_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*IntegrationEvent) MomoMeta() *momo.Meta[IntegrationEvent] { return &integrationEventMeta }
+
+var integrationEventMeta = momo.Meta[IntegrationEvent]{
+	Table: "integration_events",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK},
+		{Name: "cursor_ms"},
+		{Name: "cursor_seq"},
+		{Name: "type"},
+		{Name: "created_at"},
+		{Name: "correlation_id", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "extension_number", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "payload"},
+		{Name: "ingested_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *IntegrationEvent, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.CursorMs
+		case 2:
+			return &m.CursorSeq
+		case 3:
+			return &m.Type
+		case 4:
+			return &m.CreatedAt
+		case 5:
+			return &m.CorrelationID
+		case 6:
+			return &m.ExtensionNumber
+		case 7:
+			return &m.Payload
+		case 8:
+			return &m.IngestedAt
+		}
+		return nil
+	},
+	Value: func(m *IntegrationEvent, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.CursorMs
+		case 2:
+			return m.CursorSeq
+		case 3:
+			return m.Type
+		case 4:
+			return m.CreatedAt
+		case 5:
+			return m.CorrelationID
+		case 6:
+			return m.ExtensionNumber
+		case 7:
+			return m.Payload
+		case 8:
+			return m.IngestedAt
+		}
+		return nil
+	},
+	TableSchema: &integrationEventTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var integrationEventTable = schema.Table{
+	Name: "integration_events",
+	Columns: []schema.Column{
+		{
+			Name: "id",
+			Type: "text",
+		},
+		{
+			Name: "cursor_ms",
+			Type: "bigint",
+		},
+		{
+			Name: "cursor_seq",
+			Type: "bigint",
+		},
+		{
+			Name: "type",
+			Type: "text",
+		},
+		{
+			Name: "created_at",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:    "correlation_id",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "extension_number",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name: "payload",
+			Type: "jsonb",
+		},
+		{
+			Name:    "ingested_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "integration_events_correlation",
+			Parts: []schema.IndexPart{
+				{
+					Column: "correlation_id",
+				},
+			},
+		},
+		{
+			Name: "integration_events_created",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+				},
+			},
+		},
+		{
+			Name:   "integration_events_cursor",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "cursor_ms",
+				},
+				{
+					Column: "cursor_seq",
+				},
+			},
+			Method: "btree",
+		},
+		{
+			Name: "integration_events_extension",
+			Parts: []schema.IndexPart{
+				{
+					Column: "extension_number",
+				},
+				{
+					Column: "cursor_ms",
+				},
+				{
+					Column: "cursor_seq",
+				},
+			},
+		},
+	},
+}
+
+func (*IvrMenu) MomoMeta() *momo.Meta[IvrMenu] { return &ivrMenuMeta }
+
+var ivrMenuMeta = momo.Meta[IvrMenu]{
+	Table: "ivr_menus",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "number", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "greeting_id"},
+		{Name: "invalid_prompt_id", Flags: momo.FlagNullable},
+		{Name: "timeout_prompt_id", Flags: momo.FlagNullable},
+		{Name: "digit_timeout", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "inter_digit_timeout", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "max_retries", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "allow_direct_dial", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "timeout_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "timeout_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "invalid_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "invalid_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "prompt_language", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *IvrMenu, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Number
+		case 3:
+			return &m.Enabled
+		case 4:
+			return &m.GreetingID
+		case 5:
+			return &m.InvalidPromptID
+		case 6:
+			return &m.TimeoutPromptID
+		case 7:
+			return &m.DigitTimeout
+		case 8:
+			return &m.InterDigitTimeout
+		case 9:
+			return &m.MaxRetries
+		case 10:
+			return &m.AllowDirectDial
+		case 11:
+			return &m.TimeoutKind
+		case 12:
+			return &m.TimeoutTarget
+		case 13:
+			return &m.InvalidKind
+		case 14:
+			return &m.InvalidTarget
+		case 15:
+			return &m.CreatedAt
+		case 16:
+			return &m.UpdatedAt
+		case 17:
+			return &m.PromptLanguage
+		}
+		return nil
+	},
+	Value: func(m *IvrMenu, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Number
+		case 3:
+			return m.Enabled
+		case 4:
+			return m.GreetingID
+		case 5:
+			return m.InvalidPromptID
+		case 6:
+			return m.TimeoutPromptID
+		case 7:
+			return m.DigitTimeout
+		case 8:
+			return m.InterDigitTimeout
+		case 9:
+			return m.MaxRetries
+		case 10:
+			return m.AllowDirectDial
+		case 11:
+			return m.TimeoutKind
+		case 12:
+			return m.TimeoutTarget
+		case 13:
+			return m.InvalidKind
+		case 14:
+			return m.InvalidTarget
+		case 15:
+			return m.CreatedAt
+		case 16:
+			return m.UpdatedAt
+		case 17:
+			return m.PromptLanguage
+		}
+		return nil
+	},
+	TableSchema: &ivrMenuTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var ivrMenuTable = schema.Table{
+	Name: "ivr_menus",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "number",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name: "greeting_id",
+			Type: "bigint",
+		},
+		{
+			Name:     "invalid_prompt_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "timeout_prompt_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "digit_timeout",
+			Type:    "integer",
+			Default: "5",
+		},
+		{
+			Name:    "inter_digit_timeout",
+			Type:    "integer",
+			Default: "3",
+		},
+		{
+			Name:    "max_retries",
+			Type:    "integer",
+			Default: "3",
+		},
+		{
+			Name:    "allow_direct_dial",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "timeout_kind",
+			Type:    "text",
+			Default: "'hangup'::text",
+		},
+		{
+			Name:    "timeout_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "invalid_kind",
+			Type:    "text",
+			Default: "'hangup'::text",
+		},
+		{
+			Name:    "invalid_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "prompt_language",
+			Type:     "text",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "ivr_menus_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name:   "ivr_menus_number",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "number",
+				},
+			},
+			Where: "(number <> ''::text)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ivr_menus_greeting_id_fkey",
+			Columns:    []string{"greeting_id"},
+			RefTable:   "announcements",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "ivr_menus_invalid_prompt_id_fkey",
+			Columns:    []string{"invalid_prompt_id"},
+			RefTable:   "announcements",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "ivr_menus_timeout_prompt_id_fkey",
+			Columns:    []string{"timeout_prompt_id"},
+			RefTable:   "announcements",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ivr_menus_digit_timeout_check",
+			Expr: "((digit_timeout >= 1) AND (digit_timeout <= 60))",
+		},
+		{
+			Name: "ivr_menus_inter_digit_timeout_check",
+			Expr: "((inter_digit_timeout >= 1) AND (inter_digit_timeout <= 30))",
+		},
+		{
+			Name: "ivr_menus_invalid_kind_check",
+			Expr: "\"invalid_kind\" IN ('announcement','directory','extension','external','fax','hangup','ivr','paging','queue','ring_group','time_condition','voicemail','voicemail_group')",
+			In: &schema.CheckIn{
+				Column: "invalid_kind",
+				Values: []string{"announcement", "directory", "extension", "external", "fax", "hangup", "ivr", "paging", "queue", "ring_group", "time_condition", "voicemail", "voicemail_group"},
+			},
+		},
+		{
+			Name: "ivr_menus_max_retries_check",
+			Expr: "((max_retries >= 0) AND (max_retries <= 10))",
+		},
+		{
+			Name: "ivr_menus_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._-]{1,64}$'::text)",
+		},
+		{
+			Name: "ivr_menus_number_check",
+			Expr: "(number ~ '^([0-9]{2,16})?$'::text)",
+		},
+		{
+			Name: "ivr_menus_timeout_kind_check",
+			Expr: "\"timeout_kind\" IN ('announcement','directory','extension','external','fax','hangup','ivr','paging','queue','ring_group','time_condition','voicemail','voicemail_group')",
+			In: &schema.CheckIn{
+				Column: "timeout_kind",
+				Values: []string{"announcement", "directory", "extension", "external", "fax", "hangup", "ivr", "paging", "queue", "ring_group", "time_condition", "voicemail", "voicemail_group"},
+			},
+		},
+	},
+}
+
+func (*IvrMenuOption) MomoMeta() *momo.Meta[IvrMenuOption] { return &ivrMenuOptionMeta }
+
+var ivrMenuOptionMeta = momo.Meta[IvrMenuOption]{
+	Table: "ivr_menu_options",
+	Columns: []momo.ColumnMeta{
+		{Name: "menu_id", Flags: momo.FlagPK},
+		{Name: "digit", Flags: momo.FlagPK},
+		{Name: "dest_kind"},
+		{Name: "dest_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *IvrMenuOption, i int) any {
+		switch i {
+		case 0:
+			return &m.MenuID
+		case 1:
+			return &m.Digit
+		case 2:
+			return &m.DestKind
+		case 3:
+			return &m.DestTarget
+		}
+		return nil
+	},
+	Value: func(m *IvrMenuOption, i int) any {
+		switch i {
+		case 0:
+			return m.MenuID
+		case 1:
+			return m.Digit
+		case 2:
+			return m.DestKind
+		case 3:
+			return m.DestTarget
+		}
+		return nil
+	},
+	TableSchema: &ivrMenuOptionTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var ivrMenuOptionTable = schema.Table{
+	Name: "ivr_menu_options",
+	Columns: []schema.Column{
+		{
+			Name: "menu_id",
+			Type: "bigint",
+		},
+		{
+			Name: "digit",
+			Type: "text",
+		},
+		{
+			Name: "dest_kind",
+			Type: "text",
+		},
+		{
+			Name:    "dest_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+	},
+	PrimaryKey: []string{"menu_id", "digit"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ivr_menu_options_menu_id_fkey",
+			Columns:    []string{"menu_id"},
+			RefTable:   "ivr_menus",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ivr_menu_options_dest_kind_check",
+			Expr: "\"dest_kind\" IN ('announcement','directory','extension','external','fax','hangup','ivr','paging','queue','ring_group','time_condition','voicemail','voicemail_group')",
+			In: &schema.CheckIn{
+				Column: "dest_kind",
+				Values: []string{"announcement", "directory", "extension", "external", "fax", "hangup", "ivr", "paging", "queue", "ring_group", "time_condition", "voicemail", "voicemail_group"},
+			},
+		},
+		{
+			Name: "ivr_menu_options_digit_check",
+			Expr: "(digit ~ '^[0-9*#]$'::text)",
+		},
+	},
+}
+
+func (*Location) MomoMeta() *momo.Meta[Location] { return &locationMeta }
+
+var locationMeta = momo.Meta[Location]{
+	Table: "locations",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "kind"},
+		{Name: "name"},
+		{Name: "parent_id", Flags: momo.FlagNullable},
+		{Name: "country", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "state", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "city", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "street", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "house_number", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "postal_code", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "latitude", Flags: momo.FlagNullable},
+		{Name: "longitude", Flags: momo.FlagNullable},
+		{Name: "radius_m", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Location, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Kind
+		case 2:
+			return &m.Name
+		case 3:
+			return &m.ParentID
+		case 4:
+			return &m.Country
+		case 5:
+			return &m.State
+		case 6:
+			return &m.City
+		case 7:
+			return &m.Street
+		case 8:
+			return &m.HouseNumber
+		case 9:
+			return &m.PostalCode
+		case 10:
+			return &m.Latitude
+		case 11:
+			return &m.Longitude
+		case 12:
+			return &m.RadiusM
+		case 13:
+			return &m.CreatedAt
+		case 14:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *Location, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Kind
+		case 2:
+			return m.Name
+		case 3:
+			return m.ParentID
+		case 4:
+			return m.Country
+		case 5:
+			return m.State
+		case 6:
+			return m.City
+		case 7:
+			return m.Street
+		case 8:
+			return m.HouseNumber
+		case 9:
+			return m.PostalCode
+		case 10:
+			return m.Latitude
+		case 11:
+			return m.Longitude
+		case 12:
+			return m.RadiusM
+		case 13:
+			return m.CreatedAt
+		case 14:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &locationTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var locationTable = schema.Table{
+	Name: "locations",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:     "parent_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "country",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "state",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "city",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "street",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "house_number",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "postal_code",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "latitude",
+			Type:     "double precision",
+			Nullable: true,
+		},
+		{
+			Name:     "longitude",
+			Type:     "double precision",
+			Nullable: true,
+		},
+		{
+			Name:     "radius_m",
+			Type:     "double precision",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name:   "locations_name",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Expr: "coalesce(parent_id, 0::bigint)",
+				},
+				{
+					Expr: "lower(name)",
+				},
+			},
+		},
+		{
+			Name: "locations_parent",
+			Parts: []schema.IndexPart{
+				{
+					Column: "parent_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "locations_parent_id_fkey",
+			Columns:    []string{"parent_id"},
+			RefTable:   "locations",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "locations_check",
+			Expr: "((kind = 'site'::text) = (parent_id IS NULL))",
+		},
+		{
+			Name: "locations_check1",
+			Expr: "((latitude IS NULL) = (longitude IS NULL))",
+		},
+		{
+			Name: "locations_check2",
+			Expr: "((radius_m IS NULL) OR (latitude IS NOT NULL))",
+		},
+		{
+			Name: "locations_city_check",
+			Expr: "(char_length(city) <= 100)",
+		},
+		{
+			Name: "locations_country_check",
+			Expr: "((country = ''::text) OR (country ~ '^[A-Z]{2}$'::text))",
+		},
+		{
+			Name: "locations_house_number_check",
+			Expr: "(char_length(house_number) <= 100)",
+		},
+		{
+			Name: "locations_kind_check",
+			Expr: "\"kind\" IN ('floor','room','site')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"floor", "room", "site"},
+			},
+		},
+		{
+			Name: "locations_latitude_check",
+			Expr: "((latitude >= ('-90'::integer)::double precision) AND (latitude <= (90)::double precision))",
+		},
+		{
+			Name: "locations_longitude_check",
+			Expr: "((longitude >= ('-180'::integer)::double precision) AND (longitude <= (180)::double precision))",
+		},
+		{
+			Name: "locations_name_check",
+			Expr: "((char_length(name) >= 1) AND (char_length(name) <= 100))",
+		},
+		{
+			Name: "locations_postal_code_check",
+			Expr: "(char_length(postal_code) <= 100)",
+		},
+		{
+			Name: "locations_radius_m_check",
+			Expr: "((radius_m > (0)::double precision) AND (radius_m <= (1000000)::double precision))",
+		},
+		{
+			Name: "locations_state_check",
+			Expr: "(char_length(state) <= 100)",
+		},
+		{
+			Name: "locations_street_check",
+			Expr: "(char_length(street) <= 100)",
+		},
+	},
+}
+
+func (*MediaLink) MomoMeta() *momo.Meta[MediaLink] { return &mediaLinkMeta }
+
+var mediaLinkMeta = momo.Meta[MediaLink]{
+	Table: "media_links",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "token_hash"},
+		{Name: "media_id"},
+		{Name: "expires_at"},
+		{Name: "max_uses", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "uses", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *MediaLink, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.TokenHash
+		case 2:
+			return &m.MediaID
+		case 3:
+			return &m.ExpiresAt
+		case 4:
+			return &m.MaxUses
+		case 5:
+			return &m.Uses
+		case 6:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *MediaLink, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.TokenHash
+		case 2:
+			return m.MediaID
+		case 3:
+			return m.ExpiresAt
+		case 4:
+			return m.MaxUses
+		case 5:
+			return m.Uses
+		case 6:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &mediaLinkTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var mediaLinkTable = schema.Table{
+	Name: "media_links",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "token_hash",
+			Type: "bytea",
+		},
+		{
+			Name: "media_id",
+			Type: "bigint",
+		},
+		{
+			Name: "expires_at",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:    "max_uses",
+			Type:    "integer",
+			Default: "5",
+		},
+		{
+			Name:    "uses",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "media_links_token_hash_key",
+			Columns: []string{"token_hash"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "media_links_expires",
+			Parts: []schema.IndexPart{
+				{
+					Column: "expires_at",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "media_links_media_id_fkey",
+			Columns:    []string{"media_id"},
+			RefTable:   "message_media",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "media_links_max_uses_check",
+			Expr: "((max_uses >= 1) AND (max_uses <= 100))",
+		},
+		{
+			Name: "media_links_uses_check",
+			Expr: "(uses >= 0)",
+		},
+	},
+}
+
+func (*Message) MomoMeta() *momo.Meta[Message] { return &messageMeta }
+
+var messageMeta = momo.Meta[Message]{
+	Table: "messages",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "batch"},
+		{Name: "sender"},
+		{Name: "sender_kind"},
+		{Name: "sender_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "actor", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "recipient"},
+		{Name: "recipient_kind"},
+		{Name: "scope", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "scope_ref", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "trunk_id", Flags: momo.FlagNullable},
+		{Name: "content_type", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "body_text", Flags: momo.FlagNullable},
+		{Name: "body_raw", Flags: momo.FlagNullable},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "detail", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "attempts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "expires_at"},
+		{Name: "next_attempt_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "claimed_at", Flags: momo.FlagNullable},
+		{Name: "claimed_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "delivered_at", Flags: momo.FlagNullable},
+		{Name: "conversation_message_id", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *Message, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Batch
+		case 2:
+			return &m.Sender
+		case 3:
+			return &m.SenderKind
+		case 4:
+			return &m.SenderName
+		case 5:
+			return &m.Actor
+		case 6:
+			return &m.Recipient
+		case 7:
+			return &m.RecipientKind
+		case 8:
+			return &m.Scope
+		case 9:
+			return &m.ScopeRef
+		case 10:
+			return &m.TrunkID
+		case 11:
+			return &m.ContentType
+		case 12:
+			return &m.BodyText
+		case 13:
+			return &m.BodyRaw
+		case 14:
+			return &m.Status
+		case 15:
+			return &m.Detail
+		case 16:
+			return &m.Attempts
+		case 17:
+			return &m.CreatedAt
+		case 18:
+			return &m.ExpiresAt
+		case 19:
+			return &m.NextAttemptAt
+		case 20:
+			return &m.ClaimedAt
+		case 21:
+			return &m.ClaimedBy
+		case 22:
+			return &m.DeliveredAt
+		case 23:
+			return &m.ConversationMessageID
+		}
+		return nil
+	},
+	Value: func(m *Message, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Batch
+		case 2:
+			return m.Sender
+		case 3:
+			return m.SenderKind
+		case 4:
+			return m.SenderName
+		case 5:
+			return m.Actor
+		case 6:
+			return m.Recipient
+		case 7:
+			return m.RecipientKind
+		case 8:
+			return m.Scope
+		case 9:
+			return m.ScopeRef
+		case 10:
+			return m.TrunkID
+		case 11:
+			return m.ContentType
+		case 12:
+			return m.BodyText
+		case 13:
+			return m.BodyRaw
+		case 14:
+			return m.Status
+		case 15:
+			return m.Detail
+		case 16:
+			return m.Attempts
+		case 17:
+			return m.CreatedAt
+		case 18:
+			return m.ExpiresAt
+		case 19:
+			return m.NextAttemptAt
+		case 20:
+			return m.ClaimedAt
+		case 21:
+			return m.ClaimedBy
+		case 22:
+			return m.DeliveredAt
+		case 23:
+			return m.ConversationMessageID
+		}
+		return nil
+	},
+	TableSchema: &messageTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var messageTable = schema.Table{
+	Name: "messages",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "batch",
+			Type: "text",
+		},
+		{
+			Name: "sender",
+			Type: "text",
+		},
+		{
+			Name: "sender_kind",
+			Type: "text",
+		},
+		{
+			Name:    "sender_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "actor",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name: "recipient",
+			Type: "text",
+		},
+		{
+			Name: "recipient_kind",
+			Type: "text",
+		},
+		{
+			Name:    "scope",
+			Type:    "text",
+			Default: "'direct'::text",
+		},
+		{
+			Name:    "scope_ref",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "trunk_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "content_type",
+			Type:    "text",
+			Default: "'text/plain'::text",
+		},
+		{
+			Name:     "body_text",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "body_raw",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'pending'::text",
+		},
+		{
+			Name:    "detail",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "attempts",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name: "expires_at",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:    "next_attempt_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "claimed_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "claimed_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "delivered_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "conversation_message_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "messages_batch",
+			Parts: []schema.IndexPart{
+				{
+					Column: "batch",
+				},
+			},
+		},
+		{
+			Name: "messages_conversation_message",
+			Parts: []schema.IndexPart{
+				{
+					Column: "conversation_message_id",
+				},
+			},
+			Where: "(conversation_message_id IS NOT NULL)",
+		},
+		{
+			Name: "messages_created",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+				},
+			},
+		},
+		{
+			Name: "messages_pending",
+			Parts: []schema.IndexPart{
+				{
+					Column: "recipient_kind",
+				},
+				{
+					Column: "recipient",
+				},
+				{
+					Column: "id",
+				},
+			},
+			Where: "(status = 'pending'::text)",
+		},
+		{
+			Name: "messages_recipient",
+			Parts: []schema.IndexPart{
+				{
+					Column: "recipient",
+				},
+				{
+					Column: "id",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name: "messages_sender",
+			Parts: []schema.IndexPart{
+				{
+					Column: "sender",
+				},
+				{
+					Column: "id",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name: "messages_sending",
+			Parts: []schema.IndexPart{
+				{
+					Column: "claimed_at",
+				},
+			},
+			Where: "(status = 'sending'::text)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "messages_conversation_message_id_fkey",
+			Columns:    []string{"conversation_message_id"},
+			RefTable:   "conversation_messages",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "messages_trunk_id_fkey",
+			Columns:    []string{"trunk_id"},
+			RefTable:   "trunks",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "messages_check",
+			Expr: "((body_text IS NULL) <> (body_raw IS NULL))",
+		},
+		{
+			Name: "messages_content_type_check",
+			Expr: "((length(content_type) >= 1) AND (length(content_type) <= 128))",
+		},
+		{
+			Name: "messages_recipient_kind_check",
+			Expr: "\"recipient_kind\" IN ('extension','external')",
+			In: &schema.CheckIn{
+				Column: "recipient_kind",
+				Values: []string{"extension", "external"},
+			},
+		},
+		{
+			Name: "messages_scope_check",
+			Expr: "\"scope\" IN ('broadcast','direct','paging_group','ring_group')",
+			In: &schema.CheckIn{
+				Column: "scope",
+				Values: []string{"broadcast", "direct", "paging_group", "ring_group"},
+			},
+		},
+		{
+			Name: "messages_sender_kind_check",
+			Expr: "\"sender_kind\" IN ('extension','external','system')",
+			In: &schema.CheckIn{
+				Column: "sender_kind",
+				Values: []string{"extension", "external", "system"},
+			},
+		},
+		{
+			Name: "messages_status_check",
+			Expr: "\"status\" IN ('delivered','failed','pending','sending')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"delivered", "failed", "pending", "sending"},
+			},
+		},
+	},
+}
+
+func (*MessageMedia) MomoMeta() *momo.Meta[MessageMedia] { return &messageMediaMeta }
+
+var messageMediaMeta = momo.Meta[MessageMedia]{
+	Table: "message_media",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "message_id", Flags: momo.FlagNullable},
+		{Name: "conversation_id", Flags: momo.FlagNullable},
+		{Name: "channel_id"},
+		{Name: "direction"},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "object_key", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "content_type", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "declared_type", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "size", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "sha256", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "filename", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "reason", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "source_ref", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "uploader_user_id", Flags: momo.FlagNullable},
+		{Name: "uploader_visitor_id", Flags: momo.FlagNullable},
+		{Name: "attempts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "next_attempt_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "attached_at", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *MessageMedia, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.MessageID
+		case 2:
+			return &m.ConversationID
+		case 3:
+			return &m.ChannelID
+		case 4:
+			return &m.Direction
+		case 5:
+			return &m.Status
+		case 6:
+			return &m.ObjectKey
+		case 7:
+			return &m.ContentType
+		case 8:
+			return &m.DeclaredType
+		case 9:
+			return &m.Size
+		case 10:
+			return &m.Sha256
+		case 11:
+			return &m.Filename
+		case 12:
+			return &m.Reason
+		case 13:
+			return &m.SourceRef
+		case 14:
+			return &m.UploaderUserID
+		case 15:
+			return &m.UploaderVisitorID
+		case 16:
+			return &m.Attempts
+		case 17:
+			return &m.NextAttemptAt
+		case 18:
+			return &m.AttachedAt
+		case 19:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *MessageMedia, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.MessageID
+		case 2:
+			return m.ConversationID
+		case 3:
+			return m.ChannelID
+		case 4:
+			return m.Direction
+		case 5:
+			return m.Status
+		case 6:
+			return m.ObjectKey
+		case 7:
+			return m.ContentType
+		case 8:
+			return m.DeclaredType
+		case 9:
+			return m.Size
+		case 10:
+			return m.Sha256
+		case 11:
+			return m.Filename
+		case 12:
+			return m.Reason
+		case 13:
+			return m.SourceRef
+		case 14:
+			return m.UploaderUserID
+		case 15:
+			return m.UploaderVisitorID
+		case 16:
+			return m.Attempts
+		case 17:
+			return m.NextAttemptAt
+		case 18:
+			return m.AttachedAt
+		case 19:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &messageMediaTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var messageMediaTable = schema.Table{
+	Name: "message_media",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name:     "message_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "conversation_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name: "channel_id",
+			Type: "bigint",
+		},
+		{
+			Name: "direction",
+			Type: "text",
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'pending'::text",
+		},
+		{
+			Name:    "object_key",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "content_type",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "declared_type",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "size",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "sha256",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "filename",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "reason",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "source_ref",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:     "uploader_user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "uploader_visitor_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "attempts",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "next_attempt_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "attached_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "message_media_conversation",
+			Parts: []schema.IndexPart{
+				{
+					Column: "conversation_id",
+				},
+			},
+			Where: "(conversation_id IS NOT NULL)",
+		},
+		{
+			Name: "message_media_fetch",
+			Parts: []schema.IndexPart{
+				{
+					Column: "next_attempt_at",
+				},
+			},
+			Where: "((status = 'pending'::text) AND (direction = 'in'::text) AND (attached_at IS NOT NULL))",
+		},
+		{
+			Name: "message_media_loose",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+				},
+			},
+			Where: "(message_id IS NULL)",
+		},
+		{
+			Name: "message_media_message",
+			Parts: []schema.IndexPart{
+				{
+					Column: "message_id",
+				},
+			},
+			Where: "(message_id IS NOT NULL)",
+		},
+		{
+			Name: "message_media_ready",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+				},
+			},
+			Where: "(status = 'ready'::text)",
+		},
+		{
+			Name: "message_media_visitor",
+			Parts: []schema.IndexPart{
+				{
+					Column: "uploader_visitor_id",
+				},
+			},
+			Where: "(uploader_visitor_id IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "message_media_conversation_id_fkey",
+			Columns:    []string{"conversation_id"},
+			RefTable:   "conversations",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "message_media_message_id_fkey",
+			Columns:    []string{"message_id"},
+			RefTable:   "conversation_messages",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "message_media_uploader_user_id_fkey",
+			Columns:    []string{"uploader_user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "message_media_uploader_visitor_id_fkey",
+			Columns:    []string{"uploader_visitor_id"},
+			RefTable:   "chat_visitors",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "message_media_content_type_check",
+			Expr: "(length(content_type) <= 100)",
+		},
+		{
+			Name: "message_media_declared_type_check",
+			Expr: "(length(declared_type) <= 100)",
+		},
+		{
+			Name: "message_media_direction_check",
+			Expr: "\"direction\" IN ('in','out')",
+			In: &schema.CheckIn{
+				Column: "direction",
+				Values: []string{"in", "out"},
+			},
+		},
+		{
+			Name: "message_media_filename_check",
+			Expr: "(length(filename) <= 255)",
+		},
+		{
+			Name: "message_media_object_key_check",
+			Expr: "((object_key = ''::text) OR (object_key ~~ 'msg/%'::text))",
+		},
+		{
+			Name: "message_media_reason_check",
+			Expr: "(length(reason) <= 64)",
+		},
+		{
+			Name: "message_media_sha256_check",
+			Expr: "((sha256 = ''::text) OR (sha256 ~ '^[0-9a-f]{64}$'::text))",
+		},
+		{
+			Name: "message_media_size_check",
+			Expr: "(size >= 0)",
+		},
+		{
+			Name: "message_media_status_check",
+			Expr: "\"status\" IN ('expired','pending','ready','rejected')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"expired", "pending", "ready", "rejected"},
+			},
+		},
+	},
+}
+
+func (*MessageSetting) MomoMeta() *momo.Meta[MessageSetting] { return &messageSettingMeta }
+
+var messageSettingMeta = momo.Meta[MessageSetting]{
+	Table: "message_settings",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ttl_hours", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "retention_days", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "rate_per_minute", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "max_queued_per_extension", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *MessageSetting, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Enabled
+		case 2:
+			return &m.TTLHours
+		case 3:
+			return &m.RetentionDays
+		case 4:
+			return &m.RatePerMinute
+		case 5:
+			return &m.MaxQueuedPerExtension
+		}
+		return nil
+	},
+	Value: func(m *MessageSetting, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Enabled
+		case 2:
+			return m.TTLHours
+		case 3:
+			return m.RetentionDays
+		case 4:
+			return m.RatePerMinute
+		case 5:
+			return m.MaxQueuedPerExtension
+		}
+		return nil
+	},
+	TableSchema: &messageSettingTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var messageSettingTable = schema.Table{
+	Name: "message_settings",
+	Columns: []schema.Column{
+		{
+			Name:    "id",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "ttl_hours",
+			Type:    "integer",
+			Default: "24",
+		},
+		{
+			Name:    "retention_days",
+			Type:    "integer",
+			Default: "30",
+		},
+		{
+			Name:    "rate_per_minute",
+			Type:    "integer",
+			Default: "30",
+		},
+		{
+			Name:    "max_queued_per_extension",
+			Type:    "integer",
+			Default: "100",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Checks: []schema.Check{
+		{
+			Name: "message_settings_id_check",
+			Expr: "id",
+		},
+		{
+			Name: "message_settings_max_queued_per_extension_check",
+			Expr: "((max_queued_per_extension >= 1) AND (max_queued_per_extension <= 10000))",
+		},
+		{
+			Name: "message_settings_rate_per_minute_check",
+			Expr: "((rate_per_minute >= 1) AND (rate_per_minute <= 1000))",
+		},
+		{
+			Name: "message_settings_retention_days_check",
+			Expr: "((retention_days >= 1) AND (retention_days <= 3650))",
+		},
+		{
+			Name: "message_settings_ttl_hours_check",
+			Expr: "((ttl_hours >= 1) AND (ttl_hours <= 720))",
+		},
+	},
+}
+
+func (*MessagingEvent) MomoMeta() *momo.Meta[MessagingEvent] { return &messagingEventMeta }
+
+var messagingEventMeta = momo.Meta[MessagingEvent]{
+	Table: "messaging_events",
+	Columns: []momo.ColumnMeta{
+		{Name: "channel_id", Flags: momo.FlagPK},
+		{Name: "event_key", Flags: momo.FlagPK},
+		{Name: "received_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *MessagingEvent, i int) any {
+		switch i {
+		case 0:
+			return &m.ChannelID
+		case 1:
+			return &m.EventKey
+		case 2:
+			return &m.ReceivedAt
+		}
+		return nil
+	},
+	Value: func(m *MessagingEvent, i int) any {
+		switch i {
+		case 0:
+			return m.ChannelID
+		case 1:
+			return m.EventKey
+		case 2:
+			return m.ReceivedAt
+		}
+		return nil
+	},
+	TableSchema: &messagingEventTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var messagingEventTable = schema.Table{
+	Name: "messaging_events",
+	Columns: []schema.Column{
+		{
+			Name: "channel_id",
+			Type: "bigint",
+		},
+		{
+			Name: "event_key",
+			Type: "text",
+		},
+		{
+			Name:    "received_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"channel_id", "event_key"},
+	Indexes: []schema.Index{
+		{
+			Name: "messaging_events_received",
+			Parts: []schema.IndexPart{
+				{
+					Column: "received_at",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "messaging_events_channel_id_fkey",
+			Columns:    []string{"channel_id"},
+			RefTable:   "msg_channels",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*MessagingSetting) MomoMeta() *momo.Meta[MessagingSetting] { return &messagingSettingMeta }
+
+var messagingSettingMeta = momo.Meta[MessagingSetting]{
+	Table: "messaging_settings",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "retention_sms_days", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "retention_chat_days", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "reopen_days", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "email_notify", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "first_contact", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "first_contact_user_hour", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "first_contact_address_day", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_auto_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_business_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_intents", Flags: momo.FlagDBDefault},
+		{Name: "ai_sensitive_topics", Flags: momo.FlagDBDefault},
+		{Name: "retention_media_days", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "sla_first_response_seconds", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "sla_resolution_seconds", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *MessagingSetting, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.RetentionSmsDays
+		case 2:
+			return &m.RetentionChatDays
+		case 3:
+			return &m.ReopenDays
+		case 4:
+			return &m.EmailNotify
+		case 5:
+			return &m.FirstContact
+		case 6:
+			return &m.FirstContactUserHour
+		case 7:
+			return &m.FirstContactAddressDay
+		case 8:
+			return &m.AiEnabled
+		case 9:
+			return &m.AiAutoEnabled
+		case 10:
+			return &m.AiBusinessName
+		case 11:
+			return &m.AiIntents
+		case 12:
+			return &m.AiSensitiveTopics
+		case 13:
+			return &m.RetentionMediaDays
+		case 14:
+			return &m.SLAFirstResponseSeconds
+		case 15:
+			return &m.SLAResolutionSeconds
+		}
+		return nil
+	},
+	Value: func(m *MessagingSetting, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.RetentionSmsDays
+		case 2:
+			return m.RetentionChatDays
+		case 3:
+			return m.ReopenDays
+		case 4:
+			return m.EmailNotify
+		case 5:
+			return m.FirstContact
+		case 6:
+			return m.FirstContactUserHour
+		case 7:
+			return m.FirstContactAddressDay
+		case 8:
+			return m.AiEnabled
+		case 9:
+			return m.AiAutoEnabled
+		case 10:
+			return m.AiBusinessName
+		case 11:
+			return m.AiIntents
+		case 12:
+			return m.AiSensitiveTopics
+		case 13:
+			return m.RetentionMediaDays
+		case 14:
+			return m.SLAFirstResponseSeconds
+		case 15:
+			return m.SLAResolutionSeconds
+		}
+		return nil
+	},
+	TableSchema: &messagingSettingTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var messagingSettingTable = schema.Table{
+	Name: "messaging_settings",
+	Columns: []schema.Column{
+		{
+			Name:    "id",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "retention_sms_days",
+			Type:    "integer",
+			Default: "365",
+		},
+		{
+			Name:    "retention_chat_days",
+			Type:    "integer",
+			Default: "90",
+		},
+		{
+			Name:    "reopen_days",
+			Type:    "integer",
+			Default: "7",
+		},
+		{
+			Name:    "email_notify",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "first_contact",
+			Type:    "text",
+			Default: "'off'::text",
+		},
+		{
+			Name:    "first_contact_user_hour",
+			Type:    "integer",
+			Default: "20",
+		},
+		{
+			Name:    "first_contact_address_day",
+			Type:    "integer",
+			Default: "200",
+		},
+		{
+			Name:    "ai_enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "ai_auto_enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "ai_business_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "ai_intents",
+			Type:    "text[]",
+			Default: "'{question,sales,support,billing,appointment,complaint}'::text[]",
+		},
+		{
+			Name:    "ai_sensitive_topics",
+			Type:    "text[]",
+			Default: "'{medical,legal,emergency,self-harm,harassment,\"payment dispute\",\"personal data\"}'::text[]",
+		},
+		{
+			Name:    "retention_media_days",
+			Type:    "integer",
+			Default: "90",
+		},
+		{
+			Name:    "sla_first_response_seconds",
+			Type:    "integer",
+			Default: "900",
+		},
+		{
+			Name:    "sla_resolution_seconds",
+			Type:    "integer",
+			Default: "86400",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Checks: []schema.Check{
+		{
+			Name: "messaging_settings_ai_business_name_check",
+			Expr: "(length(ai_business_name) <= 100)",
+		},
+		{
+			Name: "messaging_settings_first_contact_address_day_check",
+			Expr: "((first_contact_address_day >= 1) AND (first_contact_address_day <= 10000))",
+		},
+		{
+			Name: "messaging_settings_first_contact_check",
+			Expr: "\"first_contact\" IN ('attested','off')",
+			In: &schema.CheckIn{
+				Column: "first_contact",
+				Values: []string{"attested", "off"},
+			},
+		},
+		{
+			Name: "messaging_settings_first_contact_user_hour_check",
+			Expr: "((first_contact_user_hour >= 1) AND (first_contact_user_hour <= 1000))",
+		},
+		{
+			Name: "messaging_settings_id_check",
+			Expr: "id",
+		},
+		{
+			Name: "messaging_settings_reopen_days_check",
+			Expr: "((reopen_days >= 0) AND (reopen_days <= 365))",
+		},
+		{
+			Name: "messaging_settings_retention_chat_days_check",
+			Expr: "((retention_chat_days >= 1) AND (retention_chat_days <= 3650))",
+		},
+		{
+			Name: "messaging_settings_retention_media_days_check",
+			Expr: "((retention_media_days >= 1) AND (retention_media_days <= 3650))",
+		},
+		{
+			Name: "messaging_settings_retention_sms_days_check",
+			Expr: "((retention_sms_days >= 1) AND (retention_sms_days <= 3650))",
+		},
+		{
+			Name: "messaging_settings_sla_first_response_seconds_check",
+			Expr: "((sla_first_response_seconds >= 0) AND (sla_first_response_seconds <= 604800))",
+		},
+		{
+			Name: "messaging_settings_sla_resolution_seconds_check",
+			Expr: "((sla_resolution_seconds >= 0) AND (sla_resolution_seconds <= 2592000))",
+		},
+	},
+}
+
+func (*MohClass) MomoMeta() *momo.Meta[MohClass] { return &mohClassMeta }
+
+var mohClassMeta = momo.Meta[MohClass]{
+	Table: "moh_classes",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "mode", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "is_default", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *MohClass, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Mode
+		case 3:
+			return &m.IsDefault
+		case 4:
+			return &m.CreatedAt
+		case 5:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *MohClass, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Mode
+		case 3:
+			return m.IsDefault
+		case 4:
+			return m.CreatedAt
+		case 5:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &mohClassTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var mohClassTable = schema.Table{
+	Name: "moh_classes",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "mode",
+			Type:    "text",
+			Default: "'loop'::text",
+		},
+		{
+			Name:    "is_default",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "moh_classes_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name:   "moh_classes_one_default",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Expr: "true",
+				},
+			},
+			Where: "is_default",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "moh_classes_mode_check",
+			Expr: "\"mode\" IN ('loop','shuffle')",
+			In: &schema.CheckIn{
+				Column: "mode",
+				Values: []string{"loop", "shuffle"},
+			},
+		},
+		{
+			Name: "moh_classes_name_check",
+			Expr: "((char_length(name) >= 1) AND (char_length(name) <= 64))",
+		},
+	},
+}
+
+func (*MohClassTrack) MomoMeta() *momo.Meta[MohClassTrack] { return &mohClassTrackMeta }
+
+var mohClassTrackMeta = momo.Meta[MohClassTrack]{
+	Table: "moh_class_tracks",
+	Columns: []momo.ColumnMeta{
+		{Name: "class_id", Flags: momo.FlagPK},
+		{Name: "position", Flags: momo.FlagPK},
+		{Name: "announcement_id"},
+	},
+	Ptr: func(m *MohClassTrack, i int) any {
+		switch i {
+		case 0:
+			return &m.ClassID
+		case 1:
+			return &m.Position
+		case 2:
+			return &m.AnnouncementID
+		}
+		return nil
+	},
+	Value: func(m *MohClassTrack, i int) any {
+		switch i {
+		case 0:
+			return m.ClassID
+		case 1:
+			return m.Position
+		case 2:
+			return m.AnnouncementID
+		}
+		return nil
+	},
+	TableSchema: &mohClassTrackTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var mohClassTrackTable = schema.Table{
+	Name: "moh_class_tracks",
+	Columns: []schema.Column{
+		{
+			Name: "class_id",
+			Type: "bigint",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+		{
+			Name: "announcement_id",
+			Type: "bigint",
+		},
+	},
+	PrimaryKey: []string{"class_id", "position"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "moh_class_tracks_announcement_id_fkey",
+			Columns:    []string{"announcement_id"},
+			RefTable:   "announcements",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "moh_class_tracks_class_id_fkey",
+			Columns:    []string{"class_id"},
+			RefTable:   "moh_classes",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "moh_class_tracks_position_check",
+			Expr: "(\"position\" >= 0)",
+		},
+	},
+}
+
+func (*MsgAddress) MomoMeta() *momo.Meta[MsgAddress] { return &msgAddressMeta }
+
+var msgAddressMeta = momo.Meta[MsgAddress]{
+	Table: "msg_addresses",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "channel_id"},
+		{Name: "address"},
+		{Name: "address_key"},
+		{Name: "address_suffix", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "label", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "route_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "route_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "optout_keywords", Flags: momo.FlagDBDefault},
+		{Name: "help_text", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "optout_text", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "sends_per_minute", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "desk_phone_delivery", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "owner_extension_id", Flags: momo.FlagNullable},
+		{Name: "schedule", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "after_hours_action", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "after_hours_text", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "after_hours_route_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "after_hours_route_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "first_contact_text", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_mode", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_redact", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_disclosure", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_disclosure_text", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_holding_text", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_max_replies", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_hourly_cap", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_min_confidence", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_auto_intents", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_handoff_words", Flags: momo.FlagDBDefault},
+	},
+	Ptr: func(m *MsgAddress, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ChannelID
+		case 2:
+			return &m.Address
+		case 3:
+			return &m.AddressKey
+		case 4:
+			return &m.AddressSuffix
+		case 5:
+			return &m.Label
+		case 6:
+			return &m.RouteKind
+		case 7:
+			return &m.RouteTarget
+		case 8:
+			return &m.OptoutKeywords
+		case 9:
+			return &m.HelpText
+		case 10:
+			return &m.OptoutText
+		case 11:
+			return &m.Enabled
+		case 12:
+			return &m.CreatedAt
+		case 13:
+			return &m.SendsPerMinute
+		case 14:
+			return &m.DeskPhoneDelivery
+		case 15:
+			return &m.OwnerExtensionID
+		case 16:
+			return &m.Schedule
+		case 17:
+			return &m.AfterHoursAction
+		case 18:
+			return &m.AfterHoursText
+		case 19:
+			return &m.AfterHoursRouteKind
+		case 20:
+			return &m.AfterHoursRouteTarget
+		case 21:
+			return &m.FirstContactText
+		case 22:
+			return &m.AiMode
+		case 23:
+			return &m.AiRedact
+		case 24:
+			return &m.AiDisclosure
+		case 25:
+			return &m.AiDisclosureText
+		case 26:
+			return &m.AiHoldingText
+		case 27:
+			return &m.AiMaxReplies
+		case 28:
+			return &m.AiHourlyCap
+		case 29:
+			return &m.AiMinConfidence
+		case 30:
+			return &m.AiAutoIntents
+		case 31:
+			return &m.AiHandoffWords
+		}
+		return nil
+	},
+	Value: func(m *MsgAddress, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ChannelID
+		case 2:
+			return m.Address
+		case 3:
+			return m.AddressKey
+		case 4:
+			return m.AddressSuffix
+		case 5:
+			return m.Label
+		case 6:
+			return m.RouteKind
+		case 7:
+			return m.RouteTarget
+		case 8:
+			return m.OptoutKeywords
+		case 9:
+			return m.HelpText
+		case 10:
+			return m.OptoutText
+		case 11:
+			return m.Enabled
+		case 12:
+			return m.CreatedAt
+		case 13:
+			return m.SendsPerMinute
+		case 14:
+			return m.DeskPhoneDelivery
+		case 15:
+			return m.OwnerExtensionID
+		case 16:
+			return m.Schedule
+		case 17:
+			return m.AfterHoursAction
+		case 18:
+			return m.AfterHoursText
+		case 19:
+			return m.AfterHoursRouteKind
+		case 20:
+			return m.AfterHoursRouteTarget
+		case 21:
+			return m.FirstContactText
+		case 22:
+			return m.AiMode
+		case 23:
+			return m.AiRedact
+		case 24:
+			return m.AiDisclosure
+		case 25:
+			return m.AiDisclosureText
+		case 26:
+			return m.AiHoldingText
+		case 27:
+			return m.AiMaxReplies
+		case 28:
+			return m.AiHourlyCap
+		case 29:
+			return m.AiMinConfidence
+		case 30:
+			return m.AiAutoIntents
+		case 31:
+			return m.AiHandoffWords
+		}
+		return nil
+	},
+	TableSchema: &msgAddressTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var msgAddressTable = schema.Table{
+	Name: "msg_addresses",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "channel_id",
+			Type: "bigint",
+		},
+		{
+			Name: "address",
+			Type: "text",
+		},
+		{
+			Name: "address_key",
+			Type: "text",
+		},
+		{
+			Name:    "address_suffix",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "label",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "route_kind",
+			Type:    "text",
+			Default: "'inbox'::text",
+		},
+		{
+			Name:    "route_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "optout_keywords",
+			Type:    "text[]",
+			Default: "'{stop,stopall,unsubscribe,cancel,end,quit}'::text[]",
+		},
+		{
+			Name:    "help_text",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "optout_text",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "sends_per_minute",
+			Type:    "integer",
+			Default: "60",
+		},
+		{
+			Name:    "desk_phone_delivery",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "owner_extension_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "schedule",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "after_hours_action",
+			Type:    "text",
+			Default: "'none'::text",
+		},
+		{
+			Name:    "after_hours_text",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "after_hours_route_kind",
+			Type:    "text",
+			Default: "'inbox'::text",
+		},
+		{
+			Name:    "after_hours_route_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "first_contact_text",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "ai_mode",
+			Type:    "text",
+			Default: "'off'::text",
+		},
+		{
+			Name:    "ai_redact",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "ai_disclosure",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "ai_disclosure_text",
+			Type:    "text",
+			Default: "'This is an automated reply.'::text",
+		},
+		{
+			Name:    "ai_holding_text",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "ai_max_replies",
+			Type:    "integer",
+			Default: "3",
+		},
+		{
+			Name:    "ai_hourly_cap",
+			Type:    "integer",
+			Default: "60",
+		},
+		{
+			Name:    "ai_min_confidence",
+			Type:    "real",
+			Default: "0.8",
+		},
+		{
+			Name:    "ai_auto_intents",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:    "ai_handoff_words",
+			Type:    "text[]",
+			Default: "'{agent,human,person,representative}'::text[]",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "msg_addresses_channel_id_address_key_key",
+			Columns: []string{"channel_id", "address_key"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "msg_addresses_key",
+			Parts: []schema.IndexPart{
+				{
+					Column: "address_key",
+				},
+			},
+		},
+		{
+			Name: "msg_addresses_owner",
+			Parts: []schema.IndexPart{
+				{
+					Column: "owner_extension_id",
+				},
+			},
+			Where: "(owner_extension_id IS NOT NULL)",
+		},
+		{
+			Name: "msg_addresses_suffix",
+			Parts: []schema.IndexPart{
+				{
+					Column: "address_suffix",
+				},
+			},
+			Where: "(address_suffix <> ''::text)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "msg_addresses_channel_id_fkey",
+			Columns:    []string{"channel_id"},
+			RefTable:   "msg_channels",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "msg_addresses_owner_extension_id_fkey",
+			Columns:    []string{"owner_extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "msg_addresses_address_check",
+			Expr: "((length(address) >= 2) AND (length(address) <= 64))",
+		},
+		{
+			Name: "msg_addresses_after_hours_action_check",
+			Expr: "\"after_hours_action\" IN ('none','reply','route')",
+			In: &schema.CheckIn{
+				Column: "after_hours_action",
+				Values: []string{"none", "reply", "route"},
+			},
+		},
+		{
+			Name: "msg_addresses_after_hours_route_kind_check",
+			Expr: "\"after_hours_route_kind\" IN ('extension','inbox','queue','ring_group','user')",
+			In: &schema.CheckIn{
+				Column: "after_hours_route_kind",
+				Values: []string{"extension", "inbox", "queue", "ring_group", "user"},
+			},
+		},
+		{
+			Name: "msg_addresses_after_hours_text_check",
+			Expr: "(length(after_hours_text) <= 480)",
+		},
+		{
+			Name: "msg_addresses_ai_disclosure_text_check",
+			Expr: "(length(ai_disclosure_text) <= 160)",
+		},
+		{
+			Name: "msg_addresses_ai_holding_text_check",
+			Expr: "(length(ai_holding_text) <= 480)",
+		},
+		{
+			Name: "msg_addresses_ai_hourly_cap_check",
+			Expr: "((ai_hourly_cap >= 1) AND (ai_hourly_cap <= 1000))",
+		},
+		{
+			Name: "msg_addresses_ai_max_replies_check",
+			Expr: "((ai_max_replies >= 1) AND (ai_max_replies <= 10))",
+		},
+		{
+			Name: "msg_addresses_ai_min_confidence_check",
+			Expr: "((ai_min_confidence >= (0)::double precision) AND (ai_min_confidence <= (1)::double precision))",
+		},
+		{
+			Name: "msg_addresses_ai_mode_check",
+			Expr: "\"ai_mode\" IN ('auto','draft','off','triage')",
+			In: &schema.CheckIn{
+				Column: "ai_mode",
+				Values: []string{"auto", "draft", "off", "triage"},
+			},
+		},
+		{
+			Name: "msg_addresses_first_contact_text_check",
+			Expr: "(length(first_contact_text) <= 480)",
+		},
+		{
+			Name: "msg_addresses_help_text_check",
+			Expr: "(length(help_text) <= 480)",
+		},
+		{
+			Name: "msg_addresses_label_check",
+			Expr: "(length(label) <= 100)",
+		},
+		{
+			Name: "msg_addresses_optout_text_check",
+			Expr: "(length(optout_text) <= 480)",
+		},
+		{
+			Name: "msg_addresses_route_kind_check",
+			Expr: "\"route_kind\" IN ('ai_triage','extension','inbox','queue','ring_group','user')",
+			In: &schema.CheckIn{
+				Column: "route_kind",
+				Values: []string{"ai_triage", "extension", "inbox", "queue", "ring_group", "user"},
+			},
+		},
+		{
+			Name: "msg_addresses_sends_per_minute_check",
+			Expr: "((sends_per_minute >= 1) AND (sends_per_minute <= 600))",
+		},
+	},
+}
+
+func (*MsgAgentStat) MomoMeta() *momo.Meta[MsgAgentStat] { return &msgAgentStatMeta }
+
+var msgAgentStatMeta = momo.Meta[MsgAgentStat]{
+	Table: "msg_agent_stats",
+	Columns: []momo.ColumnMeta{
+		{Name: "user_id", Flags: momo.FlagPK},
+		{Name: "queue_id", Flags: momo.FlagPK},
+		{Name: "text_answered", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_end", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *MsgAgentStat, i int) any {
+		switch i {
+		case 0:
+			return &m.UserID
+		case 1:
+			return &m.QueueID
+		case 2:
+			return &m.TextAnswered
+		case 3:
+			return &m.LastEnd
+		}
+		return nil
+	},
+	Value: func(m *MsgAgentStat, i int) any {
+		switch i {
+		case 0:
+			return m.UserID
+		case 1:
+			return m.QueueID
+		case 2:
+			return m.TextAnswered
+		case 3:
+			return m.LastEnd
+		}
+		return nil
+	},
+	TableSchema: &msgAgentStatTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var msgAgentStatTable = schema.Table{
+	Name: "msg_agent_stats",
+	Columns: []schema.Column{
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name: "queue_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "text_answered",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:     "last_end",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"user_id", "queue_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "msg_agent_stats_queue_id_fkey",
+			Columns:    []string{"queue_id"},
+			RefTable:   "queues",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "msg_agent_stats_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*MsgChannel) MomoMeta() *momo.Meta[MsgChannel] { return &msgChannelMeta }
+
+var msgChannelMeta = momo.Meta[MsgChannel]{
+	Table: "msg_channels",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "kind"},
+		{Name: "provider"},
+		{Name: "name"},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "hook_id"},
+		{Name: "trunk_id", Flags: momo.FlagNullable},
+		{Name: "config", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "credentials_enc", Flags: momo.FlagNullable},
+		{Name: "credential_fp", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "status_detail", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_event_at", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "fail_streak", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ai_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *MsgChannel, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Kind
+		case 2:
+			return &m.Provider
+		case 3:
+			return &m.Name
+		case 4:
+			return &m.Enabled
+		case 5:
+			return &m.HookID
+		case 6:
+			return &m.TrunkID
+		case 7:
+			return &m.Config
+		case 8:
+			return &m.CredentialsEnc
+		case 9:
+			return &m.CredentialFp
+		case 10:
+			return &m.Status
+		case 11:
+			return &m.StatusDetail
+		case 12:
+			return &m.LastEventAt
+		case 13:
+			return &m.CreatedAt
+		case 14:
+			return &m.UpdatedAt
+		case 15:
+			return &m.FailStreak
+		case 16:
+			return &m.AiEnabled
+		}
+		return nil
+	},
+	Value: func(m *MsgChannel, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Kind
+		case 2:
+			return m.Provider
+		case 3:
+			return m.Name
+		case 4:
+			return m.Enabled
+		case 5:
+			return m.HookID
+		case 6:
+			return m.TrunkID
+		case 7:
+			return m.Config
+		case 8:
+			return m.CredentialsEnc
+		case 9:
+			return m.CredentialFp
+		case 10:
+			return m.Status
+		case 11:
+			return m.StatusDetail
+		case 12:
+			return m.LastEventAt
+		case 13:
+			return m.CreatedAt
+		case 14:
+			return m.UpdatedAt
+		case 15:
+			return m.FailStreak
+		case 16:
+			return m.AiEnabled
+		}
+		return nil
+	},
+	TableSchema: &msgChannelTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var msgChannelTable = schema.Table{
+	Name: "msg_channels",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "provider",
+			Type: "text",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name: "hook_id",
+			Type: "text",
+		},
+		{
+			Name:     "trunk_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "config",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:     "credentials_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "credential_fp",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'ok'::text",
+		},
+		{
+			Name:    "status_detail",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "last_event_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "fail_streak",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "ai_enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "msg_channels_hook_id_key",
+			Columns: []string{"hook_id"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name:   "msg_channels_name",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Expr: "lower(name)",
+				},
+			},
+		},
+		{
+			Name: "msg_channels_trunk",
+			Parts: []schema.IndexPart{
+				{
+					Column: "trunk_id",
+				},
+			},
+			Where: "(trunk_id IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "msg_channels_trunk_id_fkey",
+			Columns:    []string{"trunk_id"},
+			RefTable:   "trunks",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "msg_channels_kind_check",
+			Expr: "\"kind\" IN ('sms','webchat','whatsapp')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"sms", "webchat", "whatsapp"},
+			},
+		},
+		{
+			Name: "msg_channels_name_check",
+			Expr: "((length(name) >= 1) AND (length(name) <= 100))",
+		},
+		{
+			Name: "msg_channels_provider_check",
+			Expr: "((length(provider) >= 1) AND (length(provider) <= 32))",
+		},
+		{
+			Name: "msg_channels_status_check",
+			Expr: "\"status\" IN ('credentials_invalid','degraded','ok')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"credentials_invalid", "degraded", "ok"},
+			},
+		},
+	},
+}
+
+func (*MsgFaq) MomoMeta() *momo.Meta[MsgFaq] { return &msgFaqMeta }
+
+var msgFaqMeta = momo.Meta[MsgFaq]{
+	Table: "msg_faq",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "address_id"},
+		{Name: "title"},
+		{Name: "body"},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *MsgFaq, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.AddressID
+		case 2:
+			return &m.Title
+		case 3:
+			return &m.Body
+		case 4:
+			return &m.Enabled
+		case 5:
+			return &m.CreatedAt
+		case 6:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *MsgFaq, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.AddressID
+		case 2:
+			return m.Title
+		case 3:
+			return m.Body
+		case 4:
+			return m.Enabled
+		case 5:
+			return m.CreatedAt
+		case 6:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &msgFaqTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var msgFaqTable = schema.Table{
+	Name: "msg_faq",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "address_id",
+			Type: "bigint",
+		},
+		{
+			Name: "title",
+			Type: "text",
+		},
+		{
+			Name: "body",
+			Type: "text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "msg_faq_address",
+			Parts: []schema.IndexPart{
+				{
+					Column: "address_id",
+				},
+				{
+					Column: "id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "msg_faq_address_id_fkey",
+			Columns:    []string{"address_id"},
+			RefTable:   "msg_addresses",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "msg_faq_body_check",
+			Expr: "((length(body) >= 1) AND (length(body) <= 4096))",
+		},
+		{
+			Name: "msg_faq_title_check",
+			Expr: "((length(title) >= 1) AND (length(title) <= 200))",
+		},
+	},
+}
+
+func (*MsgProviderRedaction) MomoMeta() *momo.Meta[MsgProviderRedaction] {
+	return &msgProviderRedactionMeta
+}
+
+var msgProviderRedactionMeta = momo.Meta[MsgProviderRedaction]{
+	Table: "msg_provider_redactions",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "channel_id"},
+		{Name: "provider"},
+		{Name: "provider_message_id"},
+		{Name: "batch"},
+		{Name: "state", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "attempts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "next_attempt_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "claimed_until", Flags: momo.FlagNullable},
+		{Name: "last_error", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "finished_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *MsgProviderRedaction, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ChannelID
+		case 2:
+			return &m.Provider
+		case 3:
+			return &m.ProviderMessageID
+		case 4:
+			return &m.Batch
+		case 5:
+			return &m.State
+		case 6:
+			return &m.Attempts
+		case 7:
+			return &m.NextAttemptAt
+		case 8:
+			return &m.ClaimedUntil
+		case 9:
+			return &m.LastError
+		case 10:
+			return &m.CreatedAt
+		case 11:
+			return &m.FinishedAt
+		}
+		return nil
+	},
+	Value: func(m *MsgProviderRedaction, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ChannelID
+		case 2:
+			return m.Provider
+		case 3:
+			return m.ProviderMessageID
+		case 4:
+			return m.Batch
+		case 5:
+			return m.State
+		case 6:
+			return m.Attempts
+		case 7:
+			return m.NextAttemptAt
+		case 8:
+			return m.ClaimedUntil
+		case 9:
+			return m.LastError
+		case 10:
+			return m.CreatedAt
+		case 11:
+			return m.FinishedAt
+		}
+		return nil
+	},
+	TableSchema: &msgProviderRedactionTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var msgProviderRedactionTable = schema.Table{
+	Name: "msg_provider_redactions",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "channel_id",
+			Type: "bigint",
+		},
+		{
+			Name: "provider",
+			Type: "text",
+		},
+		{
+			Name: "provider_message_id",
+			Type: "text",
+		},
+		{
+			Name: "batch",
+			Type: "text",
+		},
+		{
+			Name:    "state",
+			Type:    "text",
+			Default: "'pending'::text",
+		},
+		{
+			Name:    "attempts",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "next_attempt_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "claimed_until",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "last_error",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "finished_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "msg_provider_redactions_channel_id_provider_message_id_key",
+			Columns: []string{"channel_id", "provider_message_id"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "msg_provider_redactions_batch",
+			Parts: []schema.IndexPart{
+				{
+					Column: "batch",
+				},
+			},
+		},
+		{
+			Name: "msg_provider_redactions_due",
+			Parts: []schema.IndexPart{
+				{
+					Column: "next_attempt_at",
+				},
+			},
+			Where: "(state = 'pending'::text)",
+		},
+		{
+			Name: "msg_provider_redactions_finished",
+			Parts: []schema.IndexPart{
+				{
+					Column: "finished_at",
+				},
+			},
+			Where: "(finished_at IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "msg_provider_redactions_channel_id_fkey",
+			Columns:    []string{"channel_id"},
+			RefTable:   "msg_channels",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "msg_provider_redactions_last_error_check",
+			Expr: "(length(last_error) <= 200)",
+		},
+		{
+			Name: "msg_provider_redactions_provider_check",
+			Expr: "((length(provider) >= 1) AND (length(provider) <= 32))",
+		},
+		{
+			Name: "msg_provider_redactions_provider_message_id_check",
+			Expr: "((length(provider_message_id) >= 1) AND (length(provider_message_id) <= 128))",
+		},
+		{
+			Name: "msg_provider_redactions_state_check",
+			Expr: "\"state\" IN ('done','failed','pending','unsupported')",
+			In: &schema.CheckIn{
+				Column: "state",
+				Values: []string{"done", "failed", "pending", "unsupported"},
+			},
+		},
+	},
+}
+
+func (*MsgQueueRr) MomoMeta() *momo.Meta[MsgQueueRr] { return &msgQueueRrMeta }
+
+var msgQueueRrMeta = momo.Meta[MsgQueueRr]{
+	Table: "msg_queue_rr",
+	Columns: []momo.ColumnMeta{
+		{Name: "queue_id", Flags: momo.FlagPK},
+		{Name: "rr", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *MsgQueueRr, i int) any {
+		switch i {
+		case 0:
+			return &m.QueueID
+		case 1:
+			return &m.Rr
+		}
+		return nil
+	},
+	Value: func(m *MsgQueueRr, i int) any {
+		switch i {
+		case 0:
+			return m.QueueID
+		case 1:
+			return m.Rr
+		}
+		return nil
+	},
+	TableSchema: &msgQueueRrTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var msgQueueRrTable = schema.Table{
+	Name: "msg_queue_rr",
+	Columns: []schema.Column{
+		{
+			Name: "queue_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "rr",
+			Type:    "bigint",
+			Default: "0",
+		},
+	},
+	PrimaryKey: []string{"queue_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "msg_queue_rr_queue_id_fkey",
+			Columns:    []string{"queue_id"},
+			RefTable:   "queues",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*MulticastChannel) MomoMeta() *momo.Meta[MulticastChannel] { return &multicastChannelMeta }
+
+var multicastChannelMeta = momo.Meta[MulticastChannel]{
+	Table: "multicast_channels",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "group_id", Flags: momo.FlagNullable},
+		{Name: "position", Flags: momo.FlagNullable},
+		{Name: "label"},
+		{Name: "address"},
+		{Name: "port"},
+		{Name: "codec"},
+		{Name: "role", Flags: momo.FlagNullable},
+		{Name: "priority", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *MulticastChannel, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.GroupID
+		case 2:
+			return &m.Position
+		case 3:
+			return &m.Label
+		case 4:
+			return &m.Address
+		case 5:
+			return &m.Port
+		case 6:
+			return &m.Codec
+		case 7:
+			return &m.Role
+		case 8:
+			return &m.Priority
+		case 9:
+			return &m.Enabled
+		case 10:
+			return &m.Kind
+		}
+		return nil
+	},
+	Value: func(m *MulticastChannel, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.GroupID
+		case 2:
+			return m.Position
+		case 3:
+			return m.Label
+		case 4:
+			return m.Address
+		case 5:
+			return m.Port
+		case 6:
+			return m.Codec
+		case 7:
+			return m.Role
+		case 8:
+			return m.Priority
+		case 9:
+			return m.Enabled
+		case 10:
+			return m.Kind
+		}
+		return nil
+	},
+	TableSchema: &multicastChannelTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var multicastChannelTable = schema.Table{
+	Name: "multicast_channels",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name:     "group_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "position",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name: "label",
+			Type: "text",
+		},
+		{
+			Name: "address",
+			Type: "text",
+		},
+		{
+			Name: "port",
+			Type: "integer",
+		},
+		{
+			Name: "codec",
+			Type: "text",
+		},
+		{
+			Name:     "role",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "priority",
+			Type:    "integer",
+			Default: "1",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "kind",
+			Type:    "text",
+			Default: "'paging'::text",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "multicast_channels_group_id_position_key",
+			Columns: []string{"group_id", "position"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "multicast_channels_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "phone_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "multicast_channels_codec_check",
+			Expr: "\"codec\" IN ('G722','PCMA','PCMU')",
+			In: &schema.CheckIn{
+				Column: "codec",
+				Values: []string{"G722", "PCMA", "PCMU"},
+			},
+		},
+		{
+			Name: "multicast_channels_kind_check",
+			Expr: "\"kind\" IN ('paging','ptt')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"paging", "ptt"},
+			},
+		},
+		{
+			Name: "multicast_channels_label_check",
+			Expr: "((char_length(label) >= 1) AND (char_length(label) <= 40))",
+		},
+		{
+			Name: "multicast_channels_port_check",
+			Expr: "((port >= 1024) AND (port <= 65535))",
+		},
+		{
+			Name: "multicast_channels_position_check",
+			Expr: "(\"position\" >= 0)",
+		},
+		{
+			Name: "multicast_channels_priority_check",
+			Expr: "((priority >= 1) AND (priority <= 25))",
+		},
+		{
+			Name: "multicast_channels_role_check",
+			Expr: "\"role\" IN ('both','listen','send')",
+			In: &schema.CheckIn{
+				Column: "role",
+				Values: []string{"both", "listen", "send"},
+			},
+		},
+	},
+}
+
+func (*OauthClient) MomoMeta() *momo.Meta[OauthClient] { return &oauthClientMeta }
+
+var oauthClientMeta = momo.Meta[OauthClient]{
+	Table: "oauth_clients",
+	Columns: []momo.ColumnMeta{
+		{Name: "client_id", Flags: momo.FlagPK},
+		{Name: "kind"},
+		{Name: "name"},
+		{Name: "client_uri", Flags: momo.FlagNullable},
+		{Name: "redirect_uris", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "metadata", Flags: momo.FlagNullable},
+		{Name: "fetched_at", Flags: momo.FlagNullable},
+		{Name: "cache_until", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_used_at", Flags: momo.FlagNullable},
+		{Name: "description", Flags: momo.FlagNullable},
+		{Name: "role", Flags: momo.FlagNullable},
+		{Name: "scopes", Flags: momo.FlagNullable},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_by", Flags: momo.FlagNullable},
+		{Name: "extension_scope", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *OauthClient, i int) any {
+		switch i {
+		case 0:
+			return &m.ClientID
+		case 1:
+			return &m.Kind
+		case 2:
+			return &m.Name
+		case 3:
+			return &m.ClientURI
+		case 4:
+			return &m.RedirectURIs
+		case 5:
+			return &m.Metadata
+		case 6:
+			return &m.FetchedAt
+		case 7:
+			return &m.CacheUntil
+		case 8:
+			return &m.CreatedAt
+		case 9:
+			return &m.LastUsedAt
+		case 10:
+			return &m.Description
+		case 11:
+			return &m.Role
+		case 12:
+			return &m.Scopes
+		case 13:
+			return &m.Enabled
+		case 14:
+			return &m.CreatedBy
+		case 15:
+			return &m.ExtensionScope
+		}
+		return nil
+	},
+	Value: func(m *OauthClient, i int) any {
+		switch i {
+		case 0:
+			return m.ClientID
+		case 1:
+			return m.Kind
+		case 2:
+			return m.Name
+		case 3:
+			return m.ClientURI
+		case 4:
+			return m.RedirectURIs
+		case 5:
+			return m.Metadata
+		case 6:
+			return m.FetchedAt
+		case 7:
+			return m.CacheUntil
+		case 8:
+			return m.CreatedAt
+		case 9:
+			return m.LastUsedAt
+		case 10:
+			return m.Description
+		case 11:
+			return m.Role
+		case 12:
+			return m.Scopes
+		case 13:
+			return m.Enabled
+		case 14:
+			return m.CreatedBy
+		case 15:
+			return m.ExtensionScope
+		}
+		return nil
+	},
+	TableSchema: &oauthClientTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var oauthClientTable = schema.Table{
+	Name: "oauth_clients",
+	Columns: []schema.Column{
+		{
+			Name: "client_id",
+			Type: "text",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:     "client_uri",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "redirect_uris",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:     "metadata",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:     "fetched_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "cache_until",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "last_used_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "description",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "role",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "scopes",
+			Type:     "text[]",
+			Nullable: true,
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:     "created_by",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "extension_scope",
+			Type:     "text[]",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"client_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "oauth_clients_created_by_fkey",
+			Columns:    []string{"created_by"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "oauth_clients_check",
+			Expr: "((kind <> 'service'::text) OR ((role IS NOT NULL) AND (scopes IS NOT NULL)))",
+		},
+		{
+			Name: "oauth_clients_kind_check",
+			Expr: "\"kind\" IN ('cimd','dcr','preregistered','service')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"cimd", "dcr", "preregistered", "service"},
+			},
+		},
+		{
+			Name: "oauth_clients_role_check",
+			Expr: "\"role\" IN ('admin','operator','viewer')",
+			In: &schema.CheckIn{
+				Column: "role",
+				Values: []string{"admin", "operator", "viewer"},
+			},
+		},
+	},
+}
+
+func (*OauthClientSecret) MomoMeta() *momo.Meta[OauthClientSecret] { return &oauthClientSecretMeta }
+
+var oauthClientSecretMeta = momo.Meta[OauthClientSecret]{
+	Table: "oauth_client_secrets",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "client_id"},
+		{Name: "secret_hash"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "expires_at", Flags: momo.FlagNullable},
+		{Name: "revoked_at", Flags: momo.FlagNullable},
+		{Name: "last_used_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *OauthClientSecret, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ClientID
+		case 2:
+			return &m.SecretHash
+		case 3:
+			return &m.CreatedAt
+		case 4:
+			return &m.ExpiresAt
+		case 5:
+			return &m.RevokedAt
+		case 6:
+			return &m.LastUsedAt
+		}
+		return nil
+	},
+	Value: func(m *OauthClientSecret, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ClientID
+		case 2:
+			return m.SecretHash
+		case 3:
+			return m.CreatedAt
+		case 4:
+			return m.ExpiresAt
+		case 5:
+			return m.RevokedAt
+		case 6:
+			return m.LastUsedAt
+		}
+		return nil
+	},
+	TableSchema: &oauthClientSecretTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var oauthClientSecretTable = schema.Table{
+	Name: "oauth_client_secrets",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "client_id",
+			Type: "text",
+		},
+		{
+			Name: "secret_hash",
+			Type: "bytea",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "expires_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "revoked_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "last_used_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "oauth_client_secrets_secret_hash_key",
+			Columns: []string{"secret_hash"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "oauth_client_secrets_client",
+			Parts: []schema.IndexPart{
+				{
+					Column: "client_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "oauth_client_secrets_client_id_fkey",
+			Columns:    []string{"client_id"},
+			RefTable:   "oauth_clients",
+			RefColumns: []string{"client_id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*OauthGrant) MomoMeta() *momo.Meta[OauthGrant] { return &oauthGrantMeta }
+
+var oauthGrantMeta = momo.Meta[OauthGrant]{
+	Table: "oauth_grants",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "user_id"},
+		{Name: "client_id"},
+		{Name: "scopes"},
+		{Name: "resources"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_used_at", Flags: momo.FlagNullable},
+		{Name: "revoked_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *OauthGrant, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.UserID
+		case 2:
+			return &m.ClientID
+		case 3:
+			return &m.Scopes
+		case 4:
+			return &m.Resources
+		case 5:
+			return &m.CreatedAt
+		case 6:
+			return &m.LastUsedAt
+		case 7:
+			return &m.RevokedAt
+		}
+		return nil
+	},
+	Value: func(m *OauthGrant, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.UserID
+		case 2:
+			return m.ClientID
+		case 3:
+			return m.Scopes
+		case 4:
+			return m.Resources
+		case 5:
+			return m.CreatedAt
+		case 6:
+			return m.LastUsedAt
+		case 7:
+			return m.RevokedAt
+		}
+		return nil
+	},
+	TableSchema: &oauthGrantTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var oauthGrantTable = schema.Table{
+	Name: "oauth_grants",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name: "client_id",
+			Type: "text",
+		},
+		{
+			Name: "scopes",
+			Type: "text[]",
+		},
+		{
+			Name: "resources",
+			Type: "text[]",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "last_used_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "revoked_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "oauth_grants_user",
+			Parts: []schema.IndexPart{
+				{
+					Column: "user_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "oauth_grants_client_id_fkey",
+			Columns:    []string{"client_id"},
+			RefTable:   "oauth_clients",
+			RefColumns: []string{"client_id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "oauth_grants_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*OauthRequest) MomoMeta() *momo.Meta[OauthRequest] { return &oauthRequestMeta }
+
+var oauthRequestMeta = momo.Meta[OauthRequest]{
+	Table: "oauth_requests",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK},
+		{Name: "client_id"},
+		{Name: "redirect_uri"},
+		{Name: "state", Flags: momo.FlagNullable},
+		{Name: "code_challenge"},
+		{Name: "scopes"},
+		{Name: "resources"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "expires_at"},
+		{Name: "user_id", Flags: momo.FlagNullable},
+		{Name: "code_hash", Flags: momo.FlagNullable},
+		{Name: "code_expires_at", Flags: momo.FlagNullable},
+		{Name: "code_used_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *OauthRequest, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ClientID
+		case 2:
+			return &m.RedirectURI
+		case 3:
+			return &m.State
+		case 4:
+			return &m.CodeChallenge
+		case 5:
+			return &m.Scopes
+		case 6:
+			return &m.Resources
+		case 7:
+			return &m.CreatedAt
+		case 8:
+			return &m.ExpiresAt
+		case 9:
+			return &m.UserID
+		case 10:
+			return &m.CodeHash
+		case 11:
+			return &m.CodeExpiresAt
+		case 12:
+			return &m.CodeUsedAt
+		}
+		return nil
+	},
+	Value: func(m *OauthRequest, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ClientID
+		case 2:
+			return m.RedirectURI
+		case 3:
+			return m.State
+		case 4:
+			return m.CodeChallenge
+		case 5:
+			return m.Scopes
+		case 6:
+			return m.Resources
+		case 7:
+			return m.CreatedAt
+		case 8:
+			return m.ExpiresAt
+		case 9:
+			return m.UserID
+		case 10:
+			return m.CodeHash
+		case 11:
+			return m.CodeExpiresAt
+		case 12:
+			return m.CodeUsedAt
+		}
+		return nil
+	},
+	TableSchema: &oauthRequestTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var oauthRequestTable = schema.Table{
+	Name: "oauth_requests",
+	Columns: []schema.Column{
+		{
+			Name: "id",
+			Type: "text",
+		},
+		{
+			Name: "client_id",
+			Type: "text",
+		},
+		{
+			Name: "redirect_uri",
+			Type: "text",
+		},
+		{
+			Name:     "state",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name: "code_challenge",
+			Type: "text",
+		},
+		{
+			Name: "scopes",
+			Type: "text[]",
+		},
+		{
+			Name: "resources",
+			Type: "text[]",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name: "expires_at",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:     "user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "code_hash",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:     "code_expires_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "code_used_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "oauth_requests_code_hash_key",
+			Columns: []string{"code_hash"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "oauth_requests_expires",
+			Parts: []schema.IndexPart{
+				{
+					Column: "expires_at",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "oauth_requests_client_id_fkey",
+			Columns:    []string{"client_id"},
+			RefTable:   "oauth_clients",
+			RefColumns: []string{"client_id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "oauth_requests_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*OauthToken) MomoMeta() *momo.Meta[OauthToken] { return &oauthTokenMeta }
+
+var oauthTokenMeta = momo.Meta[OauthToken]{
+	Table: "oauth_tokens",
+	Columns: []momo.ColumnMeta{
+		{Name: "hash", Flags: momo.FlagPK},
+		{Name: "kind"},
+		{Name: "grant_id", Flags: momo.FlagNullable},
+		{Name: "client_id"},
+		{Name: "user_id", Flags: momo.FlagNullable},
+		{Name: "scopes"},
+		{Name: "resources"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "expires_at"},
+		{Name: "spent_at", Flags: momo.FlagNullable},
+		{Name: "revoked_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *OauthToken, i int) any {
+		switch i {
+		case 0:
+			return &m.Hash
+		case 1:
+			return &m.Kind
+		case 2:
+			return &m.GrantID
+		case 3:
+			return &m.ClientID
+		case 4:
+			return &m.UserID
+		case 5:
+			return &m.Scopes
+		case 6:
+			return &m.Resources
+		case 7:
+			return &m.CreatedAt
+		case 8:
+			return &m.ExpiresAt
+		case 9:
+			return &m.SpentAt
+		case 10:
+			return &m.RevokedAt
+		}
+		return nil
+	},
+	Value: func(m *OauthToken, i int) any {
+		switch i {
+		case 0:
+			return m.Hash
+		case 1:
+			return m.Kind
+		case 2:
+			return m.GrantID
+		case 3:
+			return m.ClientID
+		case 4:
+			return m.UserID
+		case 5:
+			return m.Scopes
+		case 6:
+			return m.Resources
+		case 7:
+			return m.CreatedAt
+		case 8:
+			return m.ExpiresAt
+		case 9:
+			return m.SpentAt
+		case 10:
+			return m.RevokedAt
+		}
+		return nil
+	},
+	TableSchema: &oauthTokenTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var oauthTokenTable = schema.Table{
+	Name: "oauth_tokens",
+	Columns: []schema.Column{
+		{
+			Name: "hash",
+			Type: "bytea",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name:     "grant_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name: "client_id",
+			Type: "text",
+		},
+		{
+			Name:     "user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name: "scopes",
+			Type: "text[]",
+		},
+		{
+			Name: "resources",
+			Type: "text[]",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name: "expires_at",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:     "spent_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "revoked_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"hash"},
+	Indexes: []schema.Index{
+		{
+			Name: "oauth_tokens_expires",
+			Parts: []schema.IndexPart{
+				{
+					Column: "expires_at",
+				},
+			},
+		},
+		{
+			Name: "oauth_tokens_grant",
+			Parts: []schema.IndexPart{
+				{
+					Column: "grant_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "oauth_tokens_client_id_fkey",
+			Columns:    []string{"client_id"},
+			RefTable:   "oauth_clients",
+			RefColumns: []string{"client_id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "oauth_tokens_grant_id_fkey",
+			Columns:    []string{"grant_id"},
+			RefTable:   "oauth_grants",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "oauth_tokens_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "oauth_tokens_kind_check",
+			Expr: "\"kind\" IN ('access','refresh')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"access", "refresh"},
+			},
+		},
+	},
+}
+
+func (*OnboardingCandidate) MomoMeta() *momo.Meta[OnboardingCandidate] {
+	return &onboardingCandidateMeta
+}
+
+var onboardingCandidateMeta = momo.Meta[OnboardingCandidate]{
+	Table: "onboarding_candidates",
+	Columns: []momo.ColumnMeta{
+		{Name: "mac", Flags: momo.FlagPK},
+		{Name: "vendor", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "model", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "firmware", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "source_ip", Flags: momo.FlagNullable},
+		{Name: "requested_path", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "first_seen", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_seen", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "request_count", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *OnboardingCandidate, i int) any {
+		switch i {
+		case 0:
+			return &m.Mac
+		case 1:
+			return &m.Vendor
+		case 2:
+			return &m.Model2
+		case 3:
+			return &m.Firmware
+		case 4:
+			return &m.SourceIP
+		case 5:
+			return &m.RequestedPath
+		case 6:
+			return &m.FirstSeen
+		case 7:
+			return &m.LastSeen
+		case 8:
+			return &m.RequestCount
+		}
+		return nil
+	},
+	Value: func(m *OnboardingCandidate, i int) any {
+		switch i {
+		case 0:
+			return m.Mac
+		case 1:
+			return m.Vendor
+		case 2:
+			return m.Model2
+		case 3:
+			return m.Firmware
+		case 4:
+			return m.SourceIP
+		case 5:
+			return m.RequestedPath
+		case 6:
+			return m.FirstSeen
+		case 7:
+			return m.LastSeen
+		case 8:
+			return m.RequestCount
+		}
+		return nil
+	},
+	TableSchema: &onboardingCandidateTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var onboardingCandidateTable = schema.Table{
+	Name: "onboarding_candidates",
+	Columns: []schema.Column{
+		{
+			Name: "mac",
+			Type: "text",
+		},
+		{
+			Name:    "vendor",
+			Type:    "text",
+			Default: "'generic'::text",
+		},
+		{
+			Name:    "model",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "firmware",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "source_ip",
+			Type:     "inet",
+			Nullable: true,
+		},
+		{
+			Name:    "requested_path",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "first_seen",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "last_seen",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "request_count",
+			Type:    "bigint",
+			Default: "1",
+		},
+	},
+	PrimaryKey: []string{"mac"},
+	Indexes: []schema.Index{
+		{
+			Name: "onboarding_candidates_last_seen",
+			Parts: []schema.IndexPart{
+				{
+					Column: "last_seen",
+				},
+			},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "onboarding_candidates_firmware_check",
+			Expr: "(char_length(firmware) <= 64)",
+		},
+		{
+			Name: "onboarding_candidates_mac_check",
+			Expr: "(mac ~ '^[0-9a-f]{12}$'::text)",
+		},
+		{
+			Name: "onboarding_candidates_model_check",
+			Expr: "(char_length(model) <= 64)",
+		},
+		{
+			Name: "onboarding_candidates_request_count_check",
+			Expr: "(request_count >= 1)",
+		},
+		{
+			Name: "onboarding_candidates_requested_path_check",
+			Expr: "(char_length(requested_path) <= 256)",
+		},
+		{
+			Name: "onboarding_candidates_vendor_check",
+			Expr: "\"vendor\" IN ('fanvil','generic','grandstream','poly','snom','yealink')",
+			In: &schema.CheckIn{
+				Column: "vendor",
+				Values: []string{"fanvil", "generic", "grandstream", "poly", "snom", "yealink"},
+			},
+		},
+	},
+}
+
+func (*OnboardingIgnored) MomoMeta() *momo.Meta[OnboardingIgnored] { return &onboardingIgnoredMeta }
+
+var onboardingIgnoredMeta = momo.Meta[OnboardingIgnored]{
+	Table: "onboarding_ignored",
+	Columns: []momo.ColumnMeta{
+		{Name: "mac", Flags: momo.FlagPK},
+		{Name: "vendor", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "model", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *OnboardingIgnored, i int) any {
+		switch i {
+		case 0:
+			return &m.Mac
+		case 1:
+			return &m.Vendor
+		case 2:
+			return &m.Model2
+		case 3:
+			return &m.CreatedBy
+		case 4:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *OnboardingIgnored, i int) any {
+		switch i {
+		case 0:
+			return m.Mac
+		case 1:
+			return m.Vendor
+		case 2:
+			return m.Model2
+		case 3:
+			return m.CreatedBy
+		case 4:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &onboardingIgnoredTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var onboardingIgnoredTable = schema.Table{
+	Name: "onboarding_ignored",
+	Columns: []schema.Column{
+		{
+			Name: "mac",
+			Type: "text",
+		},
+		{
+			Name:    "vendor",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "model",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"mac"},
+	Checks: []schema.Check{
+		{
+			Name: "onboarding_ignored_mac_check",
+			Expr: "(mac ~ '^[0-9a-f]{12}$'::text)",
+		},
+	},
+}
+
+func (*OriginateRequest) MomoMeta() *momo.Meta[OriginateRequest] { return &originateRequestMeta }
+
+var originateRequestMeta = momo.Meta[OriginateRequest]{
+	Table: "originate_requests",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK},
+		{Name: "idempotency_key", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "extension_number"},
+		{Name: "destination"},
+		{Name: "caller_id", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "client", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "actor", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "state", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "reason", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "cdr_correlation_id", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *OriginateRequest, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.IdempotencyKey
+		case 2:
+			return &m.ExtensionNumber
+		case 3:
+			return &m.Destination
+		case 4:
+			return &m.CallerID
+		case 5:
+			return &m.Client
+		case 6:
+			return &m.Actor
+		case 7:
+			return &m.State
+		case 8:
+			return &m.Reason
+		case 9:
+			return &m.CdrCorrelationID
+		case 10:
+			return &m.CreatedAt
+		case 11:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *OriginateRequest, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.IdempotencyKey
+		case 2:
+			return m.ExtensionNumber
+		case 3:
+			return m.Destination
+		case 4:
+			return m.CallerID
+		case 5:
+			return m.Client
+		case 6:
+			return m.Actor
+		case 7:
+			return m.State
+		case 8:
+			return m.Reason
+		case 9:
+			return m.CdrCorrelationID
+		case 10:
+			return m.CreatedAt
+		case 11:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &originateRequestTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var originateRequestTable = schema.Table{
+	Name: "originate_requests",
+	Columns: []schema.Column{
+		{
+			Name: "id",
+			Type: "text",
+		},
+		{
+			Name:    "idempotency_key",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name: "extension_number",
+			Type: "text",
+		},
+		{
+			Name: "destination",
+			Type: "text",
+		},
+		{
+			Name:    "caller_id",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "client",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "actor",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "state",
+			Type:    "text",
+			Default: "'queued'::text",
+		},
+		{
+			Name:    "reason",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "cdr_correlation_id",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "originate_requests_created",
+			Parts: []schema.IndexPart{
+				{
+					Column: "created_at",
+				},
+			},
+		},
+		{
+			Name: "originate_requests_open",
+			Parts: []schema.IndexPart{
+				{
+					Column: "updated_at",
+				},
+			},
+			Where: "(state <> ALL (ARRAY['ended'::text, 'failed'::text]))",
+		},
+	},
+}
+
+func (*OriginateSetting) MomoMeta() *momo.Meta[OriginateSetting] { return &originateSettingMeta }
+
+var originateSettingMeta = momo.Meta[OriginateSetting]{
+	Table: "originate_settings",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "destinations", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "country_prefixes", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "auto_answer_allowed", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *OriginateSetting, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Destinations
+		case 2:
+			return &m.CountryPrefixes
+		case 3:
+			return &m.AutoAnswerAllowed
+		}
+		return nil
+	},
+	Value: func(m *OriginateSetting, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Destinations
+		case 2:
+			return m.CountryPrefixes
+		case 3:
+			return m.AutoAnswerAllowed
+		}
+		return nil
+	},
+	TableSchema: &originateSettingTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var originateSettingTable = schema.Table{
+	Name: "originate_settings",
+	Columns: []schema.Column{
+		{
+			Name:    "id",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "destinations",
+			Type:    "text",
+			Default: "'inherit'::text",
+		},
+		{
+			Name:    "country_prefixes",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:    "auto_answer_allowed",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Checks: []schema.Check{
+		{
+			Name: "originate_settings_destinations_check",
+			Expr: "\"destinations\" IN ('inherit','restricted')",
+			In: &schema.CheckIn{
+				Column: "destinations",
+				Values: []string{"inherit", "restricted"},
+			},
+		},
+		{
+			Name: "originate_settings_id_check",
+			Expr: "id",
+		},
+	},
+}
+
+func (*OutboundRoute) MomoMeta() *momo.Meta[OutboundRoute] { return &outboundRouteMeta }
+
+var outboundRouteMeta = momo.Meta[OutboundRoute]{
+	Table: "outbound_routes",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "position"},
+		{Name: "name"},
+		{Name: "match_kind"},
+		{Name: "match"},
+		{Name: "source_extensions", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "schedule", Flags: momo.FlagNullable},
+		{Name: "number_transform", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "callerid_transform", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "failover_codes", Flags: momo.FlagDBDefault},
+		{Name: "emergency", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *OutboundRoute, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Position
+		case 2:
+			return &m.Name
+		case 3:
+			return &m.MatchKind
+		case 4:
+			return &m.Match
+		case 5:
+			return &m.SourceExtensions
+		case 6:
+			return &m.Schedule
+		case 7:
+			return &m.NumberTransform
+		case 8:
+			return &m.CalleridTransform
+		case 9:
+			return &m.FailoverCodes
+		case 10:
+			return &m.Emergency
+		case 11:
+			return &m.Enabled
+		}
+		return nil
+	},
+	Value: func(m *OutboundRoute, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Position
+		case 2:
+			return m.Name
+		case 3:
+			return m.MatchKind
+		case 4:
+			return m.Match
+		case 5:
+			return m.SourceExtensions
+		case 6:
+			return m.Schedule
+		case 7:
+			return m.NumberTransform
+		case 8:
+			return m.CalleridTransform
+		case 9:
+			return m.FailoverCodes
+		case 10:
+			return m.Emergency
+		case 11:
+			return m.Enabled
+		}
+		return nil
+	},
+	TableSchema: &outboundRouteTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var outboundRouteTable = schema.Table{
+	Name: "outbound_routes",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "match_kind",
+			Type: "text",
+		},
+		{
+			Name: "match",
+			Type: "text",
+		},
+		{
+			Name:    "source_extensions",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:     "schedule",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:    "number_transform",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "callerid_transform",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "failover_codes",
+			Type:    "integer[]",
+			Default: "'{408,480,500,502,503,504}'::integer[]",
+		},
+		{
+			Name:    "emergency",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "outbound_routes_position",
+			Columns: []string{"position"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "outbound_routes_match_check",
+			Expr: "(length(match) <= 500)",
+		},
+		{
+			Name: "outbound_routes_match_kind_check",
+			Expr: "\"match_kind\" IN ('prefix','regex')",
+			In: &schema.CheckIn{
+				Column: "match_kind",
+				Values: []string{"prefix", "regex"},
+			},
+		},
+	},
+}
+
+func (*OutboundRouteTrunk) MomoMeta() *momo.Meta[OutboundRouteTrunk] { return &outboundRouteTrunkMeta }
+
+var outboundRouteTrunkMeta = momo.Meta[OutboundRouteTrunk]{
+	Table: "outbound_route_trunks",
+	Columns: []momo.ColumnMeta{
+		{Name: "route_id", Flags: momo.FlagPK},
+		{Name: "trunk_id"},
+		{Name: "position", Flags: momo.FlagPK},
+	},
+	Ptr: func(m *OutboundRouteTrunk, i int) any {
+		switch i {
+		case 0:
+			return &m.RouteID
+		case 1:
+			return &m.TrunkID
+		case 2:
+			return &m.Position
+		}
+		return nil
+	},
+	Value: func(m *OutboundRouteTrunk, i int) any {
+		switch i {
+		case 0:
+			return m.RouteID
+		case 1:
+			return m.TrunkID
+		case 2:
+			return m.Position
+		}
+		return nil
+	},
+	TableSchema: &outboundRouteTrunkTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 2},
+}
+
+var outboundRouteTrunkTable = schema.Table{
+	Name: "outbound_route_trunks",
+	Columns: []schema.Column{
+		{
+			Name: "route_id",
+			Type: "bigint",
+		},
+		{
+			Name: "trunk_id",
+			Type: "bigint",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+	},
+	PrimaryKey: []string{"route_id", "position"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "outbound_route_trunks_route_id_trunk_id_key",
+			Columns: []string{"route_id", "trunk_id"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "outbound_route_trunks_route_id_fkey",
+			Columns:    []string{"route_id"},
+			RefTable:   "outbound_routes",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "outbound_route_trunks_trunk_id_fkey",
+			Columns:    []string{"trunk_id"},
+			RefTable:   "trunks",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	},
+}
+
+func (*PagingGroup) MomoMeta() *momo.Meta[PagingGroup] { return &pagingGroupMeta }
+
+var pagingGroupMeta = momo.Meta[PagingGroup]{
+	Table: "paging_groups",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "code"},
+		{Name: "priority", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "multicast_channel_id", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *PagingGroup, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Code
+		case 3:
+			return &m.Priority
+		case 4:
+			return &m.Enabled
+		case 5:
+			return &m.CreatedAt
+		case 6:
+			return &m.UpdatedAt
+		case 7:
+			return &m.MulticastChannelID
+		}
+		return nil
+	},
+	Value: func(m *PagingGroup, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Code
+		case 3:
+			return m.Priority
+		case 4:
+			return m.Enabled
+		case 5:
+			return m.CreatedAt
+		case 6:
+			return m.UpdatedAt
+		case 7:
+			return m.MulticastChannelID
+		}
+		return nil
+	},
+	TableSchema: &pagingGroupTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var pagingGroupTable = schema.Table{
+	Name: "paging_groups",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "code",
+			Type: "text",
+		},
+		{
+			Name:    "priority",
+			Type:    "text",
+			Default: "'normal'::text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "multicast_channel_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "paging_groups_code_key",
+			Columns: []string{"code"},
+		},
+		{
+			Name:    "paging_groups_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "paging_groups_multicast_channel_id_fkey",
+			Columns:    []string{"multicast_channel_id"},
+			RefTable:   "multicast_channels",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "paging_groups_code_check",
+			Expr: "(code ~ '^\\*[0-9]{2,4}$'::text)",
+		},
+		{
+			Name: "paging_groups_name_check",
+			Expr: "((length(name) >= 1) AND (length(name) <= 64))",
+		},
+		{
+			Name: "paging_groups_priority_check",
+			Expr: "\"priority\" IN ('emergency','normal')",
+			In: &schema.CheckIn{
+				Column: "priority",
+				Values: []string{"emergency", "normal"},
+			},
+		},
+	},
+}
+
+func (*PagingGroupCaller) MomoMeta() *momo.Meta[PagingGroupCaller] { return &pagingGroupCallerMeta }
+
+var pagingGroupCallerMeta = momo.Meta[PagingGroupCaller]{
+	Table: "paging_group_callers",
+	Columns: []momo.ColumnMeta{
+		{Name: "group_id", Flags: momo.FlagPK},
+		{Name: "extension_id", Flags: momo.FlagPK},
+	},
+	Ptr: func(m *PagingGroupCaller, i int) any {
+		switch i {
+		case 0:
+			return &m.GroupID
+		case 1:
+			return &m.ExtensionID
+		}
+		return nil
+	},
+	Value: func(m *PagingGroupCaller, i int) any {
+		switch i {
+		case 0:
+			return m.GroupID
+		case 1:
+			return m.ExtensionID
+		}
+		return nil
+	},
+	TableSchema: &pagingGroupCallerTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var pagingGroupCallerTable = schema.Table{
+	Name: "paging_group_callers",
+	Columns: []schema.Column{
+		{
+			Name: "group_id",
+			Type: "bigint",
+		},
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+	},
+	PrimaryKey: []string{"group_id", "extension_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "paging_group_callers_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "paging_group_callers_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "paging_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*PagingGroupMember) MomoMeta() *momo.Meta[PagingGroupMember] { return &pagingGroupMemberMeta }
+
+var pagingGroupMemberMeta = momo.Meta[PagingGroupMember]{
+	Table: "paging_group_members",
+	Columns: []momo.ColumnMeta{
+		{Name: "group_id", Flags: momo.FlagPK},
+		{Name: "extension_id", Flags: momo.FlagPK},
+		{Name: "position", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *PagingGroupMember, i int) any {
+		switch i {
+		case 0:
+			return &m.GroupID
+		case 1:
+			return &m.ExtensionID
+		case 2:
+			return &m.Position
+		}
+		return nil
+	},
+	Value: func(m *PagingGroupMember, i int) any {
+		switch i {
+		case 0:
+			return m.GroupID
+		case 1:
+			return m.ExtensionID
+		case 2:
+			return m.Position
+		}
+		return nil
+	},
+	TableSchema: &pagingGroupMemberTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var pagingGroupMemberTable = schema.Table{
+	Name: "paging_group_members",
+	Columns: []schema.Column{
+		{
+			Name: "group_id",
+			Type: "bigint",
+		},
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "position",
+			Type:    "integer",
+			Default: "0",
+		},
+	},
+	PrimaryKey: []string{"group_id", "extension_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "paging_group_members_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "paging_group_members_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "paging_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*ParkLot) MomoMeta() *momo.Meta[ParkLot] { return &parkLotMeta }
+
+var parkLotMeta = momo.Meta[ParkLot]{
+	Table: "park_lots",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "slot_start"},
+		{Name: "slot_end"},
+		{Name: "return_secs", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "voicemail_secs", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ParkLot, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.SlotStart
+		case 3:
+			return &m.SlotEnd
+		case 4:
+			return &m.ReturnSecs
+		case 5:
+			return &m.VoicemailSecs
+		case 6:
+			return &m.Enabled
+		case 7:
+			return &m.CreatedAt
+		case 8:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *ParkLot, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.SlotStart
+		case 3:
+			return m.SlotEnd
+		case 4:
+			return m.ReturnSecs
+		case 5:
+			return m.VoicemailSecs
+		case 6:
+			return m.Enabled
+		case 7:
+			return m.CreatedAt
+		case 8:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &parkLotTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var parkLotTable = schema.Table{
+	Name: "park_lots",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "slot_start",
+			Type: "integer",
+		},
+		{
+			Name: "slot_end",
+			Type: "integer",
+		},
+		{
+			Name:    "return_secs",
+			Type:    "integer",
+			Default: "120",
+		},
+		{
+			Name:    "voicemail_secs",
+			Type:    "integer",
+			Default: "60",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "park_lots_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "park_lots_check",
+			Expr: "((slot_end >= slot_start) AND ((slot_end - slot_start) < 100))",
+		},
+		{
+			Name: "park_lots_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._-]{1,64}$'::text)",
+		},
+		{
+			Name: "park_lots_return_secs_check",
+			Expr: "((return_secs >= 10) AND (return_secs <= 3600))",
+		},
+		{
+			Name: "park_lots_slot_end_check",
+			Expr: "((slot_end >= 1) AND (slot_end <= 99999))",
+		},
+		{
+			Name: "park_lots_slot_start_check",
+			Expr: "((slot_start >= 1) AND (slot_start <= 99999))",
+		},
+		{
+			Name: "park_lots_voicemail_secs_check",
+			Expr: "((voicemail_secs >= 10) AND (voicemail_secs <= 3600))",
+		},
+	},
+}
+
+func (*Phone) MomoMeta() *momo.Meta[Phone] { return &phoneMeta }
+
+var phoneMeta = momo.Meta[Phone]{
+	Table: "phones",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "mac"},
+		{Name: "serial", Flags: momo.FlagNullable},
+		{Name: "vendor"},
+		{Name: "model"},
+		{Name: "label", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "device_id", Flags: momo.FlagNullable},
+		{Name: "template_id", Flags: momo.FlagNullable},
+		{Name: "blf", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "token_hash"},
+		{Name: "token_enc"},
+		{Name: "prev_token_hash", Flags: momo.FlagNullable},
+		{Name: "prev_token_expires", Flags: momo.FlagNullable},
+		{Name: "token_exposed", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ua_mismatch", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "boot_armed", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "boot_reclaimed", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "admin_password_enc"},
+		{Name: "redirect_status", Flags: momo.FlagDBDefault},
+		{Name: "first_fetch_at", Flags: momo.FlagNullable},
+		{Name: "last_fetch_at", Flags: momo.FlagNullable},
+		{Name: "last_fetch_ip", Flags: momo.FlagNullable},
+		{Name: "last_fetch_ua", Flags: momo.FlagNullable},
+		{Name: "last_fetch_file", Flags: momo.FlagNullable},
+		{Name: "firmware_seen", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "boot_handoff_at", Flags: momo.FlagNullable},
+		{Name: "boot_handoff_ip", Flags: momo.FlagNullable},
+		{Name: "group_id", Flags: momo.FlagNullable},
+		{Name: "sync_hash", Flags: momo.FlagNullable},
+		{Name: "ptt_channel_id", Flags: momo.FlagNullable},
+		{Name: "ldap_dn", Flags: momo.FlagNullable},
+		{Name: "ldap_password_enc", Flags: momo.FlagNullable},
+		{Name: "ldap_prev_password_enc", Flags: momo.FlagNullable},
+		{Name: "ldap_rotated_at", Flags: momo.FlagNullable},
+		{Name: "ldap_last_bind_at", Flags: momo.FlagNullable},
+		{Name: "sharing_role", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "location_id", Flags: momo.FlagNullable},
+		{Name: "side_key", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *Phone, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Mac
+		case 2:
+			return &m.Serial
+		case 3:
+			return &m.Vendor
+		case 4:
+			return &m.Model2
+		case 5:
+			return &m.Label
+		case 6:
+			return &m.DeviceID
+		case 7:
+			return &m.TemplateID
+		case 8:
+			return &m.Blf
+		case 9:
+			return &m.Enabled
+		case 10:
+			return &m.TokenHash
+		case 11:
+			return &m.TokenEnc
+		case 12:
+			return &m.PrevTokenHash
+		case 13:
+			return &m.PrevTokenExpires
+		case 14:
+			return &m.TokenExposed
+		case 15:
+			return &m.UaMismatch
+		case 16:
+			return &m.BootArmed
+		case 17:
+			return &m.BootReclaimed
+		case 18:
+			return &m.AdminPasswordEnc
+		case 19:
+			return &m.RedirectStatus
+		case 20:
+			return &m.FirstFetchAt
+		case 21:
+			return &m.LastFetchAt
+		case 22:
+			return &m.LastFetchIP
+		case 23:
+			return &m.LastFetchUa
+		case 24:
+			return &m.LastFetchFile
+		case 25:
+			return &m.FirmwareSeen
+		case 26:
+			return &m.CreatedAt
+		case 27:
+			return &m.UpdatedAt
+		case 28:
+			return &m.BootHandoffAt
+		case 29:
+			return &m.BootHandoffIP
+		case 30:
+			return &m.GroupID
+		case 31:
+			return &m.SyncHash
+		case 32:
+			return &m.PttChannelID
+		case 33:
+			return &m.LdapDn
+		case 34:
+			return &m.LdapPasswordEnc
+		case 35:
+			return &m.LdapPrevPasswordEnc
+		case 36:
+			return &m.LdapRotatedAt
+		case 37:
+			return &m.LdapLastBindAt
+		case 38:
+			return &m.SharingRole
+		case 39:
+			return &m.LocationID
+		case 40:
+			return &m.SideKey
+		}
+		return nil
+	},
+	Value: func(m *Phone, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Mac
+		case 2:
+			return m.Serial
+		case 3:
+			return m.Vendor
+		case 4:
+			return m.Model2
+		case 5:
+			return m.Label
+		case 6:
+			return m.DeviceID
+		case 7:
+			return m.TemplateID
+		case 8:
+			return m.Blf
+		case 9:
+			return m.Enabled
+		case 10:
+			return m.TokenHash
+		case 11:
+			return m.TokenEnc
+		case 12:
+			return m.PrevTokenHash
+		case 13:
+			return m.PrevTokenExpires
+		case 14:
+			return m.TokenExposed
+		case 15:
+			return m.UaMismatch
+		case 16:
+			return m.BootArmed
+		case 17:
+			return m.BootReclaimed
+		case 18:
+			return m.AdminPasswordEnc
+		case 19:
+			return m.RedirectStatus
+		case 20:
+			return m.FirstFetchAt
+		case 21:
+			return m.LastFetchAt
+		case 22:
+			return m.LastFetchIP
+		case 23:
+			return m.LastFetchUa
+		case 24:
+			return m.LastFetchFile
+		case 25:
+			return m.FirmwareSeen
+		case 26:
+			return m.CreatedAt
+		case 27:
+			return m.UpdatedAt
+		case 28:
+			return m.BootHandoffAt
+		case 29:
+			return m.BootHandoffIP
+		case 30:
+			return m.GroupID
+		case 31:
+			return m.SyncHash
+		case 32:
+			return m.PttChannelID
+		case 33:
+			return m.LdapDn
+		case 34:
+			return m.LdapPasswordEnc
+		case 35:
+			return m.LdapPrevPasswordEnc
+		case 36:
+			return m.LdapRotatedAt
+		case 37:
+			return m.LdapLastBindAt
+		case 38:
+			return m.SharingRole
+		case 39:
+			return m.LocationID
+		case 40:
+			return m.SideKey
+		}
+		return nil
+	},
+	TableSchema: &phoneTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var phoneTable = schema.Table{
+	Name: "phones",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "mac",
+			Type: "text",
+		},
+		{
+			Name:     "serial",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name: "vendor",
+			Type: "text",
+		},
+		{
+			Name: "model",
+			Type: "text",
+		},
+		{
+			Name:    "label",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "device_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "template_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "blf",
+			Type:    "jsonb",
+			Default: "'[]'::jsonb",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name: "token_hash",
+			Type: "bytea",
+		},
+		{
+			Name: "token_enc",
+			Type: "bytea",
+		},
+		{
+			Name:     "prev_token_hash",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:     "prev_token_expires",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "token_exposed",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "ua_mismatch",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "boot_armed",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "boot_reclaimed",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name: "admin_password_enc",
+			Type: "bytea",
+		},
+		{
+			Name:    "redirect_status",
+			Type:    "jsonb",
+			Default: "'{\"state\": \"not_configured\"}'::jsonb",
+		},
+		{
+			Name:     "first_fetch_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "last_fetch_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "last_fetch_ip",
+			Type:     "inet",
+			Nullable: true,
+		},
+		{
+			Name:     "last_fetch_ua",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "last_fetch_file",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "firmware_seen",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "boot_handoff_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "boot_handoff_ip",
+			Type:     "inet",
+			Nullable: true,
+		},
+		{
+			Name:     "group_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "sync_hash",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "ptt_channel_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "ldap_dn",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "ldap_password_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:     "ldap_prev_password_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:     "ldap_rotated_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "ldap_last_bind_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "sharing_role",
+			Type:    "text",
+			Default: "'host'::text",
+		},
+		{
+			Name:     "location_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "side_key",
+			Type:     "text",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "phones_device_id_key",
+			Columns: []string{"device_id"},
+		},
+		{
+			Name:    "phones_mac_key",
+			Columns: []string{"mac"},
+		},
+		{
+			Name:    "phones_prev_token_hash_key",
+			Columns: []string{"prev_token_hash"},
+		},
+		{
+			Name:    "phones_token_hash_key",
+			Columns: []string{"token_hash"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "phones_location",
+			Parts: []schema.IndexPart{
+				{
+					Column: "location_id",
+				},
+			},
+			Where: "(location_id IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "phones_device_id_fkey",
+			Columns:    []string{"device_id"},
+			RefTable:   "devices",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "phones_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "phone_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "phones_location_id_fkey",
+			Columns:    []string{"location_id"},
+			RefTable:   "locations",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "phones_ptt_channel_id_fkey",
+			Columns:    []string{"ptt_channel_id"},
+			RefTable:   "multicast_channels",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "phones_template_id_fkey",
+			Columns:    []string{"template_id"},
+			RefTable:   "prov_templates",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "phones_blf_check",
+			Expr: "(jsonb_typeof(blf) = 'array'::text)",
+		},
+		{
+			Name: "phones_check",
+			Expr: "((device_id IS NOT NULL) OR (NOT enabled))",
+		},
+		{
+			Name: "phones_check1",
+			Expr: "((prev_token_hash IS NULL) = (prev_token_expires IS NULL))",
+		},
+		{
+			Name: "phones_mac_check",
+			Expr: "(mac ~ '^[0-9a-f]{12}$'::text)",
+		},
+		{
+			Name: "phones_model_check",
+			Expr: "((length(model) >= 1) AND (length(model) <= 64))",
+		},
+		{
+			Name: "phones_prev_token_hash_check",
+			Expr: "(length(prev_token_hash) = 32)",
+		},
+		{
+			Name: "phones_redirect_status_check",
+			Expr: "(jsonb_typeof(redirect_status) = 'object'::text)",
+		},
+		{
+			Name: "phones_serial_check",
+			Expr: "((length(serial) >= 1) AND (length(serial) <= 64))",
+		},
+		{
+			Name: "phones_sharing_role_check",
+			Expr: "\"sharing_role\" IN ('guest','host')",
+			In: &schema.CheckIn{
+				Column: "sharing_role",
+				Values: []string{"guest", "host"},
+			},
+		},
+		{
+			Name: "phones_side_key_check",
+			Expr: "\"side_key\" IN ('alarm','none','ptt')",
+			In: &schema.CheckIn{
+				Column: "side_key",
+				Values: []string{"alarm", "none", "ptt"},
+			},
+		},
+		{
+			Name: "phones_token_hash_check",
+			Expr: "(length(token_hash) = 32)",
+		},
+		{
+			Name: "phones_vendor_check",
+			Expr: "\"vendor\" IN ('fanvil','generic','grandstream','poly','snom','yealink')",
+			In: &schema.CheckIn{
+				Column: "vendor",
+				Values: []string{"fanvil", "generic", "grandstream", "poly", "snom", "yealink"},
+			},
+		},
+	},
+}
+
+func (*PhoneGroup) MomoMeta() *momo.Meta[PhoneGroup] { return &phoneGroupMeta }
+
+var phoneGroupMeta = momo.Meta[PhoneGroup]{
+	Table: "phone_groups",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "description", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "include_extensions", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "include_company", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ptt_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ptt_address", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ptt_codec", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ptt_default_channel", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ptt_accept_busy", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ptt_channel_id", Flags: momo.FlagNullable},
+		{Name: "ptt_priority_channel", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ptt_emergency_channel", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "group_paging_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "group_paging_default", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "group_paging_priority", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "group_paging_emergency", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "paging_allow_in_dnd", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "paging_barge", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "paging_priority_active", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "paging_timeout", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "intercom_barge", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ldap_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "syslog_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "syslog_level", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "account_sharing", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "account_sharing_secret_enc", Flags: momo.FlagNullable},
+		{Name: "scep_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "scep_validity_days", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "wired_dot1x_id", Flags: momo.FlagNullable},
+		{Name: "location_id", Flags: momo.FlagNullable},
+		{Name: "e911_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "alarm_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "side_key", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *PhoneGroup, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Description
+		case 3:
+			return &m.IncludeExtensions
+		case 4:
+			return &m.IncludeCompany
+		case 5:
+			return &m.CreatedAt
+		case 6:
+			return &m.UpdatedAt
+		case 7:
+			return &m.PttEnabled
+		case 8:
+			return &m.PttAddress
+		case 9:
+			return &m.PttCodec
+		case 10:
+			return &m.PttDefaultChannel
+		case 11:
+			return &m.PttAcceptBusy
+		case 12:
+			return &m.PttChannelID
+		case 13:
+			return &m.PttPriorityChannel
+		case 14:
+			return &m.PttEmergencyChannel
+		case 15:
+			return &m.GroupPagingEnabled
+		case 16:
+			return &m.GroupPagingDefault
+		case 17:
+			return &m.GroupPagingPriority
+		case 18:
+			return &m.GroupPagingEmergency
+		case 19:
+			return &m.PagingAllowInDnd
+		case 20:
+			return &m.PagingBarge
+		case 21:
+			return &m.PagingPriorityActive
+		case 22:
+			return &m.PagingTimeout
+		case 23:
+			return &m.IntercomBarge
+		case 24:
+			return &m.LdapEnabled
+		case 25:
+			return &m.SyslogEnabled
+		case 26:
+			return &m.SyslogLevel
+		case 27:
+			return &m.AccountSharing
+		case 28:
+			return &m.AccountSharingSecretEnc
+		case 29:
+			return &m.ScepEnabled
+		case 30:
+			return &m.ScepValidityDays
+		case 31:
+			return &m.WiredDot1xID
+		case 32:
+			return &m.LocationID
+		case 33:
+			return &m.E911Enabled
+		case 34:
+			return &m.AlarmTarget
+		case 35:
+			return &m.SideKey
+		}
+		return nil
+	},
+	Value: func(m *PhoneGroup, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Description
+		case 3:
+			return m.IncludeExtensions
+		case 4:
+			return m.IncludeCompany
+		case 5:
+			return m.CreatedAt
+		case 6:
+			return m.UpdatedAt
+		case 7:
+			return m.PttEnabled
+		case 8:
+			return m.PttAddress
+		case 9:
+			return m.PttCodec
+		case 10:
+			return m.PttDefaultChannel
+		case 11:
+			return m.PttAcceptBusy
+		case 12:
+			return m.PttChannelID
+		case 13:
+			return m.PttPriorityChannel
+		case 14:
+			return m.PttEmergencyChannel
+		case 15:
+			return m.GroupPagingEnabled
+		case 16:
+			return m.GroupPagingDefault
+		case 17:
+			return m.GroupPagingPriority
+		case 18:
+			return m.GroupPagingEmergency
+		case 19:
+			return m.PagingAllowInDnd
+		case 20:
+			return m.PagingBarge
+		case 21:
+			return m.PagingPriorityActive
+		case 22:
+			return m.PagingTimeout
+		case 23:
+			return m.IntercomBarge
+		case 24:
+			return m.LdapEnabled
+		case 25:
+			return m.SyslogEnabled
+		case 26:
+			return m.SyslogLevel
+		case 27:
+			return m.AccountSharing
+		case 28:
+			return m.AccountSharingSecretEnc
+		case 29:
+			return m.ScepEnabled
+		case 30:
+			return m.ScepValidityDays
+		case 31:
+			return m.WiredDot1xID
+		case 32:
+			return m.LocationID
+		case 33:
+			return m.E911Enabled
+		case 34:
+			return m.AlarmTarget
+		case 35:
+			return m.SideKey
+		}
+		return nil
+	},
+	TableSchema: &phoneGroupTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var phoneGroupTable = schema.Table{
+	Name: "phone_groups",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "description",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "include_extensions",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "include_company",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "ptt_enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "ptt_address",
+			Type:    "text",
+			Default: "'224.0.1.116:5001'::text",
+		},
+		{
+			Name:    "ptt_codec",
+			Type:    "text",
+			Default: "'PCMU'::text",
+		},
+		{
+			Name:    "ptt_default_channel",
+			Type:    "integer",
+			Default: "1",
+		},
+		{
+			Name:    "ptt_accept_busy",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "ptt_channel_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "ptt_priority_channel",
+			Type:    "integer",
+			Default: "24",
+		},
+		{
+			Name:    "ptt_emergency_channel",
+			Type:    "integer",
+			Default: "25",
+		},
+		{
+			Name:    "group_paging_enabled",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "group_paging_default",
+			Type:    "integer",
+			Default: "26",
+		},
+		{
+			Name:    "group_paging_priority",
+			Type:    "integer",
+			Default: "49",
+		},
+		{
+			Name:    "group_paging_emergency",
+			Type:    "integer",
+			Default: "50",
+		},
+		{
+			Name:    "paging_allow_in_dnd",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "paging_barge",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "paging_priority_active",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "paging_timeout",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "intercom_barge",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "ldap_enabled",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "syslog_enabled",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "syslog_level",
+			Type:    "text",
+			Default: "'info'::text",
+		},
+		{
+			Name:    "account_sharing",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "account_sharing_secret_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "scep_enabled",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "scep_validity_days",
+			Type:    "integer",
+			Default: "365",
+		},
+		{
+			Name:     "wired_dot1x_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "location_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "e911_enabled",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "alarm_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "side_key",
+			Type:    "text",
+			Default: "'ptt'::text",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "phone_groups_location",
+			Parts: []schema.IndexPart{
+				{
+					Column: "location_id",
+				},
+			},
+			Where: "(location_id IS NOT NULL)",
+		},
+		{
+			Name:   "phone_groups_name",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Expr: "lower(name)",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "phone_groups_location_id_fkey",
+			Columns:    []string{"location_id"},
+			RefTable:   "locations",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "phone_groups_ptt_channel_id_fkey",
+			Columns:    []string{"ptt_channel_id"},
+			RefTable:   "multicast_channels",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "phone_groups_wired_dot1x_id_fkey",
+			Columns:    []string{"wired_dot1x_id"},
+			RefTable:   "dot1x_profiles",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "phone_groups_alarm_target_check",
+			Expr: "(alarm_target ~ '^[0-9A-Za-z._-]{0,64}$'::text)",
+		},
+		{
+			Name: "phone_groups_description_check",
+			Expr: "(char_length(description) <= 255)",
+		},
+		{
+			Name: "phone_groups_group_paging_default_check",
+			Expr: "(group_paging_default = ANY (ARRAY[26, 27, 49, 50]))",
+		},
+		{
+			Name: "phone_groups_group_paging_emergency_check",
+			Expr: "((group_paging_emergency >= 26) AND (group_paging_emergency <= 50))",
+		},
+		{
+			Name: "phone_groups_group_paging_priority_check",
+			Expr: "((group_paging_priority >= 26) AND (group_paging_priority <= 50))",
+		},
+		{
+			Name: "phone_groups_name_check",
+			Expr: "((char_length(name) >= 1) AND (char_length(name) <= 100))",
+		},
+		{
+			Name: "phone_groups_paging_barge_check",
+			Expr: "((paging_barge >= 0) AND (paging_barge <= 10))",
+		},
+		{
+			Name: "phone_groups_paging_timeout_check",
+			Expr: "((paging_timeout >= 0) AND (paging_timeout <= 3600))",
+		},
+		{
+			Name: "phone_groups_ptt_codec_check",
+			Expr: "\"ptt_codec\" IN ('G722','PCMU')",
+			In: &schema.CheckIn{
+				Column: "ptt_codec",
+				Values: []string{"G722", "PCMU"},
+			},
+		},
+		{
+			Name: "phone_groups_ptt_default_channel_check",
+			Expr: "((ptt_default_channel >= 1) AND (ptt_default_channel <= 25))",
+		},
+		{
+			Name: "phone_groups_ptt_emergency_channel_check",
+			Expr: "((ptt_emergency_channel >= 1) AND (ptt_emergency_channel <= 25))",
+		},
+		{
+			Name: "phone_groups_ptt_priority_channel_check",
+			Expr: "((ptt_priority_channel >= 1) AND (ptt_priority_channel <= 25))",
+		},
+		{
+			Name: "phone_groups_scep_validity_days_check",
+			Expr: "((scep_validity_days >= 30) AND (scep_validity_days <= 1825))",
+		},
+		{
+			Name: "phone_groups_side_key_check",
+			Expr: "\"side_key\" IN ('alarm','none','ptt')",
+			In: &schema.CheckIn{
+				Column: "side_key",
+				Values: []string{"alarm", "none", "ptt"},
+			},
+		},
+		{
+			Name: "phone_groups_syslog_level_check",
+			Expr: "\"syslog_level\" IN ('debug','error','info','warning')",
+			In: &schema.CheckIn{
+				Column: "syslog_level",
+				Values: []string{"debug", "error", "info", "warning"},
+			},
+		},
+	},
+}
+
+func (*PhoneGroupBook) MomoMeta() *momo.Meta[PhoneGroupBook] { return &phoneGroupBookMeta }
+
+var phoneGroupBookMeta = momo.Meta[PhoneGroupBook]{
+	Table: "phone_group_books",
+	Columns: []momo.ColumnMeta{
+		{Name: "group_id", Flags: momo.FlagPK},
+		{Name: "book_id", Flags: momo.FlagPK},
+		{Name: "position"},
+	},
+	Ptr: func(m *PhoneGroupBook, i int) any {
+		switch i {
+		case 0:
+			return &m.GroupID
+		case 1:
+			return &m.BookID
+		case 2:
+			return &m.Position
+		}
+		return nil
+	},
+	Value: func(m *PhoneGroupBook, i int) any {
+		switch i {
+		case 0:
+			return m.GroupID
+		case 1:
+			return m.BookID
+		case 2:
+			return m.Position
+		}
+		return nil
+	},
+	TableSchema: &phoneGroupBookTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var phoneGroupBookTable = schema.Table{
+	Name: "phone_group_books",
+	Columns: []schema.Column{
+		{
+			Name: "group_id",
+			Type: "bigint",
+		},
+		{
+			Name: "book_id",
+			Type: "bigint",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+	},
+	PrimaryKey: []string{"group_id", "book_id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "phone_group_books_group_id_position_key",
+			Columns: []string{"group_id", "position"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "phone_group_books_book_id_fkey",
+			Columns:    []string{"book_id"},
+			RefTable:   "phonebooks",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "phone_group_books_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "phone_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "phone_group_books_position_check",
+			Expr: "(\"position\" >= 0)",
+		},
+	},
+}
+
+func (*PhoneGroupMulticast) MomoMeta() *momo.Meta[PhoneGroupMulticast] {
+	return &phoneGroupMulticastMeta
+}
+
+var phoneGroupMulticastMeta = momo.Meta[PhoneGroupMulticast]{
+	Table: "phone_group_multicast",
+	Columns: []momo.ColumnMeta{
+		{Name: "group_id", Flags: momo.FlagPK},
+		{Name: "channel_id", Flags: momo.FlagPK},
+		{Name: "position"},
+		{Name: "role"},
+	},
+	Ptr: func(m *PhoneGroupMulticast, i int) any {
+		switch i {
+		case 0:
+			return &m.GroupID
+		case 1:
+			return &m.ChannelID
+		case 2:
+			return &m.Position
+		case 3:
+			return &m.Role
+		}
+		return nil
+	},
+	Value: func(m *PhoneGroupMulticast, i int) any {
+		switch i {
+		case 0:
+			return m.GroupID
+		case 1:
+			return m.ChannelID
+		case 2:
+			return m.Position
+		case 3:
+			return m.Role
+		}
+		return nil
+	},
+	TableSchema: &phoneGroupMulticastTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var phoneGroupMulticastTable = schema.Table{
+	Name: "phone_group_multicast",
+	Columns: []schema.Column{
+		{
+			Name: "group_id",
+			Type: "bigint",
+		},
+		{
+			Name: "channel_id",
+			Type: "bigint",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+		{
+			Name: "role",
+			Type: "text",
+		},
+	},
+	PrimaryKey: []string{"group_id", "channel_id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "phone_group_multicast_group_id_position_key",
+			Columns: []string{"group_id", "position"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "phone_group_multicast_channel_id_fkey",
+			Columns:    []string{"channel_id"},
+			RefTable:   "multicast_channels",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "phone_group_multicast_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "phone_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "phone_group_multicast_position_check",
+			Expr: "(\"position\" >= 0)",
+		},
+		{
+			Name: "phone_group_multicast_role_check",
+			Expr: "\"role\" IN ('both','listen','send')",
+			In: &schema.CheckIn{
+				Column: "role",
+				Values: []string{"both", "listen", "send"},
+			},
+		},
+	},
+}
+
+func (*PhoneLine) MomoMeta() *momo.Meta[PhoneLine] { return &phoneLineMeta }
+
+var phoneLineMeta = momo.Meta[PhoneLine]{
+	Table: "phone_lines",
+	Columns: []momo.ColumnMeta{
+		{Name: "phone_id", Flags: momo.FlagPK},
+		{Name: "line", Flags: momo.FlagPK},
+		{Name: "device_id"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *PhoneLine, i int) any {
+		switch i {
+		case 0:
+			return &m.PhoneID
+		case 1:
+			return &m.Line
+		case 2:
+			return &m.DeviceID
+		case 3:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *PhoneLine, i int) any {
+		switch i {
+		case 0:
+			return m.PhoneID
+		case 1:
+			return m.Line
+		case 2:
+			return m.DeviceID
+		case 3:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &phoneLineTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var phoneLineTable = schema.Table{
+	Name: "phone_lines",
+	Columns: []schema.Column{
+		{
+			Name: "phone_id",
+			Type: "bigint",
+		},
+		{
+			Name: "line",
+			Type: "smallint",
+		},
+		{
+			Name: "device_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"phone_id", "line"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "phone_lines_device_id_key",
+			Columns: []string{"device_id"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "phone_lines_device_id_fkey",
+			Columns:    []string{"device_id"},
+			RefTable:   "devices",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "phone_lines_phone_id_fkey",
+			Columns:    []string{"phone_id"},
+			RefTable:   "phones",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "phone_lines_line_check",
+			Expr: "((line >= 2) AND (line <= 6))",
+		},
+	},
+}
+
+func (*PhonePush) MomoMeta() *momo.Meta[PhonePush] { return &phonePushMeta }
+
+var phonePushMeta = momo.Meta[PhonePush]{
+	Table: "phone_pushes",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "phone_id"},
+		{Name: "kind"},
+		{Name: "source", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "actor", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "detail", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "contacts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "requested_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "claimed_at", Flags: momo.FlagNullable},
+		{Name: "claimed_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "finished_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *PhonePush, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.PhoneID
+		case 2:
+			return &m.Kind
+		case 3:
+			return &m.Source
+		case 4:
+			return &m.Actor
+		case 5:
+			return &m.Status
+		case 6:
+			return &m.Detail
+		case 7:
+			return &m.Contacts
+		case 8:
+			return &m.RequestedAt
+		case 9:
+			return &m.ClaimedAt
+		case 10:
+			return &m.ClaimedBy
+		case 11:
+			return &m.FinishedAt
+		}
+		return nil
+	},
+	Value: func(m *PhonePush, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.PhoneID
+		case 2:
+			return m.Kind
+		case 3:
+			return m.Source
+		case 4:
+			return m.Actor
+		case 5:
+			return m.Status
+		case 6:
+			return m.Detail
+		case 7:
+			return m.Contacts
+		case 8:
+			return m.RequestedAt
+		case 9:
+			return m.ClaimedAt
+		case 10:
+			return m.ClaimedBy
+		case 11:
+			return m.FinishedAt
+		}
+		return nil
+	},
+	TableSchema: &phonePushTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var phonePushTable = schema.Table{
+	Name: "phone_pushes",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "phone_id",
+			Type: "bigint",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name:    "source",
+			Type:    "text",
+			Default: "'manual'::text",
+		},
+		{
+			Name:    "actor",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'pending'::text",
+		},
+		{
+			Name:    "detail",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "contacts",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "requested_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "claimed_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "claimed_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "finished_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "phone_pushes_claimed",
+			Parts: []schema.IndexPart{
+				{
+					Column: "claimed_at",
+				},
+			},
+			Where: "(claimed_at IS NOT NULL)",
+		},
+		{
+			Name: "phone_pushes_open",
+			Parts: []schema.IndexPart{
+				{
+					Column: "status",
+				},
+				{
+					Column: "id",
+				},
+			},
+			Where: "(status = ANY (ARRAY['pending'::text, 'sending'::text]))",
+		},
+		{
+			Name: "phone_pushes_phone",
+			Parts: []schema.IndexPart{
+				{
+					Column: "phone_id",
+				},
+				{
+					Column: "id",
+					Desc:   true,
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "phone_pushes_phone_id_fkey",
+			Columns:    []string{"phone_id"},
+			RefTable:   "phones",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "phone_pushes_kind_check",
+			Expr: "\"kind\" IN ('reboot','resync')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"reboot", "resync"},
+			},
+		},
+		{
+			Name: "phone_pushes_source_check",
+			Expr: "\"source\" IN ('auto','manual')",
+			In: &schema.CheckIn{
+				Column: "source",
+				Values: []string{"auto", "manual"},
+			},
+		},
+		{
+			Name: "phone_pushes_status_check",
+			Expr: "\"status\" IN ('auth_failed','failed','not_registered','ok','pending','sending','timeout')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"auth_failed", "failed", "not_registered", "ok", "pending", "sending", "timeout"},
+			},
+		},
+	},
+}
+
+func (*Phonebook) MomoMeta() *momo.Meta[Phonebook] { return &phonebookMeta }
+
+var phonebookMeta = momo.Meta[Phonebook]{
+	Table: "phonebooks",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "kind"},
+		{Name: "name"},
+		{Name: "owner_user_id", Flags: momo.FlagNullable},
+		{Name: "version", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Phonebook, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Kind
+		case 2:
+			return &m.Name
+		case 3:
+			return &m.OwnerUserID
+		case 4:
+			return &m.Version
+		case 5:
+			return &m.CreatedAt
+		case 6:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *Phonebook, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Kind
+		case 2:
+			return m.Name
+		case 3:
+			return m.OwnerUserID
+		case 4:
+			return m.Version
+		case 5:
+			return m.CreatedAt
+		case 6:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &phonebookTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var phonebookTable = schema.Table{
+	Name: "phonebooks",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:     "owner_user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "version",
+			Type:    "bigint",
+			Default: "1",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name:   "phonebooks_named_name",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Expr: "lower(name)",
+				},
+			},
+			Where: "(kind = 'named'::text)",
+		},
+		{
+			Name:   "phonebooks_one_company",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "kind",
+				},
+			},
+			Where: "(kind = 'company'::text)",
+		},
+		{
+			Name:   "phonebooks_one_extensions",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "kind",
+				},
+			},
+			Where: "(kind = 'extensions'::text)",
+		},
+		{
+			Name:   "phonebooks_one_personal",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "owner_user_id",
+				},
+			},
+			Where: "(kind = 'personal'::text)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "phonebooks_owner_user_id_fkey",
+			Columns:    []string{"owner_user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "phonebooks_check",
+			Expr: "((kind = 'personal'::text) = (owner_user_id IS NOT NULL))",
+		},
+		{
+			Name: "phonebooks_kind_check",
+			Expr: "\"kind\" IN ('company','extensions','named','personal')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"company", "extensions", "named", "personal"},
+			},
+		},
+		{
+			Name: "phonebooks_name_check",
+			Expr: "((char_length(name) >= 1) AND (char_length(name) <= 100))",
+		},
+		{
+			Name: "phonebooks_version_check",
+			Expr: "(version >= 1)",
+		},
+	},
+}
+
+func (*PhonebookEntry) MomoMeta() *momo.Meta[PhonebookEntry] { return &phonebookEntryMeta }
+
+var phonebookEntryMeta = momo.Meta[PhonebookEntry]{
+	Table: "phonebook_entries",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "book_id"},
+		{Name: "first_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "company", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "numbers"},
+		{Name: "note", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *PhonebookEntry, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.BookID
+		case 2:
+			return &m.FirstName
+		case 3:
+			return &m.LastName
+		case 4:
+			return &m.Company
+		case 5:
+			return &m.Numbers
+		case 6:
+			return &m.Note
+		case 7:
+			return &m.CreatedAt
+		case 8:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *PhonebookEntry, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.BookID
+		case 2:
+			return m.FirstName
+		case 3:
+			return m.LastName
+		case 4:
+			return m.Company
+		case 5:
+			return m.Numbers
+		case 6:
+			return m.Note
+		case 7:
+			return m.CreatedAt
+		case 8:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &phonebookEntryTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var phonebookEntryTable = schema.Table{
+	Name: "phonebook_entries",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "book_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "first_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "last_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "company",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name: "numbers",
+			Type: "jsonb",
+		},
+		{
+			Name:    "note",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "phonebook_entries_book_name",
+			Parts: []schema.IndexPart{
+				{
+					Column: "book_id",
+				},
+				{
+					Expr: "lower(last_name)",
+				},
+				{
+					Expr: "lower(first_name)",
+				},
+				{
+					Column: "id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "phonebook_entries_book_id_fkey",
+			Columns:    []string{"book_id"},
+			RefTable:   "phonebooks",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "phonebook_entries_company_check",
+			Expr: "(char_length(company) <= 60)",
+		},
+		{
+			Name: "phonebook_entries_first_name_check",
+			Expr: "(char_length(first_name) <= 60)",
+		},
+		{
+			Name: "phonebook_entries_last_name_check",
+			Expr: "(char_length(last_name) <= 60)",
+		},
+		{
+			Name: "phonebook_entries_note_check",
+			Expr: "(char_length(note) <= 255)",
+		},
+		{
+			Name: "phonebook_entries_numbers_check",
+			Expr: "((jsonb_typeof(numbers) = 'array'::text) AND ((jsonb_array_length(numbers) >= 1) AND (jsonb_array_length(numbers) <= 3)))",
+		},
+	},
+}
+
+func (*PickupGroup) MomoMeta() *momo.Meta[PickupGroup] { return &pickupGroupMeta }
+
+var pickupGroupMeta = momo.Meta[PickupGroup]{
+	Table: "pickup_groups",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *PickupGroup, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.CreatedAt
+		case 3:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *PickupGroup, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.CreatedAt
+		case 3:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &pickupGroupTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var pickupGroupTable = schema.Table{
+	Name: "pickup_groups",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "pickup_groups_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "pickup_groups_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._-]{1,64}$'::text)",
+		},
+	},
+}
+
+func (*PickupGroupMember) MomoMeta() *momo.Meta[PickupGroupMember] { return &pickupGroupMemberMeta }
+
+var pickupGroupMemberMeta = momo.Meta[PickupGroupMember]{
+	Table: "pickup_group_members",
+	Columns: []momo.ColumnMeta{
+		{Name: "group_id", Flags: momo.FlagPK},
+		{Name: "extension_id", Flags: momo.FlagPK},
+	},
+	Ptr: func(m *PickupGroupMember, i int) any {
+		switch i {
+		case 0:
+			return &m.GroupID
+		case 1:
+			return &m.ExtensionID
+		}
+		return nil
+	},
+	Value: func(m *PickupGroupMember, i int) any {
+		switch i {
+		case 0:
+			return m.GroupID
+		case 1:
+			return m.ExtensionID
+		}
+		return nil
+	},
+	TableSchema: &pickupGroupMemberTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var pickupGroupMemberTable = schema.Table{
+	Name: "pickup_group_members",
+	Columns: []schema.Column{
+		{
+			Name: "group_id",
+			Type: "bigint",
+		},
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+	},
+	PrimaryKey: []string{"group_id", "extension_id"},
+	Indexes: []schema.Index{
+		{
+			Name: "pickup_group_members_ext",
+			Parts: []schema.IndexPart{
+				{
+					Column: "extension_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "pickup_group_members_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "pickup_group_members_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "pickup_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*ProvFetch) MomoMeta() *momo.Meta[ProvFetch] { return &provFetchMeta }
+
+var provFetchMeta = momo.Meta[ProvFetch]{
+	Table: "prov_fetches",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "phone_id", Flags: momo.FlagNullable},
+		{Name: "mac_claimed", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ip", Flags: momo.FlagNullable},
+		{Name: "user_agent", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "path_redacted"},
+		{Name: "kind"},
+		{Name: "result"},
+		{Name: "status"},
+		{Name: "bytes", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ua_mismatch", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ProvFetch, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.At
+		case 2:
+			return &m.PhoneID
+		case 3:
+			return &m.MacClaimed
+		case 4:
+			return &m.IP
+		case 5:
+			return &m.UserAgent
+		case 6:
+			return &m.PathRedacted
+		case 7:
+			return &m.Kind
+		case 8:
+			return &m.Result
+		case 9:
+			return &m.Status
+		case 10:
+			return &m.Bytes
+		case 11:
+			return &m.UaMismatch
+		}
+		return nil
+	},
+	Value: func(m *ProvFetch, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.At
+		case 2:
+			return m.PhoneID
+		case 3:
+			return m.MacClaimed
+		case 4:
+			return m.IP
+		case 5:
+			return m.UserAgent
+		case 6:
+			return m.PathRedacted
+		case 7:
+			return m.Kind
+		case 8:
+			return m.Result
+		case 9:
+			return m.Status
+		case 10:
+			return m.Bytes
+		case 11:
+			return m.UaMismatch
+		}
+		return nil
+	},
+	TableSchema: &provFetchTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var provFetchTable = schema.Table{
+	Name: "prov_fetches",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name:    "at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "phone_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "mac_claimed",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "ip",
+			Type:     "inet",
+			Nullable: true,
+		},
+		{
+			Name:    "user_agent",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name: "path_redacted",
+			Type: "text",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "result",
+			Type: "text",
+		},
+		{
+			Name: "status",
+			Type: "integer",
+		},
+		{
+			Name:    "bytes",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "ua_mismatch",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "prov_fetches_at",
+			Parts: []schema.IndexPart{
+				{
+					Column: "at",
+				},
+			},
+		},
+		{
+			Name: "prov_fetches_phone_at",
+			Parts: []schema.IndexPart{
+				{
+					Column: "phone_id",
+				},
+				{
+					Column: "at",
+					Desc:   true,
+				},
+			},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "prov_fetches_bytes_check",
+			Expr: "(bytes >= 0)",
+		},
+		{
+			Name: "prov_fetches_kind_check",
+			Expr: "\"kind\" IN ('boot','ca','common','device','firmware','master','other','phonebook','ringtone','scep','upload')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"boot", "ca", "common", "device", "firmware", "master", "other", "phonebook", "ringtone", "scep", "upload"},
+			},
+		},
+		{
+			Name: "prov_fetches_path_redacted_check",
+			Expr: "(path_redacted !~ '^/p/[a-z2-7]{52}(/|$)'::text)",
+		},
+		{
+			Name: "prov_fetches_result_check",
+			Expr: "\"result\" IN ('boot_denied','boot_handoff','boot_reclaim','boot_served','mac_mismatch','no_template','not_allowlisted','not_found','not_modified','plain_http','rate_limited','render_error','scep_issued','scep_refused','served','unavailable','unknown_token','upload_discarded')",
+			In: &schema.CheckIn{
+				Column: "result",
+				Values: []string{"boot_denied", "boot_handoff", "boot_reclaim", "boot_served", "mac_mismatch", "no_template", "not_allowlisted", "not_found", "not_modified", "plain_http", "rate_limited", "render_error", "scep_issued", "scep_refused", "served", "unavailable", "unknown_token", "upload_discarded"},
+			},
+		},
+		{
+			Name: "prov_fetches_user_agent_check",
+			Expr: "(octet_length(user_agent) <= 256)",
+		},
+	},
+}
+
+func (*ProvFirmware) MomoMeta() *momo.Meta[ProvFirmware] { return &provFirmwareMeta }
+
+var provFirmwareMeta = momo.Meta[ProvFirmware]{
+	Table: "prov_firmware",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "vendor"},
+		{Name: "model_glob"},
+		{Name: "version"},
+		{Name: "filename"},
+		{Name: "object_key"},
+		{Name: "size"},
+		{Name: "sha256"},
+		{Name: "uploaded_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ProvFirmware, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Vendor
+		case 2:
+			return &m.ModelGlob
+		case 3:
+			return &m.Version
+		case 4:
+			return &m.Filename
+		case 5:
+			return &m.ObjectKey
+		case 6:
+			return &m.Size
+		case 7:
+			return &m.Sha256
+		case 8:
+			return &m.UploadedAt
+		}
+		return nil
+	},
+	Value: func(m *ProvFirmware, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Vendor
+		case 2:
+			return m.ModelGlob
+		case 3:
+			return m.Version
+		case 4:
+			return m.Filename
+		case 5:
+			return m.ObjectKey
+		case 6:
+			return m.Size
+		case 7:
+			return m.Sha256
+		case 8:
+			return m.UploadedAt
+		}
+		return nil
+	},
+	TableSchema: &provFirmwareTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var provFirmwareTable = schema.Table{
+	Name: "prov_firmware",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "vendor",
+			Type: "text",
+		},
+		{
+			Name: "model_glob",
+			Type: "text",
+		},
+		{
+			Name: "version",
+			Type: "text",
+		},
+		{
+			Name: "filename",
+			Type: "text",
+		},
+		{
+			Name: "object_key",
+			Type: "text",
+		},
+		{
+			Name: "size",
+			Type: "bigint",
+		},
+		{
+			Name: "sha256",
+			Type: "text",
+		},
+		{
+			Name:    "uploaded_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "prov_firmware_object_key_key",
+			Columns: []string{"object_key"},
+		},
+		{
+			Name:    "prov_firmware_vendor_filename_key",
+			Columns: []string{"vendor", "filename"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "prov_firmware_filename_check",
+			Expr: "(filename ~ '^[A-Za-z0-9_+-][A-Za-z0-9._+-]{0,127}$'::text)",
+		},
+		{
+			Name: "prov_firmware_model_glob_check",
+			Expr: "((length(model_glob) >= 1) AND (length(model_glob) <= 64))",
+		},
+		{
+			Name: "prov_firmware_sha256_check",
+			Expr: "(sha256 ~ '^[0-9a-f]{64}$'::text)",
+		},
+		{
+			Name: "prov_firmware_size_check",
+			Expr: "(size >= 0)",
+		},
+		{
+			Name: "prov_firmware_vendor_check",
+			Expr: "\"vendor\" IN ('fanvil','generic','grandstream','poly','snom','yealink')",
+			In: &schema.CheckIn{
+				Column: "vendor",
+				Values: []string{"fanvil", "generic", "grandstream", "poly", "snom", "yealink"},
+			},
+		},
+		{
+			Name: "prov_firmware_version_check",
+			Expr: "((length(version) >= 1) AND (length(version) <= 64))",
+		},
+	},
+}
+
+func (*ProvFirmwareMinimum) MomoMeta() *momo.Meta[ProvFirmwareMinimum] {
+	return &provFirmwareMinimumMeta
+}
+
+var provFirmwareMinimumMeta = momo.Meta[ProvFirmwareMinimum]{
+	Table: "prov_firmware_minimums",
+	Columns: []momo.ColumnMeta{
+		{Name: "vendor", Flags: momo.FlagPK},
+		{Name: "model_glob", Flags: momo.FlagPK},
+		{Name: "min_version", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "recommended", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ProvFirmwareMinimum, i int) any {
+		switch i {
+		case 0:
+			return &m.Vendor
+		case 1:
+			return &m.ModelGlob
+		case 2:
+			return &m.MinVersion
+		case 3:
+			return &m.Recommended
+		}
+		return nil
+	},
+	Value: func(m *ProvFirmwareMinimum, i int) any {
+		switch i {
+		case 0:
+			return m.Vendor
+		case 1:
+			return m.ModelGlob
+		case 2:
+			return m.MinVersion
+		case 3:
+			return m.Recommended
+		}
+		return nil
+	},
+	TableSchema: &provFirmwareMinimumTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var provFirmwareMinimumTable = schema.Table{
+	Name: "prov_firmware_minimums",
+	Columns: []schema.Column{
+		{
+			Name: "vendor",
+			Type: "text",
+		},
+		{
+			Name: "model_glob",
+			Type: "text",
+		},
+		{
+			Name:    "min_version",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "recommended",
+			Type:    "text",
+			Default: "''::text",
+		},
+	},
+	PrimaryKey: []string{"vendor", "model_glob"},
+	Checks: []schema.Check{
+		{
+			Name: "prov_firmware_minimums_min_version_check",
+			Expr: "(length(min_version) <= 64)",
+		},
+		{
+			Name: "prov_firmware_minimums_model_glob_check",
+			Expr: "((length(model_glob) >= 1) AND (length(model_glob) <= 64))",
+		},
+		{
+			Name: "prov_firmware_minimums_recommended_check",
+			Expr: "(length(recommended) <= 64)",
+		},
+		{
+			Name: "prov_firmware_minimums_vendor_check",
+			Expr: "\"vendor\" IN ('fanvil','generic','grandstream','poly','snom','yealink')",
+			In: &schema.CheckIn{
+				Column: "vendor",
+				Values: []string{"fanvil", "generic", "grandstream", "poly", "snom", "yealink"},
+			},
+		},
+	},
+}
+
+func (*ProvFirmwarePin) MomoMeta() *momo.Meta[ProvFirmwarePin] { return &provFirmwarePinMeta }
+
+var provFirmwarePinMeta = momo.Meta[ProvFirmwarePin]{
+	Table: "prov_firmware_pins",
+	Columns: []momo.ColumnMeta{
+		{Name: "vendor", Flags: momo.FlagPK},
+		{Name: "model_glob", Flags: momo.FlagPK},
+		{Name: "firmware_id"},
+		{Name: "upgrade_hour", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *ProvFirmwarePin, i int) any {
+		switch i {
+		case 0:
+			return &m.Vendor
+		case 1:
+			return &m.ModelGlob
+		case 2:
+			return &m.FirmwareID
+		case 3:
+			return &m.UpgradeHour
+		}
+		return nil
+	},
+	Value: func(m *ProvFirmwarePin, i int) any {
+		switch i {
+		case 0:
+			return m.Vendor
+		case 1:
+			return m.ModelGlob
+		case 2:
+			return m.FirmwareID
+		case 3:
+			return m.UpgradeHour
+		}
+		return nil
+	},
+	TableSchema: &provFirmwarePinTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var provFirmwarePinTable = schema.Table{
+	Name: "prov_firmware_pins",
+	Columns: []schema.Column{
+		{
+			Name: "vendor",
+			Type: "text",
+		},
+		{
+			Name: "model_glob",
+			Type: "text",
+		},
+		{
+			Name: "firmware_id",
+			Type: "bigint",
+		},
+		{
+			Name:     "upgrade_hour",
+			Type:     "smallint",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"vendor", "model_glob"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "prov_firmware_pins_firmware_id_fkey",
+			Columns:    []string{"firmware_id"},
+			RefTable:   "prov_firmware",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "prov_firmware_pins_model_glob_check",
+			Expr: "((length(model_glob) >= 1) AND (length(model_glob) <= 64))",
+		},
+		{
+			Name: "prov_firmware_pins_upgrade_hour_check",
+			Expr: "((upgrade_hour >= 0) AND (upgrade_hour <= 23))",
+		},
+		{
+			Name: "prov_firmware_pins_vendor_check",
+			Expr: "\"vendor\" IN ('fanvil','generic','grandstream','poly','snom','yealink')",
+			In: &schema.CheckIn{
+				Column: "vendor",
+				Values: []string{"fanvil", "generic", "grandstream", "poly", "snom", "yealink"},
+			},
+		},
+	},
+}
+
+func (*ProvRedirectAccount) MomoMeta() *momo.Meta[ProvRedirectAccount] {
+	return &provRedirectAccountMeta
+}
+
+var provRedirectAccountMeta = momo.Meta[ProvRedirectAccount]{
+	Table: "prov_redirect_accounts",
+	Columns: []momo.ColumnMeta{
+		{Name: "vendor", Flags: momo.FlagPK},
+		{Name: "credentials_enc", Flags: momo.FlagNullable},
+		{Name: "settings", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_check_at", Flags: momo.FlagNullable},
+		{Name: "last_check_result", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *ProvRedirectAccount, i int) any {
+		switch i {
+		case 0:
+			return &m.Vendor
+		case 1:
+			return &m.CredentialsEnc
+		case 2:
+			return &m.Settings
+		case 3:
+			return &m.Enabled
+		case 4:
+			return &m.LastCheckAt
+		case 5:
+			return &m.LastCheckResult
+		}
+		return nil
+	},
+	Value: func(m *ProvRedirectAccount, i int) any {
+		switch i {
+		case 0:
+			return m.Vendor
+		case 1:
+			return m.CredentialsEnc
+		case 2:
+			return m.Settings
+		case 3:
+			return m.Enabled
+		case 4:
+			return m.LastCheckAt
+		case 5:
+			return m.LastCheckResult
+		}
+		return nil
+	},
+	TableSchema: &provRedirectAccountTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var provRedirectAccountTable = schema.Table{
+	Name: "prov_redirect_accounts",
+	Columns: []schema.Column{
+		{
+			Name: "vendor",
+			Type: "text",
+		},
+		{
+			Name:     "credentials_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "settings",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "last_check_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "last_check_result",
+			Type:     "text",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"vendor"},
+	Checks: []schema.Check{
+		{
+			Name: "prov_redirect_accounts_settings_check",
+			Expr: "(jsonb_typeof(settings) = 'object'::text)",
+		},
+		{
+			Name: "prov_redirect_accounts_vendor_check",
+			Expr: "\"vendor\" IN ('fanvil','grandstream','poly','snom','yealink')",
+			In: &schema.CheckIn{
+				Column: "vendor",
+				Values: []string{"fanvil", "grandstream", "poly", "snom", "yealink"},
+			},
+		},
+	},
+}
+
+func (*ProvRedirectJob) MomoMeta() *momo.Meta[ProvRedirectJob] { return &provRedirectJobMeta }
+
+var provRedirectJobMeta = momo.Meta[ProvRedirectJob]{
+	Table: "prov_redirect_jobs",
+	Columns: []momo.ColumnMeta{
+		{Name: "seq", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "vendor", Flags: momo.FlagPK},
+		{Name: "mac", Flags: momo.FlagPK},
+		{Name: "op"},
+		{Name: "attempts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "next_attempt_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "first_queued_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_error", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ProvRedirectJob, i int) any {
+		switch i {
+		case 0:
+			return &m.Seq
+		case 1:
+			return &m.Vendor
+		case 2:
+			return &m.Mac
+		case 3:
+			return &m.Op
+		case 4:
+			return &m.Attempts
+		case 5:
+			return &m.NextAttemptAt
+		case 6:
+			return &m.FirstQueuedAt
+		case 7:
+			return &m.LastError
+		}
+		return nil
+	},
+	Value: func(m *ProvRedirectJob, i int) any {
+		switch i {
+		case 0:
+			return m.Seq
+		case 1:
+			return m.Vendor
+		case 2:
+			return m.Mac
+		case 3:
+			return m.Op
+		case 4:
+			return m.Attempts
+		case 5:
+			return m.NextAttemptAt
+		case 6:
+			return m.FirstQueuedAt
+		case 7:
+			return m.LastError
+		}
+		return nil
+	},
+	TableSchema: &provRedirectJobTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{1, 2},
+}
+
+var provRedirectJobTable = schema.Table{
+	Name: "prov_redirect_jobs",
+	Columns: []schema.Column{
+		{
+			Name:    "seq",
+			Type:    "bigint",
+			Default: "nextval('prov_redirect_jobs_seq'::regclass)",
+		},
+		{
+			Name: "vendor",
+			Type: "text",
+		},
+		{
+			Name: "mac",
+			Type: "text",
+		},
+		{
+			Name: "op",
+			Type: "text",
+		},
+		{
+			Name:    "attempts",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "next_attempt_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "first_queued_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "last_error",
+			Type:    "text",
+			Default: "''::text",
+		},
+	},
+	PrimaryKey: []string{"vendor", "mac"},
+	Indexes: []schema.Index{
+		{
+			Name: "prov_redirect_jobs_due",
+			Parts: []schema.IndexPart{
+				{
+					Column: "next_attempt_at",
+				},
+			},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "prov_redirect_jobs_attempts_check",
+			Expr: "(attempts >= 0)",
+		},
+		{
+			Name: "prov_redirect_jobs_mac_check",
+			Expr: "(mac ~ '^[0-9a-f]{12}$'::text)",
+		},
+		{
+			Name: "prov_redirect_jobs_op_check",
+			Expr: "\"op\" IN ('register','unregister')",
+			In: &schema.CheckIn{
+				Column: "op",
+				Values: []string{"register", "unregister"},
+			},
+		},
+		{
+			Name: "prov_redirect_jobs_vendor_check",
+			Expr: "\"vendor\" IN ('fanvil','grandstream','poly','snom','yealink')",
+			In: &schema.CheckIn{
+				Column: "vendor",
+				Values: []string{"fanvil", "grandstream", "poly", "snom", "yealink"},
+			},
+		},
+	},
+}
+
+func (*ProvSettingOverride) MomoMeta() *momo.Meta[ProvSettingOverride] {
+	return &provSettingOverrideMeta
+}
+
+var provSettingOverrideMeta = momo.Meta[ProvSettingOverride]{
+	Table: "prov_setting_overrides",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "group_id", Flags: momo.FlagNullable},
+		{Name: "phone_id", Flags: momo.FlagNullable},
+		{Name: "key"},
+		{Name: "value", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "value_enc", Flags: momo.FlagNullable},
+		{Name: "secret", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ProvSettingOverride, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.GroupID
+		case 2:
+			return &m.PhoneID
+		case 3:
+			return &m.Key
+		case 4:
+			return &m.Value
+		case 5:
+			return &m.ValueEnc
+		case 6:
+			return &m.Secret
+		case 7:
+			return &m.CreatedAt
+		case 8:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *ProvSettingOverride, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.GroupID
+		case 2:
+			return m.PhoneID
+		case 3:
+			return m.Key
+		case 4:
+			return m.Value
+		case 5:
+			return m.ValueEnc
+		case 6:
+			return m.Secret
+		case 7:
+			return m.CreatedAt
+		case 8:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &provSettingOverrideTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var provSettingOverrideTable = schema.Table{
+	Name: "prov_setting_overrides",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name:     "group_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "phone_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name: "key",
+			Type: "text",
+		},
+		{
+			Name:    "value",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "value_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "secret",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name:   "prov_setting_overrides_group_key",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "group_id",
+				},
+				{
+					Column: "key",
+				},
+			},
+			Where: "(group_id IS NOT NULL)",
+		},
+		{
+			Name:   "prov_setting_overrides_phone_key",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "phone_id",
+				},
+				{
+					Column: "key",
+				},
+			},
+			Where: "(phone_id IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "prov_setting_overrides_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "phone_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "prov_setting_overrides_phone_id_fkey",
+			Columns:    []string{"phone_id"},
+			RefTable:   "phones",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "prov_setting_overrides_check",
+			Expr: "((group_id IS NULL) <> (phone_id IS NULL))",
+		},
+		{
+			Name: "prov_setting_overrides_check1",
+			Expr: "(secret = (value_enc IS NOT NULL))",
+		},
+		{
+			Name: "prov_setting_overrides_check2",
+			Expr: "((NOT secret) OR (value = ''::text))",
+		},
+		{
+			Name: "prov_setting_overrides_key_check",
+			Expr: "(key ~ '^[A-Za-z0-9_.]{1,128}$'::text)",
+		},
+		{
+			Name: "prov_setting_overrides_value_check",
+			Expr: "(length(value) <= 1024)",
+		},
+	},
+}
+
+func (*ProvTemplate) MomoMeta() *momo.Meta[ProvTemplate] { return &provTemplateMeta }
+
+var provTemplateMeta = momo.Meta[ProvTemplate]{
+	Table: "prov_templates",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "vendor"},
+		{Name: "model_glob"},
+		{Name: "priority", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "name"},
+		{Name: "files"},
+		{Name: "builtin_ref", Flags: momo.FlagNullable},
+		{Name: "version", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ProvTemplate, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Vendor
+		case 2:
+			return &m.ModelGlob
+		case 3:
+			return &m.Priority
+		case 4:
+			return &m.Name
+		case 5:
+			return &m.Files
+		case 6:
+			return &m.BuiltinRef
+		case 7:
+			return &m.Version
+		case 8:
+			return &m.CreatedAt
+		case 9:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *ProvTemplate, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Vendor
+		case 2:
+			return m.ModelGlob
+		case 3:
+			return m.Priority
+		case 4:
+			return m.Name
+		case 5:
+			return m.Files
+		case 6:
+			return m.BuiltinRef
+		case 7:
+			return m.Version
+		case 8:
+			return m.CreatedAt
+		case 9:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &provTemplateTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var provTemplateTable = schema.Table{
+	Name: "prov_templates",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "vendor",
+			Type: "text",
+		},
+		{
+			Name: "model_glob",
+			Type: "text",
+		},
+		{
+			Name:    "priority",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "files",
+			Type: "jsonb",
+		},
+		{
+			Name:     "builtin_ref",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "version",
+			Type:    "integer",
+			Default: "1",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Checks: []schema.Check{
+		{
+			Name: "prov_templates_files_check",
+			Expr: "(jsonb_typeof(files) = 'array'::text)",
+		},
+		{
+			Name: "prov_templates_model_glob_check",
+			Expr: "((length(model_glob) >= 1) AND (length(model_glob) <= 64))",
+		},
+		{
+			Name: "prov_templates_name_check",
+			Expr: "((length(name) >= 1) AND (length(name) <= 128))",
+		},
+		{
+			Name: "prov_templates_vendor_check",
+			Expr: "\"vendor\" IN ('fanvil','generic','grandstream','poly','snom','yealink')",
+			In: &schema.CheckIn{
+				Column: "vendor",
+				Values: []string{"fanvil", "generic", "grandstream", "poly", "snom", "yealink"},
+			},
+		},
+		{
+			Name: "prov_templates_version_check",
+			Expr: "(version >= 1)",
+		},
+	},
+}
+
+func (*ProvTemplateVersion) MomoMeta() *momo.Meta[ProvTemplateVersion] {
+	return &provTemplateVersionMeta
+}
+
+var provTemplateVersionMeta = momo.Meta[ProvTemplateVersion]{
+	Table: "prov_template_versions",
+	Columns: []momo.ColumnMeta{
+		{Name: "template_id", Flags: momo.FlagPK},
+		{Name: "version", Flags: momo.FlagPK},
+		{Name: "files"},
+		{Name: "actor"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ProvTemplateVersion, i int) any {
+		switch i {
+		case 0:
+			return &m.TemplateID
+		case 1:
+			return &m.Version
+		case 2:
+			return &m.Files
+		case 3:
+			return &m.Actor
+		case 4:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *ProvTemplateVersion, i int) any {
+		switch i {
+		case 0:
+			return m.TemplateID
+		case 1:
+			return m.Version
+		case 2:
+			return m.Files
+		case 3:
+			return m.Actor
+		case 4:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &provTemplateVersionTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var provTemplateVersionTable = schema.Table{
+	Name: "prov_template_versions",
+	Columns: []schema.Column{
+		{
+			Name: "template_id",
+			Type: "bigint",
+		},
+		{
+			Name: "version",
+			Type: "integer",
+		},
+		{
+			Name: "files",
+			Type: "jsonb",
+		},
+		{
+			Name: "actor",
+			Type: "text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"template_id", "version"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "prov_template_versions_template_id_fkey",
+			Columns:    []string{"template_id"},
+			RefTable:   "prov_templates",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "prov_template_versions_files_check",
+			Expr: "(jsonb_typeof(files) = 'array'::text)",
+		},
+	},
+}
+
+func (*PttChannel) MomoMeta() *momo.Meta[PttChannel] { return &pttChannelMeta }
+
+var pttChannelMeta = momo.Meta[PttChannel]{
+	Table: "ptt_channels",
+	Columns: []momo.ColumnMeta{
+		{Name: "group_id", Flags: momo.FlagPK},
+		{Name: "channel", Flags: momo.FlagPK},
+		{Name: "label"},
+		{Name: "transmit", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "subscribe", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *PttChannel, i int) any {
+		switch i {
+		case 0:
+			return &m.GroupID
+		case 1:
+			return &m.Channel
+		case 2:
+			return &m.Label
+		case 3:
+			return &m.Transmit
+		case 4:
+			return &m.Subscribe
+		}
+		return nil
+	},
+	Value: func(m *PttChannel, i int) any {
+		switch i {
+		case 0:
+			return m.GroupID
+		case 1:
+			return m.Channel
+		case 2:
+			return m.Label
+		case 3:
+			return m.Transmit
+		case 4:
+			return m.Subscribe
+		}
+		return nil
+	},
+	TableSchema: &pttChannelTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var pttChannelTable = schema.Table{
+	Name: "ptt_channels",
+	Columns: []schema.Column{
+		{
+			Name: "group_id",
+			Type: "bigint",
+		},
+		{
+			Name: "channel",
+			Type: "integer",
+		},
+		{
+			Name: "label",
+			Type: "text",
+		},
+		{
+			Name:    "transmit",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "subscribe",
+			Type:    "boolean",
+			Default: "true",
+		},
+	},
+	PrimaryKey: []string{"group_id", "channel"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ptt_channels_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "phone_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ptt_channels_channel_check",
+			Expr: "((channel >= 1) AND (channel <= 50))",
+		},
+		{
+			Name: "ptt_channels_label_check",
+			Expr: "((char_length(label) >= 1) AND (char_length(label) <= 40))",
+		},
+	},
+}
+
+func (*Queue) MomoMeta() *momo.Meta[Queue] { return &queueMeta }
+
+var queueMeta = momo.Meta[Queue]{
+	Table: "queues",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "number", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "strategy", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "agent_timeout", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "retry_delay", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "wrap_up", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "max_callers", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "max_wait", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "join_empty", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "leave_empty", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "timeout_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "timeout_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "full_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "full_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "no_agents_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "no_agents_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "moh_class_id", Flags: momo.FlagNullable},
+		{Name: "announce_frequency", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "announce_position", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "announce_wait", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "periodic_prompt_id", Flags: momo.FlagNullable},
+		{Name: "position_prompt_id", Flags: momo.FlagNullable},
+		{Name: "wait_prompt_id", Flags: momo.FlagNullable},
+		{Name: "minutes_prompt_id", Flags: momo.FlagNullable},
+		{Name: "digits_prefix", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "breakout_key", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "breakout_prompt_id", Flags: momo.FlagNullable},
+		{Name: "breakout_voicemail", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "callback_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "callback_offer_after_seconds", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "callback_digit", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "prompt_language", Flags: momo.FlagNullable},
+		{Name: "text_enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "text_capacity", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "text_reassign_seconds", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "text_requires_idle_voice", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Queue, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Number
+		case 3:
+			return &m.Enabled
+		case 4:
+			return &m.Strategy
+		case 5:
+			return &m.AgentTimeout
+		case 6:
+			return &m.RetryDelay
+		case 7:
+			return &m.WrapUp
+		case 8:
+			return &m.MaxCallers
+		case 9:
+			return &m.MaxWait
+		case 10:
+			return &m.JoinEmpty
+		case 11:
+			return &m.LeaveEmpty
+		case 12:
+			return &m.TimeoutKind
+		case 13:
+			return &m.TimeoutTarget
+		case 14:
+			return &m.FullKind
+		case 15:
+			return &m.FullTarget
+		case 16:
+			return &m.NoAgentsKind
+		case 17:
+			return &m.NoAgentsTarget
+		case 18:
+			return &m.MohClassID
+		case 19:
+			return &m.AnnounceFrequency
+		case 20:
+			return &m.AnnouncePosition
+		case 21:
+			return &m.AnnounceWait
+		case 22:
+			return &m.PeriodicPromptID
+		case 23:
+			return &m.PositionPromptID
+		case 24:
+			return &m.WaitPromptID
+		case 25:
+			return &m.MinutesPromptID
+		case 26:
+			return &m.DigitsPrefix
+		case 27:
+			return &m.BreakoutKey
+		case 28:
+			return &m.BreakoutPromptID
+		case 29:
+			return &m.BreakoutVoicemail
+		case 30:
+			return &m.CreatedAt
+		case 31:
+			return &m.UpdatedAt
+		case 32:
+			return &m.CallbackEnabled
+		case 33:
+			return &m.CallbackOfferAfterSeconds
+		case 34:
+			return &m.CallbackDigit
+		case 35:
+			return &m.PromptLanguage
+		case 36:
+			return &m.TextEnabled
+		case 37:
+			return &m.TextCapacity
+		case 38:
+			return &m.TextReassignSeconds
+		case 39:
+			return &m.TextRequiresIdleVoice
+		}
+		return nil
+	},
+	Value: func(m *Queue, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Number
+		case 3:
+			return m.Enabled
+		case 4:
+			return m.Strategy
+		case 5:
+			return m.AgentTimeout
+		case 6:
+			return m.RetryDelay
+		case 7:
+			return m.WrapUp
+		case 8:
+			return m.MaxCallers
+		case 9:
+			return m.MaxWait
+		case 10:
+			return m.JoinEmpty
+		case 11:
+			return m.LeaveEmpty
+		case 12:
+			return m.TimeoutKind
+		case 13:
+			return m.TimeoutTarget
+		case 14:
+			return m.FullKind
+		case 15:
+			return m.FullTarget
+		case 16:
+			return m.NoAgentsKind
+		case 17:
+			return m.NoAgentsTarget
+		case 18:
+			return m.MohClassID
+		case 19:
+			return m.AnnounceFrequency
+		case 20:
+			return m.AnnouncePosition
+		case 21:
+			return m.AnnounceWait
+		case 22:
+			return m.PeriodicPromptID
+		case 23:
+			return m.PositionPromptID
+		case 24:
+			return m.WaitPromptID
+		case 25:
+			return m.MinutesPromptID
+		case 26:
+			return m.DigitsPrefix
+		case 27:
+			return m.BreakoutKey
+		case 28:
+			return m.BreakoutPromptID
+		case 29:
+			return m.BreakoutVoicemail
+		case 30:
+			return m.CreatedAt
+		case 31:
+			return m.UpdatedAt
+		case 32:
+			return m.CallbackEnabled
+		case 33:
+			return m.CallbackOfferAfterSeconds
+		case 34:
+			return m.CallbackDigit
+		case 35:
+			return m.PromptLanguage
+		case 36:
+			return m.TextEnabled
+		case 37:
+			return m.TextCapacity
+		case 38:
+			return m.TextReassignSeconds
+		case 39:
+			return m.TextRequiresIdleVoice
+		}
+		return nil
+	},
+	TableSchema: &queueTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var queueTable = schema.Table{
+	Name: "queues",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "number",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "strategy",
+			Type:    "text",
+			Default: "'ring_all'::text",
+		},
+		{
+			Name:    "agent_timeout",
+			Type:    "integer",
+			Default: "20",
+		},
+		{
+			Name:    "retry_delay",
+			Type:    "integer",
+			Default: "5",
+		},
+		{
+			Name:    "wrap_up",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "max_callers",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "max_wait",
+			Type:    "integer",
+			Default: "600",
+		},
+		{
+			Name:    "join_empty",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "leave_empty",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "timeout_kind",
+			Type:    "text",
+			Default: "'hangup'::text",
+		},
+		{
+			Name:    "timeout_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "full_kind",
+			Type:    "text",
+			Default: "'hangup'::text",
+		},
+		{
+			Name:    "full_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "no_agents_kind",
+			Type:    "text",
+			Default: "'hangup'::text",
+		},
+		{
+			Name:    "no_agents_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "moh_class_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "announce_frequency",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "announce_position",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "announce_wait",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "periodic_prompt_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "position_prompt_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "wait_prompt_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "minutes_prompt_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "digits_prefix",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "breakout_key",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "breakout_prompt_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "breakout_voicemail",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "callback_enabled",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "callback_offer_after_seconds",
+			Type:    "integer",
+			Default: "120",
+		},
+		{
+			Name:    "callback_digit",
+			Type:    "text",
+			Default: "'2'::text",
+		},
+		{
+			Name:     "prompt_language",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "text_enabled",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "text_capacity",
+			Type:    "integer",
+			Default: "3",
+		},
+		{
+			Name:    "text_reassign_seconds",
+			Type:    "integer",
+			Default: "300",
+		},
+		{
+			Name:    "text_requires_idle_voice",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "queues_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name:   "queues_number",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "number",
+				},
+			},
+			Where: "(number <> ''::text)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "queues_breakout_prompt_id_fkey",
+			Columns:    []string{"breakout_prompt_id"},
+			RefTable:   "announcements",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "queues_minutes_prompt_id_fkey",
+			Columns:    []string{"minutes_prompt_id"},
+			RefTable:   "announcements",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "queues_moh_class_id_fkey",
+			Columns:    []string{"moh_class_id"},
+			RefTable:   "moh_classes",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "queues_periodic_prompt_id_fkey",
+			Columns:    []string{"periodic_prompt_id"},
+			RefTable:   "announcements",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "queues_position_prompt_id_fkey",
+			Columns:    []string{"position_prompt_id"},
+			RefTable:   "announcements",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "queues_wait_prompt_id_fkey",
+			Columns:    []string{"wait_prompt_id"},
+			RefTable:   "announcements",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "queues_agent_timeout_check",
+			Expr: "((agent_timeout >= 5) AND (agent_timeout <= 120))",
+		},
+		{
+			Name: "queues_announce_frequency_check",
+			Expr: "((announce_frequency >= 0) AND (announce_frequency <= 600))",
+		},
+		{
+			Name: "queues_breakout_key_check",
+			Expr: "(breakout_key ~ '^[0-9*#]?$'::text)",
+		},
+		{
+			Name: "queues_breakout_voicemail_check",
+			Expr: "(breakout_voicemail ~ '^([0-9]{2,10})?$'::text)",
+		},
+		{
+			Name: "queues_callback_digit_check",
+			Expr: "(callback_digit ~ '^[0-9*#]$'::text)",
+		},
+		{
+			Name: "queues_callback_offer_after_seconds_check",
+			Expr: "((callback_offer_after_seconds >= 0) AND (callback_offer_after_seconds <= 3600))",
+		},
+		{
+			Name: "queues_digits_prefix_check",
+			Expr: "(digits_prefix ~ '^[A-Za-z0-9._-]{0,32}$'::text)",
+		},
+		{
+			Name: "queues_full_kind_check",
+			Expr: "\"full_kind\" IN ('announcement','directory','extension','external','hangup','ivr','paging','queue','ring_group','time_condition','voicemail','voicemail_group')",
+			In: &schema.CheckIn{
+				Column: "full_kind",
+				Values: []string{"announcement", "directory", "extension", "external", "hangup", "ivr", "paging", "queue", "ring_group", "time_condition", "voicemail", "voicemail_group"},
+			},
+		},
+		{
+			Name: "queues_max_callers_check",
+			Expr: "((max_callers >= 0) AND (max_callers <= 1000))",
+		},
+		{
+			Name: "queues_max_wait_check",
+			Expr: "((max_wait >= 0) AND (max_wait <= 86400))",
+		},
+		{
+			Name: "queues_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._-]{1,64}$'::text)",
+		},
+		{
+			Name: "queues_no_agents_kind_check",
+			Expr: "\"no_agents_kind\" IN ('announcement','directory','extension','external','hangup','ivr','paging','queue','ring_group','time_condition','voicemail','voicemail_group')",
+			In: &schema.CheckIn{
+				Column: "no_agents_kind",
+				Values: []string{"announcement", "directory", "extension", "external", "hangup", "ivr", "paging", "queue", "ring_group", "time_condition", "voicemail", "voicemail_group"},
+			},
+		},
+		{
+			Name: "queues_number_check",
+			Expr: "(number ~ '^([0-9]{2,16})?$'::text)",
+		},
+		{
+			Name: "queues_retry_delay_check",
+			Expr: "((retry_delay >= 0) AND (retry_delay <= 120))",
+		},
+		{
+			Name: "queues_strategy_check",
+			Expr: "\"strategy\" IN ('fewest_calls','linear','longest_idle','random','ring_all','round_robin')",
+			In: &schema.CheckIn{
+				Column: "strategy",
+				Values: []string{"fewest_calls", "linear", "longest_idle", "random", "ring_all", "round_robin"},
+			},
+		},
+		{
+			Name: "queues_text_capacity_check",
+			Expr: "((text_capacity >= 1) AND (text_capacity <= 50))",
+		},
+		{
+			Name: "queues_text_reassign_seconds_check",
+			Expr: "((text_reassign_seconds >= 0) AND (text_reassign_seconds <= 86400))",
+		},
+		{
+			Name: "queues_timeout_kind_check",
+			Expr: "\"timeout_kind\" IN ('announcement','directory','extension','external','hangup','ivr','paging','queue','ring_group','time_condition','voicemail','voicemail_group')",
+			In: &schema.CheckIn{
+				Column: "timeout_kind",
+				Values: []string{"announcement", "directory", "extension", "external", "hangup", "ivr", "paging", "queue", "ring_group", "time_condition", "voicemail", "voicemail_group"},
+			},
+		},
+		{
+			Name: "queues_wrap_up_check",
+			Expr: "((wrap_up >= 0) AND (wrap_up <= 600))",
+		},
+	},
+}
+
+func (*QueueCallback) MomoMeta() *momo.Meta[QueueCallback] { return &queueCallbackMeta }
+
+var queueCallbackMeta = momo.Meta[QueueCallback]{
+	Table: "queue_callbacks",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "queue_id"},
+		{Name: "number"},
+		{Name: "caller_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "attempts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "position_key"},
+		{Name: "next_attempt_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "claimed_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "lease_until", Flags: momo.FlagNullable},
+		{Name: "agent", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "result", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "expires_at"},
+		{Name: "finished_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *QueueCallback, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.QueueID
+		case 2:
+			return &m.Number
+		case 3:
+			return &m.CallerName
+		case 4:
+			return &m.Status
+		case 5:
+			return &m.Attempts
+		case 6:
+			return &m.PositionKey
+		case 7:
+			return &m.NextAttemptAt
+		case 8:
+			return &m.ClaimedBy
+		case 9:
+			return &m.LeaseUntil
+		case 10:
+			return &m.Agent
+		case 11:
+			return &m.Result
+		case 12:
+			return &m.CreatedAt
+		case 13:
+			return &m.ExpiresAt
+		case 14:
+			return &m.FinishedAt
+		}
+		return nil
+	},
+	Value: func(m *QueueCallback, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.QueueID
+		case 2:
+			return m.Number
+		case 3:
+			return m.CallerName
+		case 4:
+			return m.Status
+		case 5:
+			return m.Attempts
+		case 6:
+			return m.PositionKey
+		case 7:
+			return m.NextAttemptAt
+		case 8:
+			return m.ClaimedBy
+		case 9:
+			return m.LeaseUntil
+		case 10:
+			return m.Agent
+		case 11:
+			return m.Result
+		case 12:
+			return m.CreatedAt
+		case 13:
+			return m.ExpiresAt
+		case 14:
+			return m.FinishedAt
+		}
+		return nil
+	},
+	TableSchema: &queueCallbackTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var queueCallbackTable = schema.Table{
+	Name: "queue_callbacks",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "queue_id",
+			Type: "bigint",
+		},
+		{
+			Name: "number",
+			Type: "text",
+		},
+		{
+			Name:    "caller_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'waiting'::text",
+		},
+		{
+			Name:    "attempts",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name: "position_key",
+			Type: "bigint",
+		},
+		{
+			Name:    "next_attempt_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "claimed_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "lease_until",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "agent",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "result",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name: "expires_at",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:     "finished_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "queue_callbacks_due",
+			Parts: []schema.IndexPart{
+				{
+					Column: "queue_id",
+				},
+				{
+					Column: "position_key",
+				},
+			},
+			Where: "(status = ANY (ARRAY['waiting'::text, 'dialling'::text]))",
+		},
+		{
+			Name: "queue_callbacks_finished",
+			Parts: []schema.IndexPart{
+				{
+					Column: "finished_at",
+				},
+			},
+			Where: "(finished_at IS NOT NULL)",
+		},
+		{
+			Name:   "queue_callbacks_open_number",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "queue_id",
+				},
+				{
+					Column: "number",
+				},
+			},
+			Where: "(status = ANY (ARRAY['waiting'::text, 'dialling'::text]))",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "queue_callbacks_queue_id_fkey",
+			Columns:    []string{"queue_id"},
+			RefTable:   "queues",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "queue_callbacks_attempts_check",
+			Expr: "((attempts >= 0) AND (attempts <= 3))",
+		},
+		{
+			Name: "queue_callbacks_number_check",
+			Expr: "(number ~ '^\\+?[0-9]{2,20}$'::text)",
+		},
+		{
+			Name: "queue_callbacks_status_check",
+			Expr: "\"status\" IN ('cancelled','connected','dialling','expired','failed','waiting')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"cancelled", "connected", "dialling", "expired", "failed", "waiting"},
+			},
+		},
+	},
+}
+
+func (*QueueMember) MomoMeta() *momo.Meta[QueueMember] { return &queueMemberMeta }
+
+var queueMemberMeta = momo.Meta[QueueMember]{
+	Table: "queue_members",
+	Columns: []momo.ColumnMeta{
+		{Name: "queue_id", Flags: momo.FlagPK},
+		{Name: "extension_id", Flags: momo.FlagPK},
+		{Name: "dynamic", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "penalty", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "position"},
+	},
+	Ptr: func(m *QueueMember, i int) any {
+		switch i {
+		case 0:
+			return &m.QueueID
+		case 1:
+			return &m.ExtensionID
+		case 2:
+			return &m.Dynamic
+		case 3:
+			return &m.Penalty
+		case 4:
+			return &m.Position
+		}
+		return nil
+	},
+	Value: func(m *QueueMember, i int) any {
+		switch i {
+		case 0:
+			return m.QueueID
+		case 1:
+			return m.ExtensionID
+		case 2:
+			return m.Dynamic
+		case 3:
+			return m.Penalty
+		case 4:
+			return m.Position
+		}
+		return nil
+	},
+	TableSchema: &queueMemberTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var queueMemberTable = schema.Table{
+	Name: "queue_members",
+	Columns: []schema.Column{
+		{
+			Name: "queue_id",
+			Type: "bigint",
+		},
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "dynamic",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "penalty",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+	},
+	PrimaryKey: []string{"queue_id", "extension_id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "queue_members_queue_id_position_key",
+			Columns: []string{"queue_id", "position"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "queue_members_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "queue_members_queue_id_fkey",
+			Columns:    []string{"queue_id"},
+			RefTable:   "queues",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "queue_members_penalty_check",
+			Expr: "((penalty >= 0) AND (penalty <= 99))",
+		},
+		{
+			Name: "queue_members_position_check",
+			Expr: "(\"position\" >= 1)",
+		},
+	},
+}
+
+func (*Recording) MomoMeta() *momo.Meta[Recording] { return &recordingMeta }
+
+var recordingMeta = momo.Meta[Recording]{
+	Table: "recordings",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "correlation_id"},
+		{Name: "minio_object"},
+		{Name: "initiated_by"},
+		{Name: "duration_ms", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Recording, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.CorrelationID
+		case 2:
+			return &m.MinioObject
+		case 3:
+			return &m.InitiatedBy
+		case 4:
+			return &m.DurationMs
+		case 5:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *Recording, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.CorrelationID
+		case 2:
+			return m.MinioObject
+		case 3:
+			return m.InitiatedBy
+		case 4:
+			return m.DurationMs
+		case 5:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &recordingTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var recordingTable = schema.Table{
+	Name: "recordings",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "correlation_id",
+			Type: "text",
+		},
+		{
+			Name: "minio_object",
+			Type: "text",
+		},
+		{
+			Name: "initiated_by",
+			Type: "text",
+		},
+		{
+			Name:    "duration_ms",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "recordings_correlation_id_key",
+			Columns: []string{"correlation_id"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "recordings_initiated_by_check",
+			Expr: "\"initiated_by\" IN ('api','default','dtmf')",
+			In: &schema.CheckIn{
+				Column: "initiated_by",
+				Values: []string{"api", "default", "dtmf"},
+			},
+		},
+	},
+}
+
+func (*RecordingLink) MomoMeta() *momo.Meta[RecordingLink] { return &recordingLinkMeta }
+
+var recordingLinkMeta = momo.Meta[RecordingLink]{
+	Table: "recording_links",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "token_hash"},
+		{Name: "recording_id"},
+		{Name: "expires_at"},
+		{Name: "max_uses", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "uses", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_used_at", Flags: momo.FlagNullable},
+		{Name: "created_by"},
+		{Name: "connector_id", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "revoked_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *RecordingLink, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.TokenHash
+		case 2:
+			return &m.RecordingID
+		case 3:
+			return &m.ExpiresAt
+		case 4:
+			return &m.MaxUses
+		case 5:
+			return &m.Uses
+		case 6:
+			return &m.LastUsedAt
+		case 7:
+			return &m.CreatedBy
+		case 8:
+			return &m.ConnectorID
+		case 9:
+			return &m.CreatedAt
+		case 10:
+			return &m.RevokedAt
+		}
+		return nil
+	},
+	Value: func(m *RecordingLink, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.TokenHash
+		case 2:
+			return m.RecordingID
+		case 3:
+			return m.ExpiresAt
+		case 4:
+			return m.MaxUses
+		case 5:
+			return m.Uses
+		case 6:
+			return m.LastUsedAt
+		case 7:
+			return m.CreatedBy
+		case 8:
+			return m.ConnectorID
+		case 9:
+			return m.CreatedAt
+		case 10:
+			return m.RevokedAt
+		}
+		return nil
+	},
+	TableSchema: &recordingLinkTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var recordingLinkTable = schema.Table{
+	Name: "recording_links",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "token_hash",
+			Type: "bytea",
+		},
+		{
+			Name: "recording_id",
+			Type: "bigint",
+		},
+		{
+			Name: "expires_at",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:    "max_uses",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "uses",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:     "last_used_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name: "created_by",
+			Type: "text",
+		},
+		{
+			Name:     "connector_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "revoked_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "recording_links_token_hash_key",
+			Columns: []string{"token_hash"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "recording_links_expires",
+			Parts: []schema.IndexPart{
+				{
+					Column: "expires_at",
+				},
+			},
+		},
+		{
+			Name: "recording_links_recording",
+			Parts: []schema.IndexPart{
+				{
+					Column: "recording_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "recording_links_recording_id_fkey",
+			Columns:    []string{"recording_id"},
+			RefTable:   "recordings",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "recording_links_max_uses_check",
+			Expr: "(max_uses >= 0)",
+		},
+	},
+}
+
+func (*RecordingSetting) MomoMeta() *momo.Meta[RecordingSetting] { return &recordingSettingMeta }
+
+var recordingSettingMeta = momo.Meta[RecordingSetting]{
+	Table: "recording_settings",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "video_retention_days", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *RecordingSetting, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.VideoRetentionDays
+		case 2:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *RecordingSetting, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.VideoRetentionDays
+		case 2:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &recordingSettingTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var recordingSettingTable = schema.Table{
+	Name: "recording_settings",
+	Columns: []schema.Column{
+		{
+			Name:    "id",
+			Type:    "smallint",
+			Default: "1",
+		},
+		{
+			Name:    "video_retention_days",
+			Type:    "integer",
+			Default: "30",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Checks: []schema.Check{
+		{
+			Name: "recording_settings_id_check",
+			Expr: "(id = 1)",
+		},
+		{
+			Name: "recording_settings_video_retention_days_check",
+			Expr: "((video_retention_days >= 1) AND (video_retention_days <= 3650))",
+		},
+	},
+}
+
+func (*RecordingStream) MomoMeta() *momo.Meta[RecordingStream] { return &recordingStreamMeta }
+
+var recordingStreamMeta = momo.Meta[RecordingStream]{
+	Table: "recording_streams",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "call_correlation"},
+		{Name: "part"},
+		{Name: "leg"},
+		{Name: "direction", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "codec"},
+		{Name: "container"},
+		{Name: "object_prefix"},
+		{Name: "segments", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "bytes", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "width", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "height", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "offset_ms", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "duration_ms", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "segment_list", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "final_object", Flags: momo.FlagNullable},
+		{Name: "started_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ended_at", Flags: momo.FlagNullable},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "state", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "failure", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "node", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "claim_until", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *RecordingStream, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.CallCorrelation
+		case 2:
+			return &m.Part
+		case 3:
+			return &m.Leg
+		case 4:
+			return &m.Direction
+		case 5:
+			return &m.Codec
+		case 6:
+			return &m.Container
+		case 7:
+			return &m.ObjectPrefix
+		case 8:
+			return &m.Segments
+		case 9:
+			return &m.Bytes
+		case 10:
+			return &m.Width
+		case 11:
+			return &m.Height
+		case 12:
+			return &m.OffsetMs
+		case 13:
+			return &m.DurationMs
+		case 14:
+			return &m.SegmentList
+		case 15:
+			return &m.FinalObject
+		case 16:
+			return &m.StartedAt
+		case 17:
+			return &m.EndedAt
+		case 18:
+			return &m.UpdatedAt
+		case 19:
+			return &m.State
+		case 20:
+			return &m.Failure
+		case 21:
+			return &m.Node
+		case 22:
+			return &m.ClaimUntil
+		}
+		return nil
+	},
+	Value: func(m *RecordingStream, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.CallCorrelation
+		case 2:
+			return m.Part
+		case 3:
+			return m.Leg
+		case 4:
+			return m.Direction
+		case 5:
+			return m.Codec
+		case 6:
+			return m.Container
+		case 7:
+			return m.ObjectPrefix
+		case 8:
+			return m.Segments
+		case 9:
+			return m.Bytes
+		case 10:
+			return m.Width
+		case 11:
+			return m.Height
+		case 12:
+			return m.OffsetMs
+		case 13:
+			return m.DurationMs
+		case 14:
+			return m.SegmentList
+		case 15:
+			return m.FinalObject
+		case 16:
+			return m.StartedAt
+		case 17:
+			return m.EndedAt
+		case 18:
+			return m.UpdatedAt
+		case 19:
+			return m.State
+		case 20:
+			return m.Failure
+		case 21:
+			return m.Node
+		case 22:
+			return m.ClaimUntil
+		}
+		return nil
+	},
+	TableSchema: &recordingStreamTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var recordingStreamTable = schema.Table{
+	Name: "recording_streams",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "call_correlation",
+			Type: "text",
+		},
+		{
+			Name: "part",
+			Type: "integer",
+		},
+		{
+			Name: "leg",
+			Type: "text",
+		},
+		{
+			Name:    "direction",
+			Type:    "text",
+			Default: "'in'::text",
+		},
+		{
+			Name: "codec",
+			Type: "text",
+		},
+		{
+			Name: "container",
+			Type: "text",
+		},
+		{
+			Name: "object_prefix",
+			Type: "text",
+		},
+		{
+			Name:    "segments",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "bytes",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "width",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "height",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "offset_ms",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "duration_ms",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "segment_list",
+			Type:    "jsonb",
+			Default: "'[]'::jsonb",
+		},
+		{
+			Name:     "final_object",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "started_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "ended_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "state",
+			Type:    "text",
+			Default: "'recording'::text",
+		},
+		{
+			Name:    "failure",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "node",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "claim_until",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "recording_streams_call_correlation_part_leg_key",
+			Columns: []string{"call_correlation", "part", "leg"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "recording_streams_ended_idx",
+			Parts: []schema.IndexPart{
+				{
+					Column: "ended_at",
+				},
+			},
+			Where: "(state <> 'recording'::text)",
+		},
+		{
+			Name: "recording_streams_state_idx",
+			Parts: []schema.IndexPart{
+				{
+					Column: "state",
+				},
+				{
+					Column: "updated_at",
+				},
+			},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "recording_streams_bytes_check",
+			Expr: "(bytes >= 0)",
+		},
+		{
+			Name: "recording_streams_call_correlation_check",
+			Expr: "((length(call_correlation) >= 1) AND (length(call_correlation) <= 256))",
+		},
+		{
+			Name: "recording_streams_codec_check",
+			Expr: "\"codec\" IN ('h264','vp8')",
+			In: &schema.CheckIn{
+				Column: "codec",
+				Values: []string{"h264", "vp8"},
+			},
+		},
+		{
+			Name: "recording_streams_container_check",
+			Expr: "\"container\" IN ('mp4','webm')",
+			In: &schema.CheckIn{
+				Column: "container",
+				Values: []string{"mp4", "webm"},
+			},
+		},
+		{
+			Name: "recording_streams_direction_check",
+			Expr: "\"direction\" IN ('in')",
+			In: &schema.CheckIn{
+				Column: "direction",
+				Values: []string{"in"},
+			},
+		},
+		{
+			Name: "recording_streams_duration_ms_check",
+			Expr: "(duration_ms >= 0)",
+		},
+		{
+			Name: "recording_streams_failure_check",
+			Expr: "(length(failure) <= 64)",
+		},
+		{
+			Name: "recording_streams_height_check",
+			Expr: "((height >= 0) AND (height <= 16384))",
+		},
+		{
+			Name: "recording_streams_leg_check",
+			Expr: "\"leg\" IN ('callee','caller')",
+			In: &schema.CheckIn{
+				Column: "leg",
+				Values: []string{"callee", "caller"},
+			},
+		},
+		{
+			Name: "recording_streams_node_check",
+			Expr: "(length(node) <= 128)",
+		},
+		{
+			Name: "recording_streams_object_prefix_check",
+			Expr: "((length(object_prefix) >= 1) AND (length(object_prefix) <= 512))",
+		},
+		{
+			Name: "recording_streams_part_check",
+			Expr: "(part >= 1)",
+		},
+		{
+			Name: "recording_streams_segments_check",
+			Expr: "(segments >= 0)",
+		},
+		{
+			Name: "recording_streams_state_check",
+			Expr: "\"state\" IN ('ended','failed','finalized','purged','recording')",
+			In: &schema.CheckIn{
+				Column: "state",
+				Values: []string{"ended", "failed", "finalized", "purged", "recording"},
+			},
+		},
+		{
+			Name: "recording_streams_width_check",
+			Expr: "((width >= 0) AND (width <= 16384))",
+		},
+	},
+}
+
+func (*RingGroup) MomoMeta() *momo.Meta[RingGroup] { return &ringGroupMeta }
+
+var ringGroupMeta = momo.Meta[RingGroup]{
+	Table: "ring_groups",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "strategy"},
+		{Name: "hunt", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ring_timeout", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "member_delay", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ignore_dnd", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "failure_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "failure_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "moh_class_id", Flags: momo.FlagNullable},
+		{Name: "moh_ringback", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ring_tag", Flags: momo.FlagNullable},
+		{Name: "is_door", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *RingGroup, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Strategy
+		case 3:
+			return &m.Hunt
+		case 4:
+			return &m.RingTimeout
+		case 5:
+			return &m.MemberDelay
+		case 6:
+			return &m.IgnoreDnd
+		case 7:
+			return &m.FailureKind
+		case 8:
+			return &m.FailureTarget
+		case 9:
+			return &m.CreatedAt
+		case 10:
+			return &m.UpdatedAt
+		case 11:
+			return &m.MohClassID
+		case 12:
+			return &m.MohRingback
+		case 13:
+			return &m.RingTag
+		case 14:
+			return &m.IsDoor
+		}
+		return nil
+	},
+	Value: func(m *RingGroup, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Strategy
+		case 3:
+			return m.Hunt
+		case 4:
+			return m.RingTimeout
+		case 5:
+			return m.MemberDelay
+		case 6:
+			return m.IgnoreDnd
+		case 7:
+			return m.FailureKind
+		case 8:
+			return m.FailureTarget
+		case 9:
+			return m.CreatedAt
+		case 10:
+			return m.UpdatedAt
+		case 11:
+			return m.MohClassID
+		case 12:
+			return m.MohRingback
+		case 13:
+			return m.RingTag
+		case 14:
+			return m.IsDoor
+		}
+		return nil
+	},
+	TableSchema: &ringGroupTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var ringGroupTable = schema.Table{
+	Name: "ring_groups",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "strategy",
+			Type: "text",
+		},
+		{
+			Name:    "hunt",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "ring_timeout",
+			Type:    "integer",
+			Default: "30",
+		},
+		{
+			Name:    "member_delay",
+			Type:    "integer",
+			Default: "5",
+		},
+		{
+			Name:    "ignore_dnd",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "failure_kind",
+			Type:    "text",
+			Default: "'none'::text",
+		},
+		{
+			Name:    "failure_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "moh_class_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "moh_ringback",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "ring_tag",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "is_door",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "ring_groups_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ring_groups_moh_class_id_fkey",
+			Columns:    []string{"moh_class_id"},
+			RefTable:   "moh_classes",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "ring_groups_ring_tag_fkey",
+			Columns:    []string{"ring_tag"},
+			RefTable:   "ring_tags",
+			RefColumns: []string{"name"},
+			OnDelete:   "RESTRICT",
+			OnUpdate:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ring_groups_failure_kind_check",
+			Expr: "\"failure_kind\" IN ('announcement','directory','extension','external','ivr','none','queue','ring_group','time_condition','voicemail')",
+			In: &schema.CheckIn{
+				Column: "failure_kind",
+				Values: []string{"announcement", "directory", "extension", "external", "ivr", "none", "queue", "ring_group", "time_condition", "voicemail"},
+			},
+		},
+		{
+			Name: "ring_groups_member_delay_check",
+			Expr: "((member_delay >= 0) AND (member_delay <= 60))",
+		},
+		{
+			Name: "ring_groups_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._-]{1,64}$'::text)",
+		},
+		{
+			Name: "ring_groups_ring_timeout_check",
+			Expr: "((ring_timeout >= 5) AND (ring_timeout <= 300))",
+		},
+		{
+			Name: "ring_groups_strategy_check",
+			Expr: "\"strategy\" IN ('longest-idle','ring-all','round-robin','sequential','weighted')",
+			In: &schema.CheckIn{
+				Column: "strategy",
+				Values: []string{"longest-idle", "ring-all", "round-robin", "sequential", "weighted"},
+			},
+		},
+	},
+}
+
+func (*RingGroupMember) MomoMeta() *momo.Meta[RingGroupMember] { return &ringGroupMemberMeta }
+
+var ringGroupMemberMeta = momo.Meta[RingGroupMember]{
+	Table: "ring_group_members",
+	Columns: []momo.ColumnMeta{
+		{Name: "group_id", Flags: momo.FlagPK},
+		{Name: "extension_id", Flags: momo.FlagPK},
+		{Name: "position"},
+		{Name: "weight", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "delay", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "source_connector_id", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *RingGroupMember, i int) any {
+		switch i {
+		case 0:
+			return &m.GroupID
+		case 1:
+			return &m.ExtensionID
+		case 2:
+			return &m.Position
+		case 3:
+			return &m.Weight
+		case 4:
+			return &m.Delay
+		case 5:
+			return &m.SourceConnectorID
+		}
+		return nil
+	},
+	Value: func(m *RingGroupMember, i int) any {
+		switch i {
+		case 0:
+			return m.GroupID
+		case 1:
+			return m.ExtensionID
+		case 2:
+			return m.Position
+		case 3:
+			return m.Weight
+		case 4:
+			return m.Delay
+		case 5:
+			return m.SourceConnectorID
+		}
+		return nil
+	},
+	TableSchema: &ringGroupMemberTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var ringGroupMemberTable = schema.Table{
+	Name: "ring_group_members",
+	Columns: []schema.Column{
+		{
+			Name: "group_id",
+			Type: "bigint",
+		},
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+		{
+			Name:    "weight",
+			Type:    "integer",
+			Default: "1",
+		},
+		{
+			Name:    "delay",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:     "source_connector_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"group_id", "extension_id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "ring_group_members_group_id_position_key",
+			Columns: []string{"group_id", "position"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ring_group_members_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+		},
+		{
+			Name:       "ring_group_members_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "ring_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "ring_group_members_source_connector_id_fkey",
+			Columns:    []string{"source_connector_id"},
+			RefTable:   "directory_connectors",
+			RefColumns: []string{"id"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ring_group_members_delay_check",
+			Expr: "(delay >= 0)",
+		},
+		{
+			Name: "ring_group_members_position_check",
+			Expr: "(\"position\" >= 1)",
+		},
+		{
+			Name: "ring_group_members_weight_check",
+			Expr: "(weight > 0)",
+		},
+	},
+}
+
+func (*RingMap) MomoMeta() *momo.Meta[RingMap] { return &ringMapMeta }
+
+var ringMapMeta = momo.Meta[RingMap]{
+	Table: "ring_map",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "group_id", Flags: momo.FlagNullable},
+		{Name: "tag"},
+		{Name: "vendor"},
+		{Name: "tone"},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "custom_tone_id", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *RingMap, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.GroupID
+		case 2:
+			return &m.Tag
+		case 3:
+			return &m.Vendor
+		case 4:
+			return &m.Tone
+		case 5:
+			return &m.UpdatedAt
+		case 6:
+			return &m.CustomToneID
+		}
+		return nil
+	},
+	Value: func(m *RingMap, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.GroupID
+		case 2:
+			return m.Tag
+		case 3:
+			return m.Vendor
+		case 4:
+			return m.Tone
+		case 5:
+			return m.UpdatedAt
+		case 6:
+			return m.CustomToneID
+		}
+		return nil
+	},
+	TableSchema: &ringMapTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var ringMapTable = schema.Table{
+	Name: "ring_map",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name:     "group_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name: "tag",
+			Type: "text",
+		},
+		{
+			Name: "vendor",
+			Type: "text",
+		},
+		{
+			Name: "tone",
+			Type: "text",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "custom_tone_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "ring_map_custom_tone",
+			Parts: []schema.IndexPart{
+				{
+					Column: "custom_tone_id",
+				},
+			},
+			Where: "(custom_tone_id IS NOT NULL)",
+		},
+		{
+			Name:   "ring_map_key",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Expr: "coalesce(group_id, 0::bigint)",
+				},
+				{
+					Column: "tag",
+				},
+				{
+					Column: "vendor",
+				},
+			},
+		},
+		{
+			Name: "ring_map_tag",
+			Parts: []schema.IndexPart{
+				{
+					Column: "tag",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ring_map_custom_tone_id_fkey",
+			Columns:    []string{"custom_tone_id"},
+			RefTable:   "ringtones",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "ring_map_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "phone_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "ring_map_tag_fkey",
+			Columns:    []string{"tag"},
+			RefTable:   "ring_tags",
+			RefColumns: []string{"name"},
+			OnDelete:   "RESTRICT",
+			OnUpdate:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ring_map_custom_tone",
+			Expr: "((tone = 'custom'::text) = (custom_tone_id IS NOT NULL))",
+		},
+		{
+			Name: "ring_map_tone_check",
+			Expr: "(tone ~ '^[A-Za-z0-9-]{1,24}$'::text)",
+		},
+		{
+			Name: "ring_map_vendor_check",
+			Expr: "\"vendor\" IN ('fanvil','grandstream','poly','snom','yealink')",
+			In: &schema.CheckIn{
+				Column: "vendor",
+				Values: []string{"fanvil", "grandstream", "poly", "snom", "yealink"},
+			},
+		},
+	},
+}
+
+func (*RingRule) MomoMeta() *momo.Meta[RingRule] { return &ringRuleMeta }
+
+var ringRuleMeta = momo.Meta[RingRule]{
+	Table: "ring_rules",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "position"},
+		{Name: "name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "match", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "tag"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *RingRule, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Position
+		case 2:
+			return &m.Name
+		case 3:
+			return &m.Match
+		case 4:
+			return &m.Tag
+		case 5:
+			return &m.CreatedAt
+		case 6:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *RingRule, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Position
+		case 2:
+			return m.Name
+		case 3:
+			return m.Match
+		case 4:
+			return m.Tag
+		case 5:
+			return m.CreatedAt
+		case 6:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &ringRuleTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var ringRuleTable = schema.Table{
+	Name: "ring_rules",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "position",
+			Type: "integer",
+		},
+		{
+			Name:    "name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "match",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name: "tag",
+			Type: "text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "ring_rules_position",
+			Parts: []schema.IndexPart{
+				{
+					Column: "position",
+				},
+				{
+					Column: "id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "ring_rules_tag_fkey",
+			Columns:    []string{"tag"},
+			RefTable:   "ring_tags",
+			RefColumns: []string{"name"},
+			OnDelete:   "RESTRICT",
+			OnUpdate:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ring_rules_name_check",
+			Expr: "(length(name) <= 64)",
+		},
+		{
+			Name: "ring_rules_position_check",
+			Expr: "(\"position\" >= 1)",
+		},
+	},
+}
+
+func (*RingTag) MomoMeta() *momo.Meta[RingTag] { return &ringTagMeta }
+
+var ringTagMeta = momo.Meta[RingTag]{
+	Table: "ring_tags",
+	Columns: []momo.ColumnMeta{
+		{Name: "name", Flags: momo.FlagPK},
+		{Name: "builtin", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "bellcore_slot", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "description", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *RingTag, i int) any {
+		switch i {
+		case 0:
+			return &m.Name
+		case 1:
+			return &m.Builtin
+		case 2:
+			return &m.BellcoreSlot
+		case 3:
+			return &m.Description
+		case 4:
+			return &m.CreatedAt
+		case 5:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *RingTag, i int) any {
+		switch i {
+		case 0:
+			return m.Name
+		case 1:
+			return m.Builtin
+		case 2:
+			return m.BellcoreSlot
+		case 3:
+			return m.Description
+		case 4:
+			return m.CreatedAt
+		case 5:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &ringTagTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var ringTagTable = schema.Table{
+	Name: "ring_tags",
+	Columns: []schema.Column{
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "builtin",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "bellcore_slot",
+			Type:    "smallint",
+			Default: "1",
+		},
+		{
+			Name:    "description",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"name"},
+	Checks: []schema.Check{
+		{
+			Name: "ring_tags_bellcore_slot_check",
+			Expr: "((bellcore_slot >= 1) AND (bellcore_slot <= 5))",
+		},
+		{
+			Name: "ring_tags_description_check",
+			Expr: "(length(description) <= 200)",
+		},
+		{
+			Name: "ring_tags_name_check",
+			Expr: "(name ~ '^[a-z0-9-]{1,32}$'::text)",
+		},
+	},
+}
+
+func (*Ringtone) MomoMeta() *momo.Meta[Ringtone] { return &ringtoneMeta }
+
+var ringtoneMeta = momo.Meta[Ringtone]{
+	Table: "ringtones",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "object_key"},
+		{Name: "size_bytes"},
+		{Name: "sha256"},
+		{Name: "sample_rate"},
+		{Name: "duration_ms"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Ringtone, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.ObjectKey
+		case 3:
+			return &m.SizeBytes
+		case 4:
+			return &m.Sha256
+		case 5:
+			return &m.SampleRate
+		case 6:
+			return &m.DurationMs
+		case 7:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *Ringtone, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.ObjectKey
+		case 3:
+			return m.SizeBytes
+		case 4:
+			return m.Sha256
+		case 5:
+			return m.SampleRate
+		case 6:
+			return m.DurationMs
+		case 7:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &ringtoneTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var ringtoneTable = schema.Table{
+	Name: "ringtones",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "object_key",
+			Type: "text",
+		},
+		{
+			Name: "size_bytes",
+			Type: "integer",
+		},
+		{
+			Name: "sha256",
+			Type: "text",
+		},
+		{
+			Name: "sample_rate",
+			Type: "integer",
+		},
+		{
+			Name: "duration_ms",
+			Type: "integer",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "ringtones_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "ringtones_duration_ms_check",
+			Expr: "((duration_ms >= 1) AND (duration_ms <= 30000))",
+		},
+		{
+			Name: "ringtones_name_check",
+			Expr: "(name ~ '^[a-z0-9][a-z0-9-]{0,31}$'::text)",
+		},
+		{
+			Name: "ringtones_sample_rate_check",
+			Expr: "(sample_rate = ANY (ARRAY[8000, 16000]))",
+		},
+		{
+			Name: "ringtones_sha256_check",
+			Expr: "(sha256 ~ '^[0-9a-f]{64}$'::text)",
+		},
+		{
+			Name: "ringtones_size_bytes_check",
+			Expr: "((size_bytes >= 1) AND (size_bytes <= 524288))",
+		},
+	},
+}
+
+func (*SMTPSetting) MomoMeta() *momo.Meta[SMTPSetting] { return &sMTPSettingMeta }
+
+var sMTPSettingMeta = momo.Meta[SMTPSetting]{
+	Table: "smtp_settings",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "host", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "port", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "security", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "username", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "password_sealed", Flags: momo.FlagNullable},
+		{Name: "from_address", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *SMTPSetting, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Host
+		case 2:
+			return &m.Port
+		case 3:
+			return &m.Security
+		case 4:
+			return &m.Username
+		case 5:
+			return &m.PasswordSealed
+		case 6:
+			return &m.FromAddress
+		case 7:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *SMTPSetting, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Host
+		case 2:
+			return m.Port
+		case 3:
+			return m.Security
+		case 4:
+			return m.Username
+		case 5:
+			return m.PasswordSealed
+		case 6:
+			return m.FromAddress
+		case 7:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &sMTPSettingTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var sMTPSettingTable = schema.Table{
+	Name: "smtp_settings",
+	Columns: []schema.Column{
+		{
+			Name:    "id",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "host",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "port",
+			Type:    "integer",
+			Default: "587",
+		},
+		{
+			Name:    "security",
+			Type:    "text",
+			Default: "'starttls'::text",
+		},
+		{
+			Name:    "username",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "password_sealed",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "from_address",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Checks: []schema.Check{
+		{
+			Name: "smtp_settings_id_check",
+			Expr: "id",
+		},
+		{
+			Name: "smtp_settings_port_check",
+			Expr: "((port >= 1) AND (port <= 65535))",
+		},
+		{
+			Name: "smtp_settings_security_check",
+			Expr: "\"security\" IN ('none','starttls','tls')",
+			In: &schema.CheckIn{
+				Column: "security",
+				Values: []string{"none", "starttls", "tls"},
+			},
+		},
+	},
+}
+
+func (*ScepCa) MomoMeta() *momo.Meta[ScepCa] { return &scepCaMeta }
+
+var scepCaMeta = momo.Meta[ScepCa]{
+	Table: "scep_ca",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "cert_pem"},
+		{Name: "key_enc"},
+		{Name: "source"},
+		{Name: "active", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ScepCa, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.CertPem
+		case 2:
+			return &m.KeyEnc
+		case 3:
+			return &m.Source
+		case 4:
+			return &m.Active
+		case 5:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *ScepCa, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.CertPem
+		case 2:
+			return m.KeyEnc
+		case 3:
+			return m.Source
+		case 4:
+			return m.Active
+		case 5:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &scepCaTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var scepCaTable = schema.Table{
+	Name: "scep_ca",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "cert_pem",
+			Type: "text",
+		},
+		{
+			Name: "key_enc",
+			Type: "bytea",
+		},
+		{
+			Name: "source",
+			Type: "text",
+		},
+		{
+			Name:    "active",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name:   "scep_ca_one_active",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "active",
+				},
+			},
+			Where: "active",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "scep_ca_cert_pem_check",
+			Expr: "(cert_pem ~~ '-----BEGIN CERTIFICATE-----%'::text)",
+		},
+		{
+			Name: "scep_ca_source_check",
+			Expr: "\"source\" IN ('generated','imported')",
+			In: &schema.CheckIn{
+				Column: "source",
+				Values: []string{"generated", "imported"},
+			},
+		},
+	},
+}
+
+func (*ScepCertificate) MomoMeta() *momo.Meta[ScepCertificate] { return &scepCertificateMeta }
+
+var scepCertificateMeta = momo.Meta[ScepCertificate]{
+	Table: "scep_certificates",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "ca_id"},
+		{Name: "phone_id", Flags: momo.FlagNullable},
+		{Name: "mac"},
+		{Name: "serial"},
+		{Name: "subject"},
+		{Name: "key_sha256"},
+		{Name: "cert_pem"},
+		{Name: "kind"},
+		{Name: "not_before"},
+		{Name: "not_after"},
+		{Name: "issued_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "revoked_at", Flags: momo.FlagNullable},
+		{Name: "revoke_reason", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *ScepCertificate, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.CaID
+		case 2:
+			return &m.PhoneID
+		case 3:
+			return &m.Mac
+		case 4:
+			return &m.Serial
+		case 5:
+			return &m.Subject
+		case 6:
+			return &m.KeySha256
+		case 7:
+			return &m.CertPem
+		case 8:
+			return &m.Kind
+		case 9:
+			return &m.NotBefore
+		case 10:
+			return &m.NotAfter
+		case 11:
+			return &m.IssuedAt
+		case 12:
+			return &m.RevokedAt
+		case 13:
+			return &m.RevokeReason
+		}
+		return nil
+	},
+	Value: func(m *ScepCertificate, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.CaID
+		case 2:
+			return m.PhoneID
+		case 3:
+			return m.Mac
+		case 4:
+			return m.Serial
+		case 5:
+			return m.Subject
+		case 6:
+			return m.KeySha256
+		case 7:
+			return m.CertPem
+		case 8:
+			return m.Kind
+		case 9:
+			return m.NotBefore
+		case 10:
+			return m.NotAfter
+		case 11:
+			return m.IssuedAt
+		case 12:
+			return m.RevokedAt
+		case 13:
+			return m.RevokeReason
+		}
+		return nil
+	},
+	TableSchema: &scepCertificateTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var scepCertificateTable = schema.Table{
+	Name: "scep_certificates",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "ca_id",
+			Type: "bigint",
+		},
+		{
+			Name:     "phone_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name: "mac",
+			Type: "text",
+		},
+		{
+			Name: "serial",
+			Type: "text",
+		},
+		{
+			Name: "subject",
+			Type: "text",
+		},
+		{
+			Name: "key_sha256",
+			Type: "text",
+		},
+		{
+			Name: "cert_pem",
+			Type: "text",
+		},
+		{
+			Name: "kind",
+			Type: "text",
+		},
+		{
+			Name: "not_before",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name: "not_after",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:    "issued_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "revoked_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "revoke_reason",
+			Type:     "text",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "scep_certificates_serial_key",
+			Columns: []string{"serial"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "scep_certificates_phone",
+			Parts: []schema.IndexPart{
+				{
+					Column: "phone_id",
+				},
+				{
+					Column: "issued_at",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name: "scep_certificates_revoked",
+			Parts: []schema.IndexPart{
+				{
+					Column: "ca_id",
+				},
+			},
+			Where: "(revoked_at IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "scep_certificates_ca_id_fkey",
+			Columns:    []string{"ca_id"},
+			RefTable:   "scep_ca",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "scep_certificates_phone_id_fkey",
+			Columns:    []string{"phone_id"},
+			RefTable:   "phones",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "scep_certificates_check",
+			Expr: "((revoked_at IS NULL) = (revoke_reason IS NULL))",
+		},
+		{
+			Name: "scep_certificates_key_sha256_check",
+			Expr: "(key_sha256 ~ '^[0-9a-f]{64}$'::text)",
+		},
+		{
+			Name: "scep_certificates_kind_check",
+			Expr: "\"kind\" IN ('enrol','renewal')",
+			In: &schema.CheckIn{
+				Column: "kind",
+				Values: []string{"enrol", "renewal"},
+			},
+		},
+		{
+			Name: "scep_certificates_mac_check",
+			Expr: "(mac ~ '^[0-9a-f]{12}$'::text)",
+		},
+		{
+			Name: "scep_certificates_revoke_reason_check",
+			Expr: "\"revoke_reason\" IN ('cessation_of_operation','key_compromise','phone_removed','superseded','unspecified')",
+			In: &schema.CheckIn{
+				Column: "revoke_reason",
+				Values: []string{"cessation_of_operation", "key_compromise", "phone_removed", "superseded", "unspecified"},
+			},
+		},
+		{
+			Name: "scep_certificates_serial_check",
+			Expr: "(serial ~ '^[0-9a-f]{1,40}$'::text)",
+		},
+	},
+}
+
+func (*ScepChallenge) MomoMeta() *momo.Meta[ScepChallenge] { return &scepChallengeMeta }
+
+var scepChallengeMeta = momo.Meta[ScepChallenge]{
+	Table: "scep_challenges",
+	Columns: []momo.ColumnMeta{
+		{Name: "phone_id", Flags: momo.FlagPK},
+		{Name: "challenge_enc"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ScepChallenge, i int) any {
+		switch i {
+		case 0:
+			return &m.PhoneID
+		case 1:
+			return &m.ChallengeEnc
+		case 2:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *ScepChallenge, i int) any {
+		switch i {
+		case 0:
+			return m.PhoneID
+		case 1:
+			return m.ChallengeEnc
+		case 2:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &scepChallengeTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var scepChallengeTable = schema.Table{
+	Name: "scep_challenges",
+	Columns: []schema.Column{
+		{
+			Name: "phone_id",
+			Type: "bigint",
+		},
+		{
+			Name: "challenge_enc",
+			Type: "bytea",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"phone_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "scep_challenges_phone_id_fkey",
+			Columns:    []string{"phone_id"},
+			RefTable:   "phones",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*Schedule) MomoMeta() *momo.Meta[Schedule] { return &scheduleMeta }
+
+var scheduleMeta = momo.Meta[Schedule]{
+	Table: "schedules",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "time_zone"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Schedule, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.TimeZone
+		case 3:
+			return &m.CreatedAt
+		case 4:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *Schedule, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.TimeZone
+		case 3:
+			return m.CreatedAt
+		case 4:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &scheduleTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var scheduleTable = schema.Table{
+	Name: "schedules",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "time_zone",
+			Type: "text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "schedules_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "schedules_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._-]{1,64}$'::text)",
+		},
+		{
+			Name: "schedules_time_zone_check",
+			Expr: "(time_zone ~ '^[A-Za-z0-9_+/-]{1,64}$'::text)",
+		},
+	},
+}
+
+func (*ScheduleCalendar) MomoMeta() *momo.Meta[ScheduleCalendar] { return &scheduleCalendarMeta }
+
+var scheduleCalendarMeta = momo.Meta[ScheduleCalendar]{
+	Table: "schedule_calendars",
+	Columns: []momo.ColumnMeta{
+		{Name: "schedule_id", Flags: momo.FlagPK},
+		{Name: "calendar_id", Flags: momo.FlagPK},
+	},
+	Ptr: func(m *ScheduleCalendar, i int) any {
+		switch i {
+		case 0:
+			return &m.ScheduleID
+		case 1:
+			return &m.CalendarID
+		}
+		return nil
+	},
+	Value: func(m *ScheduleCalendar, i int) any {
+		switch i {
+		case 0:
+			return m.ScheduleID
+		case 1:
+			return m.CalendarID
+		}
+		return nil
+	},
+	TableSchema: &scheduleCalendarTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var scheduleCalendarTable = schema.Table{
+	Name: "schedule_calendars",
+	Columns: []schema.Column{
+		{
+			Name: "schedule_id",
+			Type: "bigint",
+		},
+		{
+			Name: "calendar_id",
+			Type: "bigint",
+		},
+	},
+	PrimaryKey: []string{"schedule_id", "calendar_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "schedule_calendars_calendar_id_fkey",
+			Columns:    []string{"calendar_id"},
+			RefTable:   "calendars",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+		{
+			Name:       "schedule_calendars_schedule_id_fkey",
+			Columns:    []string{"schedule_id"},
+			RefTable:   "schedules",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*ScheduleRange) MomoMeta() *momo.Meta[ScheduleRange] { return &scheduleRangeMeta }
+
+var scheduleRangeMeta = momo.Meta[ScheduleRange]{
+	Table: "schedule_ranges",
+	Columns: []momo.ColumnMeta{
+		{Name: "schedule_id", Flags: momo.FlagPK},
+		{Name: "weekday", Flags: momo.FlagPK},
+		{Name: "start_time", Flags: momo.FlagPK},
+		{Name: "end_time"},
+	},
+	Ptr: func(m *ScheduleRange, i int) any {
+		switch i {
+		case 0:
+			return &m.ScheduleID
+		case 1:
+			return &m.Weekday
+		case 2:
+			return &m.StartTime
+		case 3:
+			return &m.EndTime
+		}
+		return nil
+	},
+	Value: func(m *ScheduleRange, i int) any {
+		switch i {
+		case 0:
+			return m.ScheduleID
+		case 1:
+			return m.Weekday
+		case 2:
+			return m.StartTime
+		case 3:
+			return m.EndTime
+		}
+		return nil
+	},
+	TableSchema: &scheduleRangeTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1, 2},
+}
+
+var scheduleRangeTable = schema.Table{
+	Name: "schedule_ranges",
+	Columns: []schema.Column{
+		{
+			Name: "schedule_id",
+			Type: "bigint",
+		},
+		{
+			Name: "weekday",
+			Type: "smallint",
+		},
+		{
+			Name: "start_time",
+			Type: "text",
+		},
+		{
+			Name: "end_time",
+			Type: "text",
+		},
+	},
+	PrimaryKey: []string{"schedule_id", "weekday", "start_time"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "schedule_ranges_schedule_id_fkey",
+			Columns:    []string{"schedule_id"},
+			RefTable:   "schedules",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "schedule_ranges_check",
+			Expr: "(start_time <> end_time)",
+		},
+		{
+			Name: "schedule_ranges_end_time_check",
+			Expr: "(end_time ~ '^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$'::text)",
+		},
+		{
+			Name: "schedule_ranges_start_time_check",
+			Expr: "(start_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'::text)",
+		},
+		{
+			Name: "schedule_ranges_weekday_check",
+			Expr: "((weekday >= 0) AND (weekday <= 6))",
+		},
+	},
+}
+
+func (*SchemaInfo) MomoMeta() *momo.Meta[SchemaInfo] { return &schemaInfoMeta }
+
+var schemaInfoMeta = momo.Meta[SchemaInfo]{
+	Table: "schema_info",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "config_revision", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "prov_drift_checked_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *SchemaInfo, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ConfigRevision
+		case 2:
+			return &m.CreatedAt
+		case 3:
+			return &m.ProvDriftCheckedAt
+		}
+		return nil
+	},
+	Value: func(m *SchemaInfo, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ConfigRevision
+		case 2:
+			return m.CreatedAt
+		case 3:
+			return m.ProvDriftCheckedAt
+		}
+		return nil
+	},
+	TableSchema: &schemaInfoTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var schemaInfoTable = schema.Table{
+	Name: "schema_info",
+	Columns: []schema.Column{
+		{
+			Name:    "id",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "config_revision",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "prov_drift_checked_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Checks: []schema.Check{
+		{
+			Name: "schema_info_id_check",
+			Expr: "id",
+		},
+	},
+}
+
+func (*ScimGroupMember) MomoMeta() *momo.Meta[ScimGroupMember] { return &scimGroupMemberMeta }
+
+var scimGroupMemberMeta = momo.Meta[ScimGroupMember]{
+	Table: "scim_group_members",
+	Columns: []momo.ColumnMeta{
+		{Name: "group_id", Flags: momo.FlagPK},
+		{Name: "member_id", Flags: momo.FlagPK},
+	},
+	Ptr: func(m *ScimGroupMember, i int) any {
+		switch i {
+		case 0:
+			return &m.GroupID
+		case 1:
+			return &m.MemberID
+		}
+		return nil
+	},
+	Value: func(m *ScimGroupMember, i int) any {
+		switch i {
+		case 0:
+			return m.GroupID
+		case 1:
+			return m.MemberID
+		}
+		return nil
+	},
+	TableSchema: &scimGroupMemberTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var scimGroupMemberTable = schema.Table{
+	Name: "scim_group_members",
+	Columns: []schema.Column{
+		{
+			Name: "group_id",
+			Type: "text",
+		},
+		{
+			Name: "member_id",
+			Type: "text",
+		},
+	},
+	PrimaryKey: []string{"group_id", "member_id"},
+	Indexes: []schema.Index{
+		{
+			Name: "scim_group_members_member",
+			Parts: []schema.IndexPart{
+				{
+					Column: "member_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "scim_group_members_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "scim_resources",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "scim_group_members_member_id_fkey",
+			Columns:    []string{"member_id"},
+			RefTable:   "scim_resources",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*ScimResource) MomoMeta() *momo.Meta[ScimResource] { return &scimResourceMeta }
+
+var scimResourceMeta = momo.Meta[ScimResource]{
+	Table: "scim_resources",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK},
+		{Name: "connector_id"},
+		{Name: "resource_type"},
+		{Name: "name"},
+		{Name: "external_id", Flags: momo.FlagNullable},
+		{Name: "data", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "version", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "deleted_at", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *ScimResource, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ConnectorID
+		case 2:
+			return &m.ResourceType
+		case 3:
+			return &m.Name
+		case 4:
+			return &m.ExternalID
+		case 5:
+			return &m.Data
+		case 6:
+			return &m.Version
+		case 7:
+			return &m.DeletedAt
+		case 8:
+			return &m.CreatedAt
+		case 9:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *ScimResource, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ConnectorID
+		case 2:
+			return m.ResourceType
+		case 3:
+			return m.Name
+		case 4:
+			return m.ExternalID
+		case 5:
+			return m.Data
+		case 6:
+			return m.Version
+		case 7:
+			return m.DeletedAt
+		case 8:
+			return m.CreatedAt
+		case 9:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &scimResourceTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var scimResourceTable = schema.Table{
+	Name: "scim_resources",
+	Columns: []schema.Column{
+		{
+			Name: "id",
+			Type: "text",
+		},
+		{
+			Name: "connector_id",
+			Type: "bigint",
+		},
+		{
+			Name: "resource_type",
+			Type: "text",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:     "external_id",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "data",
+			Type:    "jsonb",
+			Default: "'{}'::jsonb",
+		},
+		{
+			Name:    "version",
+			Type:    "bigint",
+			Default: "1",
+		},
+		{
+			Name:     "deleted_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name:   "scim_resources_external",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "connector_id",
+				},
+				{
+					Column: "resource_type",
+				},
+				{
+					Column: "external_id",
+				},
+			},
+			Where: "((external_id IS NOT NULL) AND (deleted_at IS NULL))",
+		},
+		{
+			Name: "scim_resources_list",
+			Parts: []schema.IndexPart{
+				{
+					Column: "connector_id",
+				},
+				{
+					Column: "resource_type",
+				},
+				{
+					Column: "created_at",
+				},
+				{
+					Column: "id",
+				},
+			},
+		},
+		{
+			Name:   "scim_resources_name",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "connector_id",
+				},
+				{
+					Column: "resource_type",
+				},
+				{
+					Expr: "lower(name)",
+				},
+			},
+			Where: "(deleted_at IS NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "scim_resources_connector_id_fkey",
+			Columns:    []string{"connector_id"},
+			RefTable:   "directory_connectors",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "scim_resources_external_id_check",
+			Expr: "((external_id IS NULL) OR ((char_length(external_id) >= 1) AND (char_length(external_id) <= 512)))",
+		},
+		{
+			Name: "scim_resources_name_check",
+			Expr: "((char_length(name) >= 1) AND (char_length(name) <= 512))",
+		},
+		{
+			Name: "scim_resources_resource_type_check",
+			Expr: "\"resource_type\" IN ('Group','User')",
+			In: &schema.CheckIn{
+				Column: "resource_type",
+				Values: []string{"Group", "User"},
+			},
+		},
+	},
+}
+
+func (*ScimToken) MomoMeta() *momo.Meta[ScimToken] { return &scimTokenMeta }
+
+var scimTokenMeta = momo.Meta[ScimToken]{
+	Table: "scim_tokens",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "connector_id"},
+		{Name: "token_hash"},
+		{Name: "hint", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_used_at", Flags: momo.FlagNullable},
+		{Name: "revoked_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *ScimToken, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ConnectorID
+		case 2:
+			return &m.TokenHash
+		case 3:
+			return &m.Hint
+		case 4:
+			return &m.CreatedBy
+		case 5:
+			return &m.CreatedAt
+		case 6:
+			return &m.LastUsedAt
+		case 7:
+			return &m.RevokedAt
+		}
+		return nil
+	},
+	Value: func(m *ScimToken, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ConnectorID
+		case 2:
+			return m.TokenHash
+		case 3:
+			return m.Hint
+		case 4:
+			return m.CreatedBy
+		case 5:
+			return m.CreatedAt
+		case 6:
+			return m.LastUsedAt
+		case 7:
+			return m.RevokedAt
+		}
+		return nil
+	},
+	TableSchema: &scimTokenTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var scimTokenTable = schema.Table{
+	Name: "scim_tokens",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "connector_id",
+			Type: "bigint",
+		},
+		{
+			Name: "token_hash",
+			Type: "bytea",
+		},
+		{
+			Name:    "hint",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "last_used_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "revoked_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "scim_tokens_token_hash_key",
+			Columns: []string{"token_hash"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "scim_tokens_connector",
+			Parts: []schema.IndexPart{
+				{
+					Column: "connector_id",
+				},
+				{
+					Column: "id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "scim_tokens_connector_id_fkey",
+			Columns:    []string{"connector_id"},
+			RefTable:   "directory_connectors",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*Session) MomoMeta() *momo.Meta[Session] { return &sessionMeta }
+
+var sessionMeta = momo.Meta[Session]{
+	Table: "sessions",
+	Columns: []momo.ColumnMeta{
+		{Name: "token_hash", Flags: momo.FlagPK},
+		{Name: "user_id"},
+		{Name: "expires_at"},
+	},
+	Ptr: func(m *Session, i int) any {
+		switch i {
+		case 0:
+			return &m.TokenHash
+		case 1:
+			return &m.UserID
+		case 2:
+			return &m.ExpiresAt
+		}
+		return nil
+	},
+	Value: func(m *Session, i int) any {
+		switch i {
+		case 0:
+			return m.TokenHash
+		case 1:
+			return m.UserID
+		case 2:
+			return m.ExpiresAt
+		}
+		return nil
+	},
+	TableSchema: &sessionTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var sessionTable = schema.Table{
+	Name: "sessions",
+	Columns: []schema.Column{
+		{
+			Name: "token_hash",
+			Type: "bytea",
+		},
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name: "expires_at",
+			Type: "timestamp with time zone",
+		},
+	},
+	PrimaryKey: []string{"token_hash"},
+	Indexes: []schema.Index{
+		{
+			Name: "sessions_expires_at",
+			Parts: []schema.IndexPart{
+				{
+					Column: "expires_at",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "sessions_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*SlackDestination) MomoMeta() *momo.Meta[SlackDestination] { return &slackDestinationMeta }
+
+var slackDestinationMeta = momo.Meta[SlackDestination]{
+	Table: "slack_destinations",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "mode"},
+		{Name: "secret_enc"},
+		{Name: "channel", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "events", Flags: momo.FlagDBDefault},
+		{Name: "extensions", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "disabled_reason", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "consecutive_failures", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_success_at", Flags: momo.FlagNullable},
+		{Name: "last_failure_at", Flags: momo.FlagNullable},
+		{Name: "last_error", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *SlackDestination, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Mode
+		case 3:
+			return &m.SecretEnc
+		case 4:
+			return &m.Channel
+		case 5:
+			return &m.Events
+		case 6:
+			return &m.Extensions
+		case 7:
+			return &m.Enabled
+		case 8:
+			return &m.DisabledReason
+		case 9:
+			return &m.ConsecutiveFailures
+		case 10:
+			return &m.LastSuccessAt
+		case 11:
+			return &m.LastFailureAt
+		case 12:
+			return &m.LastError
+		case 13:
+			return &m.CreatedBy
+		case 14:
+			return &m.CreatedAt
+		case 15:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *SlackDestination, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Mode
+		case 3:
+			return m.SecretEnc
+		case 4:
+			return m.Channel
+		case 5:
+			return m.Events
+		case 6:
+			return m.Extensions
+		case 7:
+			return m.Enabled
+		case 8:
+			return m.DisabledReason
+		case 9:
+			return m.ConsecutiveFailures
+		case 10:
+			return m.LastSuccessAt
+		case 11:
+			return m.LastFailureAt
+		case 12:
+			return m.LastError
+		case 13:
+			return m.CreatedBy
+		case 14:
+			return m.CreatedAt
+		case 15:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &slackDestinationTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var slackDestinationTable = schema.Table{
+	Name: "slack_destinations",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "mode",
+			Type: "text",
+		},
+		{
+			Name: "secret_enc",
+			Type: "bytea",
+		},
+		{
+			Name:    "channel",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "events",
+			Type:    "text[]",
+			Default: "'{call.missed,voicemail.received}'::text[]",
+		},
+		{
+			Name:    "extensions",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "disabled_reason",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "consecutive_failures",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:     "last_success_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "last_failure_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "last_error",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "slack_destinations_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "slack_destinations_mode_check",
+			Expr: "\"mode\" IN ('bot','webhook')",
+			In: &schema.CheckIn{
+				Column: "mode",
+				Values: []string{"bot", "webhook"},
+			},
+		},
+	},
+}
+
+func (*SlackPost) MomoMeta() *momo.Meta[SlackPost] { return &slackPostMeta }
+
+var slackPostMeta = momo.Meta[SlackPost]{
+	Table: "slack_posts",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "destination_id"},
+		{Name: "event_id"},
+		{Name: "event_type"},
+		{Name: "status"},
+		{Name: "attempts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "series_attempt", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "next_attempt_at", Flags: momo.FlagNullable},
+		{Name: "claimed_until", Flags: momo.FlagNullable},
+		{Name: "last_error", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "delivered_at", Flags: momo.FlagNullable},
+		{Name: "payload"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *SlackPost, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.DestinationID
+		case 2:
+			return &m.EventID
+		case 3:
+			return &m.EventType
+		case 4:
+			return &m.Status
+		case 5:
+			return &m.Attempts
+		case 6:
+			return &m.SeriesAttempt
+		case 7:
+			return &m.NextAttemptAt
+		case 8:
+			return &m.ClaimedUntil
+		case 9:
+			return &m.LastError
+		case 10:
+			return &m.DeliveredAt
+		case 11:
+			return &m.Payload
+		case 12:
+			return &m.CreatedAt
+		case 13:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *SlackPost, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.DestinationID
+		case 2:
+			return m.EventID
+		case 3:
+			return m.EventType
+		case 4:
+			return m.Status
+		case 5:
+			return m.Attempts
+		case 6:
+			return m.SeriesAttempt
+		case 7:
+			return m.NextAttemptAt
+		case 8:
+			return m.ClaimedUntil
+		case 9:
+			return m.LastError
+		case 10:
+			return m.DeliveredAt
+		case 11:
+			return m.Payload
+		case 12:
+			return m.CreatedAt
+		case 13:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &slackPostTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var slackPostTable = schema.Table{
+	Name: "slack_posts",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "destination_id",
+			Type: "bigint",
+		},
+		{
+			Name: "event_id",
+			Type: "text",
+		},
+		{
+			Name: "event_type",
+			Type: "text",
+		},
+		{
+			Name: "status",
+			Type: "text",
+		},
+		{
+			Name:    "attempts",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "series_attempt",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:     "next_attempt_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "claimed_until",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "last_error",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "delivered_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name: "payload",
+			Type: "jsonb",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "slack_posts_destination_id_event_id_key",
+			Columns: []string{"destination_id", "event_id"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "slack_posts_due",
+			Parts: []schema.IndexPart{
+				{
+					Column: "next_attempt_at",
+				},
+			},
+			Where: "(status = ANY (ARRAY['pending'::text, 'retrying'::text]))",
+		},
+		{
+			Name: "slack_posts_list",
+			Parts: []schema.IndexPart{
+				{
+					Column: "destination_id",
+				},
+				{
+					Column: "id",
+					Desc:   true,
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "slack_posts_destination_id_fkey",
+			Columns:    []string{"destination_id"},
+			RefTable:   "slack_destinations",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "slack_posts_status_check",
+			Expr: "\"status\" IN ('dead','pending','retrying','succeeded')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"dead", "pending", "retrying", "succeeded"},
+			},
+		},
+	},
+}
+
+func (*SmsOptOut) MomoMeta() *momo.Meta[SmsOptOut] { return &smsOptOutMeta }
+
+var smsOptOutMeta = momo.Meta[SmsOptOut]{
+	Table: "sms_opt_outs",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "address_id"},
+		{Name: "peer_key", Flags: momo.FlagNullable},
+		{Name: "peer_hash"},
+		{Name: "state"},
+		{Name: "source"},
+		{Name: "note", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *SmsOptOut, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.AddressID
+		case 2:
+			return &m.PeerKey
+		case 3:
+			return &m.PeerHash
+		case 4:
+			return &m.State
+		case 5:
+			return &m.Source
+		case 6:
+			return &m.Note
+		case 7:
+			return &m.At
+		}
+		return nil
+	},
+	Value: func(m *SmsOptOut, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.AddressID
+		case 2:
+			return m.PeerKey
+		case 3:
+			return m.PeerHash
+		case 4:
+			return m.State
+		case 5:
+			return m.Source
+		case 6:
+			return m.Note
+		case 7:
+			return m.At
+		}
+		return nil
+	},
+	TableSchema: &smsOptOutTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var smsOptOutTable = schema.Table{
+	Name: "sms_opt_outs",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "address_id",
+			Type: "bigint",
+		},
+		{
+			Name:     "peer_key",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name: "peer_hash",
+			Type: "bytea",
+		},
+		{
+			Name: "state",
+			Type: "text",
+		},
+		{
+			Name: "source",
+			Type: "text",
+		},
+		{
+			Name:    "note",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "sms_opt_outs_address_id_peer_hash_key",
+			Columns: []string{"address_id", "peer_hash"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "sms_opt_outs_address_id_fkey",
+			Columns:    []string{"address_id"},
+			RefTable:   "msg_addresses",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "sms_opt_outs_source_check",
+			Expr: "\"source\" IN ('admin','customer','keyword','provider')",
+			In: &schema.CheckIn{
+				Column: "source",
+				Values: []string{"admin", "customer", "keyword", "provider"},
+			},
+		},
+		{
+			Name: "sms_opt_outs_state_check",
+			Expr: "\"state\" IN ('in','out')",
+			In: &schema.CheckIn{
+				Column: "state",
+				Values: []string{"in", "out"},
+			},
+		},
+	},
+}
+
+func (*SsoProvider) MomoMeta() *momo.Meta[SsoProvider] { return &ssoProviderMeta }
+
+var ssoProviderMeta = momo.Meta[SsoProvider]{
+	Table: "sso_providers",
+	Columns: []momo.ColumnMeta{
+		{Name: "provider", Flags: momo.FlagPK},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "client_id", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "client_secret_enc", Flags: momo.FlagNullable},
+		{Name: "tenant", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "domains", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "jit", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *SsoProvider, i int) any {
+		switch i {
+		case 0:
+			return &m.Provider
+		case 1:
+			return &m.Enabled
+		case 2:
+			return &m.ClientID
+		case 3:
+			return &m.ClientSecretEnc
+		case 4:
+			return &m.Tenant
+		case 5:
+			return &m.Domains
+		case 6:
+			return &m.Jit
+		case 7:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *SsoProvider, i int) any {
+		switch i {
+		case 0:
+			return m.Provider
+		case 1:
+			return m.Enabled
+		case 2:
+			return m.ClientID
+		case 3:
+			return m.ClientSecretEnc
+		case 4:
+			return m.Tenant
+		case 5:
+			return m.Domains
+		case 6:
+			return m.Jit
+		case 7:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &ssoProviderTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var ssoProviderTable = schema.Table{
+	Name: "sso_providers",
+	Columns: []schema.Column{
+		{
+			Name: "provider",
+			Type: "text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "client_id",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "client_secret_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "tenant",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "domains",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:    "jit",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"provider"},
+	Checks: []schema.Check{
+		{
+			Name: "sso_providers_client_id_check",
+			Expr: "(char_length(client_id) <= 256)",
+		},
+		{
+			Name: "sso_providers_provider_check",
+			Expr: "\"provider\" IN ('entra','google')",
+			In: &schema.CheckIn{
+				Column: "provider",
+				Values: []string{"entra", "google"},
+			},
+		},
+		{
+			Name: "sso_providers_tenant_check",
+			Expr: "(char_length(tenant) <= 64)",
+		},
+	},
+}
+
+func (*TimeCondition) MomoMeta() *momo.Meta[TimeCondition] { return &timeConditionMeta }
+
+var timeConditionMeta = momo.Meta[TimeCondition]{
+	Table: "time_conditions",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "schedule_id"},
+		{Name: "open_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "open_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "open_then", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "closed_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "closed_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "closed_then", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "holiday_kind", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "holiday_target", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "holiday_then", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "override", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "override_at", Flags: momo.FlagNullable},
+		{Name: "override_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "toggle_number", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *TimeCondition, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.ScheduleID
+		case 3:
+			return &m.OpenKind
+		case 4:
+			return &m.OpenTarget
+		case 5:
+			return &m.OpenThen
+		case 6:
+			return &m.ClosedKind
+		case 7:
+			return &m.ClosedTarget
+		case 8:
+			return &m.ClosedThen
+		case 9:
+			return &m.HolidayKind
+		case 10:
+			return &m.HolidayTarget
+		case 11:
+			return &m.HolidayThen
+		case 12:
+			return &m.Override
+		case 13:
+			return &m.OverrideAt
+		case 14:
+			return &m.OverrideBy
+		case 15:
+			return &m.ToggleNumber
+		case 16:
+			return &m.CreatedAt
+		case 17:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *TimeCondition, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.ScheduleID
+		case 3:
+			return m.OpenKind
+		case 4:
+			return m.OpenTarget
+		case 5:
+			return m.OpenThen
+		case 6:
+			return m.ClosedKind
+		case 7:
+			return m.ClosedTarget
+		case 8:
+			return m.ClosedThen
+		case 9:
+			return m.HolidayKind
+		case 10:
+			return m.HolidayTarget
+		case 11:
+			return m.HolidayThen
+		case 12:
+			return m.Override
+		case 13:
+			return m.OverrideAt
+		case 14:
+			return m.OverrideBy
+		case 15:
+			return m.ToggleNumber
+		case 16:
+			return m.CreatedAt
+		case 17:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &timeConditionTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var timeConditionTable = schema.Table{
+	Name: "time_conditions",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "schedule_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "open_kind",
+			Type:    "text",
+			Default: "'hangup'::text",
+		},
+		{
+			Name:    "open_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "open_then",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "closed_kind",
+			Type:    "text",
+			Default: "'hangup'::text",
+		},
+		{
+			Name:    "closed_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "closed_then",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "holiday_kind",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "holiday_target",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "holiday_then",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "override",
+			Type:    "text",
+			Default: "'auto'::text",
+		},
+		{
+			Name:     "override_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "override_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "toggle_number",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "time_conditions_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name:   "time_conditions_toggle_number",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "toggle_number",
+				},
+			},
+			Where: "(toggle_number <> ''::text)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "time_conditions_schedule_id_fkey",
+			Columns:    []string{"schedule_id"},
+			RefTable:   "schedules",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "time_conditions_closed_kind_check",
+			Expr: "\"closed_kind\" IN ('announcement','directory','extension','external','hangup','ivr','paging','queue','ring_group','time_condition','voicemail','voicemail_group')",
+			In: &schema.CheckIn{
+				Column: "closed_kind",
+				Values: []string{"announcement", "directory", "extension", "external", "hangup", "ivr", "paging", "queue", "ring_group", "time_condition", "voicemail", "voicemail_group"},
+			},
+		},
+		{
+			Name: "time_conditions_closed_then_check",
+			Expr: "(closed_then ~ '^([0-9]{2,10})?$'::text)",
+		},
+		{
+			Name: "time_conditions_holiday_kind_check",
+			Expr: "\"holiday_kind\" IN ('','announcement','directory','extension','external','hangup','ivr','paging','queue','ring_group','time_condition','voicemail','voicemail_group')",
+			In: &schema.CheckIn{
+				Column: "holiday_kind",
+				Values: []string{"", "announcement", "directory", "extension", "external", "hangup", "ivr", "paging", "queue", "ring_group", "time_condition", "voicemail", "voicemail_group"},
+			},
+		},
+		{
+			Name: "time_conditions_holiday_then_check",
+			Expr: "(holiday_then ~ '^([0-9]{2,10})?$'::text)",
+		},
+		{
+			Name: "time_conditions_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._-]{1,64}$'::text)",
+		},
+		{
+			Name: "time_conditions_open_kind_check",
+			Expr: "\"open_kind\" IN ('announcement','directory','extension','external','hangup','ivr','paging','queue','ring_group','time_condition','voicemail','voicemail_group')",
+			In: &schema.CheckIn{
+				Column: "open_kind",
+				Values: []string{"announcement", "directory", "extension", "external", "hangup", "ivr", "paging", "queue", "ring_group", "time_condition", "voicemail", "voicemail_group"},
+			},
+		},
+		{
+			Name: "time_conditions_open_then_check",
+			Expr: "(open_then ~ '^([0-9]{2,10})?$'::text)",
+		},
+		{
+			Name: "time_conditions_override_check",
+			Expr: "\"override\" IN ('auto','closed','open')",
+			In: &schema.CheckIn{
+				Column: "override",
+				Values: []string{"auto", "closed", "open"},
+			},
+		},
+		{
+			Name: "time_conditions_toggle_number_check",
+			Expr: "(toggle_number ~ '^([0-9]{1,4})?$'::text)",
+		},
+	},
+}
+
+func (*Trunk) MomoMeta() *momo.Meta[Trunk] { return &trunkMeta }
+
+var trunkMeta = momo.Meta[Trunk]{
+	Table: "trunks",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "mode"},
+		{Name: "username", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "password_enc", Flags: momo.FlagNullable},
+		{Name: "realm", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "from_domain", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "register_expires", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "options_interval", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "source_cidrs", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "max_calls", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "default_caller_id", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "internal_dialing", Flags: momo.FlagDBDefault},
+		{Name: "codecs", Flags: momo.FlagDBDefault},
+		{Name: "messaging", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "session_timers", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "reject_anonymous", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "allowed_country_codes", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "unknown_caller_action", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "reject_code", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "anonymous_policy", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "asserted_identity", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "identity_header", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "fax_mode", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "geolocation", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "srtp", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "profile", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *Trunk, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.Mode
+		case 3:
+			return &m.Username
+		case 4:
+			return &m.PasswordEnc
+		case 5:
+			return &m.Realm
+		case 6:
+			return &m.FromDomain
+		case 7:
+			return &m.RegisterExpires
+		case 8:
+			return &m.OptionsInterval
+		case 9:
+			return &m.SourceCidrs
+		case 10:
+			return &m.MaxCalls
+		case 11:
+			return &m.DefaultCallerID
+		case 12:
+			return &m.Enabled
+		case 13:
+			return &m.CreatedAt
+		case 14:
+			return &m.UpdatedAt
+		case 15:
+			return &m.InternalDialing
+		case 16:
+			return &m.Codecs
+		case 17:
+			return &m.Messaging
+		case 18:
+			return &m.SessionTimers
+		case 19:
+			return &m.RejectAnonymous
+		case 20:
+			return &m.AllowedCountryCodes
+		case 21:
+			return &m.UnknownCallerAction
+		case 22:
+			return &m.RejectCode
+		case 23:
+			return &m.AnonymousPolicy
+		case 24:
+			return &m.AssertedIdentity
+		case 25:
+			return &m.IdentityHeader
+		case 26:
+			return &m.FaxMode
+		case 27:
+			return &m.Geolocation
+		case 28:
+			return &m.Srtp
+		case 29:
+			return &m.Profile
+		}
+		return nil
+	},
+	Value: func(m *Trunk, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.Mode
+		case 3:
+			return m.Username
+		case 4:
+			return m.PasswordEnc
+		case 5:
+			return m.Realm
+		case 6:
+			return m.FromDomain
+		case 7:
+			return m.RegisterExpires
+		case 8:
+			return m.OptionsInterval
+		case 9:
+			return m.SourceCidrs
+		case 10:
+			return m.MaxCalls
+		case 11:
+			return m.DefaultCallerID
+		case 12:
+			return m.Enabled
+		case 13:
+			return m.CreatedAt
+		case 14:
+			return m.UpdatedAt
+		case 15:
+			return m.InternalDialing
+		case 16:
+			return m.Codecs
+		case 17:
+			return m.Messaging
+		case 18:
+			return m.SessionTimers
+		case 19:
+			return m.RejectAnonymous
+		case 20:
+			return m.AllowedCountryCodes
+		case 21:
+			return m.UnknownCallerAction
+		case 22:
+			return m.RejectCode
+		case 23:
+			return m.AnonymousPolicy
+		case 24:
+			return m.AssertedIdentity
+		case 25:
+			return m.IdentityHeader
+		case 26:
+			return m.FaxMode
+		case 27:
+			return m.Geolocation
+		case 28:
+			return m.Srtp
+		case 29:
+			return m.Profile
+		}
+		return nil
+	},
+	TableSchema: &trunkTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var trunkTable = schema.Table{
+	Name: "trunks",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "mode",
+			Type: "text",
+		},
+		{
+			Name:    "username",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "password_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "realm",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "from_domain",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "register_expires",
+			Type:    "integer",
+			Default: "3600",
+		},
+		{
+			Name:    "options_interval",
+			Type:    "integer",
+			Default: "30",
+		},
+		{
+			Name:    "source_cidrs",
+			Type:    "cidr[]",
+			Default: "'{}'::cidr[]",
+		},
+		{
+			Name:    "max_calls",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "default_caller_id",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "internal_dialing",
+			Type:    "jsonb",
+			Default: "'{\"mode\": \"off\"}'::jsonb",
+		},
+		{
+			Name:    "codecs",
+			Type:    "jsonb",
+			Default: "'[\"PCMU\", \"PCMA\"]'::jsonb",
+		},
+		{
+			Name:    "messaging",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "session_timers",
+			Type:    "text",
+			Default: "'default'::text",
+		},
+		{
+			Name:    "reject_anonymous",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "allowed_country_codes",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:    "unknown_caller_action",
+			Type:    "text",
+			Default: "'block'::text",
+		},
+		{
+			Name:    "reject_code",
+			Type:    "integer",
+			Default: "603",
+		},
+		{
+			Name:    "anonymous_policy",
+			Type:    "text",
+			Default: "'honour'::text",
+		},
+		{
+			Name:    "asserted_identity",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "identity_header",
+			Type:    "text",
+			Default: "'pai'::text",
+		},
+		{
+			Name:    "fax_mode",
+			Type:    "text",
+			Default: "'passthrough'::text",
+		},
+		{
+			Name:    "geolocation",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "srtp",
+			Type:    "text",
+			Default: "'off'::text",
+		},
+		{
+			Name:    "profile",
+			Type:    "text",
+			Default: "'generic'::text",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "trunks_name_key",
+			Columns: []string{"name"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "trunks_anonymous_policy_check",
+			Expr: "\"anonymous_policy\" IN ('always','honour')",
+			In: &schema.CheckIn{
+				Column: "anonymous_policy",
+				Values: []string{"always", "honour"},
+			},
+		},
+		{
+			Name: "trunks_codecs_check",
+			Expr: "((jsonb_typeof(codecs) = 'array'::text) AND ((jsonb_array_length(codecs) >= 1) AND (jsonb_array_length(codecs) <= 4)))",
+		},
+		{
+			Name: "trunks_fax_mode_check",
+			Expr: "\"fax_mode\" IN ('off','passthrough','t38')",
+			In: &schema.CheckIn{
+				Column: "fax_mode",
+				Values: []string{"off", "passthrough", "t38"},
+			},
+		},
+		{
+			Name: "trunks_identity_header_check",
+			Expr: "\"identity_header\" IN ('pai','ppi')",
+			In: &schema.CheckIn{
+				Column: "identity_header",
+				Values: []string{"pai", "ppi"},
+			},
+		},
+		{
+			Name: "trunks_internal_dialing_check",
+			Expr: "((internal_dialing ->> 'mode'::text) = ANY (ARRAY['off'::text, 'patterns'::text, 'all'::text]))",
+		},
+		{
+			Name: "trunks_max_calls_check",
+			Expr: "(max_calls >= 0)",
+		},
+		{
+			Name: "trunks_mode_check",
+			Expr: "\"mode\" IN ('ip','registration')",
+			In: &schema.CheckIn{
+				Column: "mode",
+				Values: []string{"ip", "registration"},
+			},
+		},
+		{
+			Name: "trunks_name_check",
+			Expr: "(name ~ '^[A-Za-z0-9._-]{1,64}$'::text)",
+		},
+		{
+			Name: "trunks_options_interval_check",
+			Expr: "((options_interval >= 5) AND (options_interval <= 3600))",
+		},
+		{
+			Name: "trunks_profile_check",
+			Expr: "\"profile\" IN ('generic','sbc-peer')",
+			In: &schema.CheckIn{
+				Column: "profile",
+				Values: []string{"generic", "sbc-peer"},
+			},
+		},
+		{
+			Name: "trunks_register_expires_check",
+			Expr: "((register_expires >= 60) AND (register_expires <= 86400))",
+		},
+		{
+			Name: "trunks_reject_code_check",
+			Expr: "(reject_code = ANY (ARRAY[603, 486]))",
+		},
+		{
+			Name: "trunks_session_timers_check",
+			Expr: "\"session_timers\" IN ('default','off','on')",
+			In: &schema.CheckIn{
+				Column: "session_timers",
+				Values: []string{"default", "off", "on"},
+			},
+		},
+		{
+			Name: "trunks_srtp_check",
+			Expr: "\"srtp\" IN ('off','optional','required')",
+			In: &schema.CheckIn{
+				Column: "srtp",
+				Values: []string{"off", "optional", "required"},
+			},
+		},
+		{
+			Name: "trunks_unknown_caller_action_check",
+			Expr: "\"unknown_caller_action\" IN ('allow','block')",
+			In: &schema.CheckIn{
+				Column: "unknown_caller_action",
+				Values: []string{"allow", "block"},
+			},
+		},
+	},
+}
+
+func (*TrunkDestination) MomoMeta() *momo.Meta[TrunkDestination] { return &trunkDestinationMeta }
+
+var trunkDestinationMeta = momo.Meta[TrunkDestination]{
+	Table: "trunk_destinations",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "trunk_id"},
+		{Name: "host"},
+		{Name: "port", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "priority", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "weight", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *TrunkDestination, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.TrunkID
+		case 2:
+			return &m.Host
+		case 3:
+			return &m.Port
+		case 4:
+			return &m.Priority
+		case 5:
+			return &m.Weight
+		}
+		return nil
+	},
+	Value: func(m *TrunkDestination, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.TrunkID
+		case 2:
+			return m.Host
+		case 3:
+			return m.Port
+		case 4:
+			return m.Priority
+		case 5:
+			return m.Weight
+		}
+		return nil
+	},
+	TableSchema: &trunkDestinationTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var trunkDestinationTable = schema.Table{
+	Name: "trunk_destinations",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "trunk_id",
+			Type: "bigint",
+		},
+		{
+			Name: "host",
+			Type: "text",
+		},
+		{
+			Name:    "port",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "priority",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "weight",
+			Type:    "integer",
+			Default: "1",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "trunk_destinations_trunk",
+			Parts: []schema.IndexPart{
+				{
+					Column: "trunk_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "trunk_destinations_trunk_id_fkey",
+			Columns:    []string{"trunk_id"},
+			RefTable:   "trunks",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "trunk_destinations_port_check",
+			Expr: "((port >= 0) AND (port <= 65535))",
+		},
+		{
+			Name: "trunk_destinations_weight_check",
+			Expr: "(weight > 0)",
+		},
+	},
+}
+
+func (*TtsSetting) MomoMeta() *momo.Meta[TtsSetting] { return &ttsSettingMeta }
+
+var ttsSettingMeta = momo.Meta[TtsSetting]{
+	Table: "tts_settings",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK},
+		{Name: "api_key_enc", Flags: momo.FlagNullable},
+		{Name: "key_hint", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "model", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "voice", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *TtsSetting, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.APIKeyEnc
+		case 2:
+			return &m.KeyHint
+		case 3:
+			return &m.Model2
+		case 4:
+			return &m.Voice
+		case 5:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *TtsSetting, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.APIKeyEnc
+		case 2:
+			return m.KeyHint
+		case 3:
+			return m.Model2
+		case 4:
+			return m.Voice
+		case 5:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &ttsSettingTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var ttsSettingTable = schema.Table{
+	Name: "tts_settings",
+	Columns: []schema.Column{
+		{
+			Name: "id",
+			Type: "smallint",
+		},
+		{
+			Name:     "api_key_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "key_hint",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "model",
+			Type:    "text",
+			Default: "'elevenlabs/eleven-multilingual-v2'::text",
+		},
+		{
+			Name:    "voice",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Checks: []schema.Check{
+		{
+			Name: "tts_settings_id_check",
+			Expr: "(id = 1)",
+		},
+	},
+}
+
+func (*User) MomoMeta() *momo.Meta[User] { return &userMeta }
+
+var userMeta = momo.Meta[User]{
+	Table: "users",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "username"},
+		{Name: "password_hash"},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "role", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "extension_id", Flags: momo.FlagNullable},
+		{Name: "display_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "email", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "auth_method", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "must_change_password", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "vm_email_notify", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "vm_email_attach", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "vm_email_after", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "totp_secret_enc", Flags: momo.FlagNullable},
+		{Name: "totp_enabled_at", Flags: momo.FlagNullable},
+		{Name: "totp_last_step", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "totp_required", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ring_web", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "ring_mobile", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "deskphone_delivery", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "source_connector_id", Flags: momo.FlagNullable},
+		{Name: "external_id", Flags: momo.FlagNullable},
+		{Name: "managed_fields", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "disabled_at", Flags: momo.FlagNullable},
+		{Name: "absent_runs", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "provisioned_number", Flags: momo.FlagNullable},
+		{Name: "break_glass", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *User, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Username
+		case 2:
+			return &m.PasswordHash
+		case 3:
+			return &m.CreatedAt
+		case 4:
+			return &m.Role
+		case 5:
+			return &m.ExtensionID
+		case 6:
+			return &m.DisplayName
+		case 7:
+			return &m.Email
+		case 8:
+			return &m.AuthMethod
+		case 9:
+			return &m.Enabled
+		case 10:
+			return &m.MustChangePassword
+		case 11:
+			return &m.VMEmailNotify
+		case 12:
+			return &m.VMEmailAttach
+		case 13:
+			return &m.VMEmailAfter
+		case 14:
+			return &m.TotpSecretEnc
+		case 15:
+			return &m.TotpEnabledAt
+		case 16:
+			return &m.TotpLastStep
+		case 17:
+			return &m.TotpRequired
+		case 18:
+			return &m.RingWeb
+		case 19:
+			return &m.RingMobile
+		case 20:
+			return &m.DeskphoneDelivery
+		case 21:
+			return &m.SourceConnectorID
+		case 22:
+			return &m.ExternalID
+		case 23:
+			return &m.ManagedFields
+		case 24:
+			return &m.DisabledAt
+		case 25:
+			return &m.AbsentRuns
+		case 26:
+			return &m.ProvisionedNumber
+		case 27:
+			return &m.BreakGlass
+		}
+		return nil
+	},
+	Value: func(m *User, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Username
+		case 2:
+			return m.PasswordHash
+		case 3:
+			return m.CreatedAt
+		case 4:
+			return m.Role
+		case 5:
+			return m.ExtensionID
+		case 6:
+			return m.DisplayName
+		case 7:
+			return m.Email
+		case 8:
+			return m.AuthMethod
+		case 9:
+			return m.Enabled
+		case 10:
+			return m.MustChangePassword
+		case 11:
+			return m.VMEmailNotify
+		case 12:
+			return m.VMEmailAttach
+		case 13:
+			return m.VMEmailAfter
+		case 14:
+			return m.TotpSecretEnc
+		case 15:
+			return m.TotpEnabledAt
+		case 16:
+			return m.TotpLastStep
+		case 17:
+			return m.TotpRequired
+		case 18:
+			return m.RingWeb
+		case 19:
+			return m.RingMobile
+		case 20:
+			return m.DeskphoneDelivery
+		case 21:
+			return m.SourceConnectorID
+		case 22:
+			return m.ExternalID
+		case 23:
+			return m.ManagedFields
+		case 24:
+			return m.DisabledAt
+		case 25:
+			return m.AbsentRuns
+		case 26:
+			return m.ProvisionedNumber
+		case 27:
+			return m.BreakGlass
+		}
+		return nil
+	},
+	TableSchema: &userTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var userTable = schema.Table{
+	Name: "users",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "username",
+			Type: "text",
+		},
+		{
+			Name: "password_hash",
+			Type: "text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "role",
+			Type:    "text",
+			Default: "'viewer'::text",
+		},
+		{
+			Name:     "extension_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:    "display_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "email",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "auth_method",
+			Type:    "text",
+			Default: "'local'::text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "must_change_password",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "vm_email_notify",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "vm_email_attach",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "vm_email_after",
+			Type:    "text",
+			Default: "'none'::text",
+		},
+		{
+			Name:     "totp_secret_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:     "totp_enabled_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "totp_last_step",
+			Type:    "bigint",
+			Default: "0",
+		},
+		{
+			Name:    "totp_required",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "ring_web",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "ring_mobile",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "deskphone_delivery",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:     "source_connector_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "external_id",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "managed_fields",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:     "disabled_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "absent_runs",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:     "provisioned_number",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:    "break_glass",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "users_extension_id_key",
+			Columns: []string{"extension_id"},
+		},
+		{
+			Name:    "users_username_key",
+			Columns: []string{"username"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name:   "users_source_external",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "source_connector_id",
+				},
+				{
+					Column: "external_id",
+				},
+			},
+			Where: "(source_connector_id IS NOT NULL)",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "users_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+		{
+			Name:       "users_source_connector_id_fkey",
+			Columns:    []string{"source_connector_id"},
+			RefTable:   "directory_connectors",
+			RefColumns: []string{"id"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "users_auth_method_check",
+			Expr: "\"auth_method\" IN ('local')",
+			In: &schema.CheckIn{
+				Column: "auth_method",
+				Values: []string{"local"},
+			},
+		},
+		{
+			Name: "users_provisioned_number_check",
+			Expr: "((provisioned_number IS NULL) OR (provisioned_number ~ '^[0-9]{2,10}$'::text))",
+		},
+		{
+			Name: "users_role_check",
+			Expr: "\"role\" IN ('admin','operator','user','viewer')",
+			In: &schema.CheckIn{
+				Column: "role",
+				Values: []string{"admin", "operator", "user", "viewer"},
+			},
+		},
+		{
+			Name: "users_source_pair",
+			Expr: "((source_connector_id IS NULL) = (external_id IS NULL))",
+		},
+		{
+			Name: "users_vm_email_after_check",
+			Expr: "\"vm_email_after\" IN ('delete','mark_read','none')",
+			In: &schema.CheckIn{
+				Column: "vm_email_after",
+				Values: []string{"delete", "mark_read", "none"},
+			},
+		},
+	},
+}
+
+func (*UserExtension) MomoMeta() *momo.Meta[UserExtension] { return &userExtensionMeta }
+
+var userExtensionMeta = momo.Meta[UserExtension]{
+	Table: "user_extensions",
+	Columns: []momo.ColumnMeta{
+		{Name: "user_id", Flags: momo.FlagPK},
+		{Name: "extension_id", Flags: momo.FlagPK},
+		{Name: "position", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "source_connector_id", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *UserExtension, i int) any {
+		switch i {
+		case 0:
+			return &m.UserID
+		case 1:
+			return &m.ExtensionID
+		case 2:
+			return &m.Position
+		case 3:
+			return &m.SourceConnectorID
+		}
+		return nil
+	},
+	Value: func(m *UserExtension, i int) any {
+		switch i {
+		case 0:
+			return m.UserID
+		case 1:
+			return m.ExtensionID
+		case 2:
+			return m.Position
+		case 3:
+			return m.SourceConnectorID
+		}
+		return nil
+	},
+	TableSchema: &userExtensionTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var userExtensionTable = schema.Table{
+	Name: "user_extensions",
+	Columns: []schema.Column{
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "position",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:     "source_connector_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"user_id", "extension_id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "user_extensions_extension_id_key",
+			Columns: []string{"extension_id"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "user_extensions_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "user_extensions_source_connector_id_fkey",
+			Columns:    []string{"source_connector_id"},
+			RefTable:   "directory_connectors",
+			RefColumns: []string{"id"},
+		},
+		{
+			Name:       "user_extensions_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*UserIdentity) MomoMeta() *momo.Meta[UserIdentity] { return &userIdentityMeta }
+
+var userIdentityMeta = momo.Meta[UserIdentity]{
+	Table: "user_identities",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "user_id"},
+		{Name: "provider"},
+		{Name: "subject"},
+		{Name: "tenant", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "email", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_login_at", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *UserIdentity, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.UserID
+		case 2:
+			return &m.Provider
+		case 3:
+			return &m.Subject
+		case 4:
+			return &m.Tenant
+		case 5:
+			return &m.Email
+		case 6:
+			return &m.CreatedAt
+		case 7:
+			return &m.LastLoginAt
+		}
+		return nil
+	},
+	Value: func(m *UserIdentity, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.UserID
+		case 2:
+			return m.Provider
+		case 3:
+			return m.Subject
+		case 4:
+			return m.Tenant
+		case 5:
+			return m.Email
+		case 6:
+			return m.CreatedAt
+		case 7:
+			return m.LastLoginAt
+		}
+		return nil
+	},
+	TableSchema: &userIdentityTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var userIdentityTable = schema.Table{
+	Name: "user_identities",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name: "provider",
+			Type: "text",
+		},
+		{
+			Name: "subject",
+			Type: "text",
+		},
+		{
+			Name:    "tenant",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "email",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "last_login_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name:   "user_identities_subject",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "provider",
+				},
+				{
+					Column: "subject",
+				},
+			},
+			Method: "btree",
+		},
+		{
+			Name:   "user_identities_user",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "user_id",
+				},
+				{
+					Column: "provider",
+				},
+			},
+			Method: "btree",
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "user_identities_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "user_identities_provider_check",
+			Expr: "\"provider\" IN ('entra','google')",
+			In: &schema.CheckIn{
+				Column: "provider",
+				Values: []string{"entra", "google"},
+			},
+		},
+		{
+			Name: "user_identities_subject_check",
+			Expr: "((char_length(subject) >= 1) AND (char_length(subject) <= 255))",
+		},
+	},
+}
+
+func (*UserRecoveryCode) MomoMeta() *momo.Meta[UserRecoveryCode] { return &userRecoveryCodeMeta }
+
+var userRecoveryCodeMeta = momo.Meta[UserRecoveryCode]{
+	Table: "user_recovery_codes",
+	Columns: []momo.ColumnMeta{
+		{Name: "user_id", Flags: momo.FlagPK},
+		{Name: "code_hash", Flags: momo.FlagPK},
+	},
+	Ptr: func(m *UserRecoveryCode, i int) any {
+		switch i {
+		case 0:
+			return &m.UserID
+		case 1:
+			return &m.CodeHash
+		}
+		return nil
+	},
+	Value: func(m *UserRecoveryCode, i int) any {
+		switch i {
+		case 0:
+			return m.UserID
+		case 1:
+			return m.CodeHash
+		}
+		return nil
+	},
+	TableSchema: &userRecoveryCodeTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var userRecoveryCodeTable = schema.Table{
+	Name: "user_recovery_codes",
+	Columns: []schema.Column{
+		{
+			Name: "user_id",
+			Type: "bigint",
+		},
+		{
+			Name: "code_hash",
+			Type: "bytea",
+		},
+	},
+	PrimaryKey: []string{"user_id", "code_hash"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "user_recovery_codes_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*VoicemailBox) MomoMeta() *momo.Meta[VoicemailBox] { return &voicemailBoxMeta }
+
+var voicemailBoxMeta = momo.Meta[VoicemailBox]{
+	Table: "voicemail_boxes",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "extension_id"},
+		{Name: "password_hash", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "email", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "greeting_object", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "unreachable_object", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "greeting_tts", Flags: momo.FlagNullable},
+		{Name: "unreachable_tts", Flags: momo.FlagNullable},
+		{Name: "busy_object", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "name_object", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "busy_tts", Flags: momo.FlagNullable},
+		{Name: "prompt_language", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *VoicemailBox, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ExtensionID
+		case 2:
+			return &m.PasswordHash
+		case 3:
+			return &m.Email
+		case 4:
+			return &m.GreetingObject
+		case 5:
+			return &m.UnreachableObject
+		case 6:
+			return &m.CreatedAt
+		case 7:
+			return &m.UpdatedAt
+		case 8:
+			return &m.GreetingTts
+		case 9:
+			return &m.UnreachableTts
+		case 10:
+			return &m.BusyObject
+		case 11:
+			return &m.NameObject
+		case 12:
+			return &m.BusyTts
+		case 13:
+			return &m.PromptLanguage
+		}
+		return nil
+	},
+	Value: func(m *VoicemailBox, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ExtensionID
+		case 2:
+			return m.PasswordHash
+		case 3:
+			return m.Email
+		case 4:
+			return m.GreetingObject
+		case 5:
+			return m.UnreachableObject
+		case 6:
+			return m.CreatedAt
+		case 7:
+			return m.UpdatedAt
+		case 8:
+			return m.GreetingTts
+		case 9:
+			return m.UnreachableTts
+		case 10:
+			return m.BusyObject
+		case 11:
+			return m.NameObject
+		case 12:
+			return m.BusyTts
+		case 13:
+			return m.PromptLanguage
+		}
+		return nil
+	},
+	TableSchema: &voicemailBoxTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var voicemailBoxTable = schema.Table{
+	Name: "voicemail_boxes",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+		{
+			Name:    "password_hash",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "email",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "greeting_object",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "unreachable_object",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "greeting_tts",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:     "unreachable_tts",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:    "busy_object",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "name_object",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "busy_tts",
+			Type:     "jsonb",
+			Nullable: true,
+		},
+		{
+			Name:     "prompt_language",
+			Type:     "text",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "voicemail_boxes_extension_id_key",
+			Columns: []string{"extension_id"},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "voicemail_boxes_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*VoicemailGroup) MomoMeta() *momo.Meta[VoicemailGroup] { return &voicemailGroupMeta }
+
+var voicemailGroupMeta = momo.Meta[VoicemailGroup]{
+	Table: "voicemail_groups",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "number"},
+		{Name: "name"},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "max_seconds", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *VoicemailGroup, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Number
+		case 2:
+			return &m.Name
+		case 3:
+			return &m.Enabled
+		case 4:
+			return &m.MaxSeconds
+		case 5:
+			return &m.CreatedAt
+		case 6:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *VoicemailGroup, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Number
+		case 2:
+			return m.Name
+		case 3:
+			return m.Enabled
+		case 4:
+			return m.MaxSeconds
+		case 5:
+			return m.CreatedAt
+		case 6:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &voicemailGroupTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var voicemailGroupTable = schema.Table{
+	Name: "voicemail_groups",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "number",
+			Type: "text",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "max_seconds",
+			Type:    "integer",
+			Default: "180",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "voicemail_groups_name_key",
+			Columns: []string{"name"},
+		},
+		{
+			Name:    "voicemail_groups_number_key",
+			Columns: []string{"number"},
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "voicemail_groups_max_seconds_check",
+			Expr: "((max_seconds >= 10) AND (max_seconds <= 600))",
+		},
+		{
+			Name: "voicemail_groups_name_check",
+			Expr: "((char_length(name) >= 1) AND (char_length(name) <= 64))",
+		},
+		{
+			Name: "voicemail_groups_number_check",
+			Expr: "(number ~ '^[0-9]{2,16}$'::text)",
+		},
+	},
+}
+
+func (*VoicemailGroupMember) MomoMeta() *momo.Meta[VoicemailGroupMember] {
+	return &voicemailGroupMemberMeta
+}
+
+var voicemailGroupMemberMeta = momo.Meta[VoicemailGroupMember]{
+	Table: "voicemail_group_members",
+	Columns: []momo.ColumnMeta{
+		{Name: "group_id", Flags: momo.FlagPK},
+		{Name: "extension_id", Flags: momo.FlagPK},
+	},
+	Ptr: func(m *VoicemailGroupMember, i int) any {
+		switch i {
+		case 0:
+			return &m.GroupID
+		case 1:
+			return &m.ExtensionID
+		}
+		return nil
+	},
+	Value: func(m *VoicemailGroupMember, i int) any {
+		switch i {
+		case 0:
+			return m.GroupID
+		case 1:
+			return m.ExtensionID
+		}
+		return nil
+	},
+	TableSchema: &voicemailGroupMemberTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0, 1},
+}
+
+var voicemailGroupMemberTable = schema.Table{
+	Name: "voicemail_group_members",
+	Columns: []schema.Column{
+		{
+			Name: "group_id",
+			Type: "bigint",
+		},
+		{
+			Name: "extension_id",
+			Type: "bigint",
+		},
+	},
+	PrimaryKey: []string{"group_id", "extension_id"},
+	Indexes: []schema.Index{
+		{
+			Name: "voicemail_group_members_extension",
+			Parts: []schema.IndexPart{
+				{
+					Column: "extension_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "voicemail_group_members_extension_id_fkey",
+			Columns:    []string{"extension_id"},
+			RefTable:   "extensions",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "voicemail_group_members_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "voicemail_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*VoicemailMessage) MomoMeta() *momo.Meta[VoicemailMessage] { return &voicemailMessageMeta }
+
+var voicemailMessageMeta = momo.Meta[VoicemailMessage]{
+	Table: "voicemail_messages",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "box_id"},
+		{Name: "minio_object"},
+		{Name: "caller"},
+		{Name: "duration_ms"},
+		{Name: "heard", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "email_status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "caller_name", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *VoicemailMessage, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.BoxID
+		case 2:
+			return &m.MinioObject
+		case 3:
+			return &m.Caller
+		case 4:
+			return &m.DurationMs
+		case 5:
+			return &m.Heard
+		case 6:
+			return &m.EmailStatus
+		case 7:
+			return &m.CreatedAt
+		case 8:
+			return &m.CallerName
+		}
+		return nil
+	},
+	Value: func(m *VoicemailMessage, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.BoxID
+		case 2:
+			return m.MinioObject
+		case 3:
+			return m.Caller
+		case 4:
+			return m.DurationMs
+		case 5:
+			return m.Heard
+		case 6:
+			return m.EmailStatus
+		case 7:
+			return m.CreatedAt
+		case 8:
+			return m.CallerName
+		}
+		return nil
+	},
+	TableSchema: &voicemailMessageTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var voicemailMessageTable = schema.Table{
+	Name: "voicemail_messages",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "box_id",
+			Type: "bigint",
+		},
+		{
+			Name: "minio_object",
+			Type: "text",
+		},
+		{
+			Name: "caller",
+			Type: "text",
+		},
+		{
+			Name: "duration_ms",
+			Type: "bigint",
+		},
+		{
+			Name:    "heard",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "email_status",
+			Type:    "text",
+			Default: "'pending'::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "caller_name",
+			Type:    "text",
+			Default: "''::text",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "voicemail_messages_box",
+			Parts: []schema.IndexPart{
+				{
+					Column: "box_id",
+				},
+				{
+					Column: "created_at",
+					Desc:   true,
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "voicemail_messages_box_id_fkey",
+			Columns:    []string{"box_id"},
+			RefTable:   "voicemail_boxes",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*VoicemailNotification) MomoMeta() *momo.Meta[VoicemailNotification] {
+	return &voicemailNotificationMeta
+}
+
+var voicemailNotificationMeta = momo.Meta[VoicemailNotification]{
+	Table: "voicemail_notifications",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "message_id"},
+		{Name: "user_id", Flags: momo.FlagNullable},
+		{Name: "to_email"},
+		{Name: "attach", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "after_action", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "attempts", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "next_attempt_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "claimed_at", Flags: momo.FlagNullable},
+		{Name: "last_error", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *VoicemailNotification, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.MessageID
+		case 2:
+			return &m.UserID
+		case 3:
+			return &m.ToEmail
+		case 4:
+			return &m.Attach
+		case 5:
+			return &m.AfterAction
+		case 6:
+			return &m.Status
+		case 7:
+			return &m.Attempts
+		case 8:
+			return &m.NextAttemptAt
+		case 9:
+			return &m.ClaimedAt
+		case 10:
+			return &m.LastError
+		case 11:
+			return &m.CreatedAt
+		}
+		return nil
+	},
+	Value: func(m *VoicemailNotification, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.MessageID
+		case 2:
+			return m.UserID
+		case 3:
+			return m.ToEmail
+		case 4:
+			return m.Attach
+		case 5:
+			return m.AfterAction
+		case 6:
+			return m.Status
+		case 7:
+			return m.Attempts
+		case 8:
+			return m.NextAttemptAt
+		case 9:
+			return m.ClaimedAt
+		case 10:
+			return m.LastError
+		case 11:
+			return m.CreatedAt
+		}
+		return nil
+	},
+	TableSchema: &voicemailNotificationTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var voicemailNotificationTable = schema.Table{
+	Name: "voicemail_notifications",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "message_id",
+			Type: "bigint",
+		},
+		{
+			Name:     "user_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name: "to_email",
+			Type: "text",
+		},
+		{
+			Name:    "attach",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "after_action",
+			Type:    "text",
+			Default: "'none'::text",
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'pending'::text",
+		},
+		{
+			Name:    "attempts",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "next_attempt_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "claimed_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "last_error",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "voicemail_notifications_due",
+			Parts: []schema.IndexPart{
+				{
+					Column: "status",
+				},
+				{
+					Column: "next_attempt_at",
+				},
+			},
+			Where: "(status = ANY (ARRAY['pending'::text, 'sending'::text]))",
+		},
+		{
+			Name:   "voicemail_notifications_recipient",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "message_id",
+				},
+				{
+					Expr: "lower(to_email)",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "voicemail_notifications_message_id_fkey",
+			Columns:    []string{"message_id"},
+			RefTable:   "voicemail_messages",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "voicemail_notifications_user_id_fkey",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "voicemail_notifications_after_action_check",
+			Expr: "\"after_action\" IN ('delete','mark_read','none')",
+			In: &schema.CheckIn{
+				Column: "after_action",
+				Values: []string{"delete", "mark_read", "none"},
+			},
+		},
+		{
+			Name: "voicemail_notifications_status_check",
+			Expr: "\"status\" IN ('failed','pending','sending','sent')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"failed", "pending", "sending", "sent"},
+			},
+		},
+	},
+}
+
+func (*WebhookAttempt) MomoMeta() *momo.Meta[WebhookAttempt] { return &webhookAttemptMeta }
+
+var webhookAttemptMeta = momo.Meta[WebhookAttempt]{
+	Table: "webhook_attempts",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "delivery_id"},
+		{Name: "attempt"},
+		{Name: "delivery_ref"},
+		{Name: "at"},
+		{Name: "http_status", Flags: momo.FlagNullable},
+		{Name: "error", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "latency_ms", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *WebhookAttempt, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.DeliveryID
+		case 2:
+			return &m.Attempt
+		case 3:
+			return &m.DeliveryRef
+		case 4:
+			return &m.At
+		case 5:
+			return &m.HTTPStatus
+		case 6:
+			return &m.Error
+		case 7:
+			return &m.LatencyMs
+		}
+		return nil
+	},
+	Value: func(m *WebhookAttempt, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.DeliveryID
+		case 2:
+			return m.Attempt
+		case 3:
+			return m.DeliveryRef
+		case 4:
+			return m.At
+		case 5:
+			return m.HTTPStatus
+		case 6:
+			return m.Error
+		case 7:
+			return m.LatencyMs
+		}
+		return nil
+	},
+	TableSchema: &webhookAttemptTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var webhookAttemptTable = schema.Table{
+	Name: "webhook_attempts",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "delivery_id",
+			Type: "bigint",
+		},
+		{
+			Name: "attempt",
+			Type: "integer",
+		},
+		{
+			Name: "delivery_ref",
+			Type: "text",
+		},
+		{
+			Name: "at",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:     "http_status",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:    "error",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "latency_ms",
+			Type:    "integer",
+			Default: "0",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "webhook_attempts_delivery",
+			Parts: []schema.IndexPart{
+				{
+					Column: "delivery_id",
+				},
+				{
+					Column: "attempt",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "webhook_attempts_delivery_id_fkey",
+			Columns:    []string{"delivery_id"},
+			RefTable:   "webhook_deliveries",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+}
+
+func (*WebhookDelivery) MomoMeta() *momo.Meta[WebhookDelivery] { return &webhookDeliveryMeta }
+
+var webhookDeliveryMeta = momo.Meta[WebhookDelivery]{
+	Table: "webhook_deliveries",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "endpoint_id"},
+		{Name: "event_id"},
+		{Name: "event_type"},
+		{Name: "status", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "attempt", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "series_attempt", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "next_attempt_at"},
+		{Name: "claimed_until", Flags: momo.FlagNullable},
+		{Name: "last_status", Flags: momo.FlagNullable},
+		{Name: "last_error", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_latency_ms", Flags: momo.FlagNullable},
+		{Name: "delivered_at", Flags: momo.FlagNullable},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *WebhookDelivery, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.EndpointID
+		case 2:
+			return &m.EventID
+		case 3:
+			return &m.EventType
+		case 4:
+			return &m.Status
+		case 5:
+			return &m.Attempt
+		case 6:
+			return &m.SeriesAttempt
+		case 7:
+			return &m.NextAttemptAt
+		case 8:
+			return &m.ClaimedUntil
+		case 9:
+			return &m.LastStatus
+		case 10:
+			return &m.LastError
+		case 11:
+			return &m.LastLatencyMs
+		case 12:
+			return &m.DeliveredAt
+		case 13:
+			return &m.CreatedAt
+		case 14:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *WebhookDelivery, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.EndpointID
+		case 2:
+			return m.EventID
+		case 3:
+			return m.EventType
+		case 4:
+			return m.Status
+		case 5:
+			return m.Attempt
+		case 6:
+			return m.SeriesAttempt
+		case 7:
+			return m.NextAttemptAt
+		case 8:
+			return m.ClaimedUntil
+		case 9:
+			return m.LastStatus
+		case 10:
+			return m.LastError
+		case 11:
+			return m.LastLatencyMs
+		case 12:
+			return m.DeliveredAt
+		case 13:
+			return m.CreatedAt
+		case 14:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &webhookDeliveryTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var webhookDeliveryTable = schema.Table{
+	Name: "webhook_deliveries",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "endpoint_id",
+			Type: "bigint",
+		},
+		{
+			Name: "event_id",
+			Type: "text",
+		},
+		{
+			Name: "event_type",
+			Type: "text",
+		},
+		{
+			Name:    "status",
+			Type:    "text",
+			Default: "'pending'::text",
+		},
+		{
+			Name:    "attempt",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "series_attempt",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name: "next_attempt_at",
+			Type: "timestamp with time zone",
+		},
+		{
+			Name:     "claimed_until",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "last_status",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:    "last_error",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "last_latency_ms",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:     "delivered_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Uniques: []schema.Unique{
+		{
+			Name:    "webhook_deliveries_endpoint_id_event_id_key",
+			Columns: []string{"endpoint_id", "event_id"},
+		},
+	},
+	Indexes: []schema.Index{
+		{
+			Name: "webhook_deliveries_due",
+			Parts: []schema.IndexPart{
+				{
+					Column: "status",
+				},
+				{
+					Column: "next_attempt_at",
+				},
+			},
+		},
+		{
+			Name: "webhook_deliveries_endpoint",
+			Parts: []schema.IndexPart{
+				{
+					Column: "endpoint_id",
+				},
+				{
+					Column: "id",
+					Desc:   true,
+				},
+			},
+		},
+		{
+			Name: "webhook_deliveries_event",
+			Parts: []schema.IndexPart{
+				{
+					Column: "event_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "webhook_deliveries_endpoint_id_fkey",
+			Columns:    []string{"endpoint_id"},
+			RefTable:   "webhook_endpoints",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "webhook_deliveries_status_check",
+			Expr: "\"status\" IN ('dead','pending','retrying','succeeded')",
+			In: &schema.CheckIn{
+				Column: "status",
+				Values: []string{"dead", "pending", "retrying", "succeeded"},
+			},
+		},
+	},
+}
+
+func (*WebhookEndpoint) MomoMeta() *momo.Meta[WebhookEndpoint] { return &webhookEndpointMeta }
+
+var webhookEndpointMeta = momo.Meta[WebhookEndpoint]{
+	Table: "webhook_endpoints",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "url"},
+		{Name: "secret_enc"},
+		{Name: "previous_secret_enc", Flags: momo.FlagNullable},
+		{Name: "previous_secret_expires", Flags: momo.FlagNullable},
+		{Name: "events", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "extensions", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "enabled", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "allow_private", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "disabled_reason", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "consecutive_failures", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "last_success_at", Flags: momo.FlagNullable},
+		{Name: "last_failure_at", Flags: momo.FlagNullable},
+		{Name: "last_status", Flags: momo.FlagNullable},
+		{Name: "created_by", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "include_peer", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "include_message_body", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *WebhookEndpoint, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.URL
+		case 3:
+			return &m.SecretEnc
+		case 4:
+			return &m.PreviousSecretEnc
+		case 5:
+			return &m.PreviousSecretExpires
+		case 6:
+			return &m.Events
+		case 7:
+			return &m.Extensions
+		case 8:
+			return &m.Enabled
+		case 9:
+			return &m.AllowPrivate
+		case 10:
+			return &m.DisabledReason
+		case 11:
+			return &m.ConsecutiveFailures
+		case 12:
+			return &m.LastSuccessAt
+		case 13:
+			return &m.LastFailureAt
+		case 14:
+			return &m.LastStatus
+		case 15:
+			return &m.CreatedBy
+		case 16:
+			return &m.CreatedAt
+		case 17:
+			return &m.UpdatedAt
+		case 18:
+			return &m.IncludePeer
+		case 19:
+			return &m.IncludeMessageBody
+		}
+		return nil
+	},
+	Value: func(m *WebhookEndpoint, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.URL
+		case 3:
+			return m.SecretEnc
+		case 4:
+			return m.PreviousSecretEnc
+		case 5:
+			return m.PreviousSecretExpires
+		case 6:
+			return m.Events
+		case 7:
+			return m.Extensions
+		case 8:
+			return m.Enabled
+		case 9:
+			return m.AllowPrivate
+		case 10:
+			return m.DisabledReason
+		case 11:
+			return m.ConsecutiveFailures
+		case 12:
+			return m.LastSuccessAt
+		case 13:
+			return m.LastFailureAt
+		case 14:
+			return m.LastStatus
+		case 15:
+			return m.CreatedBy
+		case 16:
+			return m.CreatedAt
+		case 17:
+			return m.UpdatedAt
+		case 18:
+			return m.IncludePeer
+		case 19:
+			return m.IncludeMessageBody
+		}
+		return nil
+	},
+	TableSchema: &webhookEndpointTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var webhookEndpointTable = schema.Table{
+	Name: "webhook_endpoints",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "url",
+			Type: "text",
+		},
+		{
+			Name: "secret_enc",
+			Type: "bytea",
+		},
+		{
+			Name:     "previous_secret_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:     "previous_secret_expires",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:    "events",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:    "extensions",
+			Type:    "text[]",
+			Default: "'{}'::text[]",
+		},
+		{
+			Name:    "enabled",
+			Type:    "boolean",
+			Default: "true",
+		},
+		{
+			Name:    "allow_private",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "disabled_reason",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "consecutive_failures",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:     "last_success_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "last_failure_at",
+			Type:     "timestamp with time zone",
+			Nullable: true,
+		},
+		{
+			Name:     "last_status",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:    "created_by",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "include_peer",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "include_message_body",
+			Type:    "boolean",
+			Default: "false",
+		},
+	},
+	PrimaryKey: []string{"id"},
+}
+
+func (*WifiAssignment) MomoMeta() *momo.Meta[WifiAssignment] { return &wifiAssignmentMeta }
+
+var wifiAssignmentMeta = momo.Meta[WifiAssignment]{
+	Table: "wifi_assignments",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "profile_id"},
+		{Name: "group_id", Flags: momo.FlagNullable},
+		{Name: "phone_id", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *WifiAssignment, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.ProfileID
+		case 2:
+			return &m.GroupID
+		case 3:
+			return &m.PhoneID
+		}
+		return nil
+	},
+	Value: func(m *WifiAssignment, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.ProfileID
+		case 2:
+			return m.GroupID
+		case 3:
+			return m.PhoneID
+		}
+		return nil
+	},
+	TableSchema: &wifiAssignmentTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var wifiAssignmentTable = schema.Table{
+	Name: "wifi_assignments",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "profile_id",
+			Type: "bigint",
+		},
+		{
+			Name:     "group_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+		{
+			Name:     "phone_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name:   "wifi_assignments_group",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "group_id",
+				},
+				{
+					Column: "profile_id",
+				},
+			},
+			Where: "(group_id IS NOT NULL)",
+		},
+		{
+			Name:   "wifi_assignments_phone",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Column: "phone_id",
+				},
+				{
+					Column: "profile_id",
+				},
+			},
+			Where: "(phone_id IS NOT NULL)",
+		},
+		{
+			Name: "wifi_assignments_profile",
+			Parts: []schema.IndexPart{
+				{
+					Column: "profile_id",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "wifi_assignments_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "phone_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "wifi_assignments_phone_id_fkey",
+			Columns:    []string{"phone_id"},
+			RefTable:   "phones",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+		{
+			Name:       "wifi_assignments_profile_id_fkey",
+			Columns:    []string{"profile_id"},
+			RefTable:   "wifi_profiles",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "wifi_assignments_check",
+			Expr: "((group_id IS NULL) <> (phone_id IS NULL))",
+		},
+	},
+}
+
+func (*WifiProfile) MomoMeta() *momo.Meta[WifiProfile] { return &wifiProfileMeta }
+
+var wifiProfileMeta = momo.Meta[WifiProfile]{
+	Table: "wifi_profiles",
+	Columns: []momo.ColumnMeta{
+		{Name: "id", Flags: momo.FlagPK | momo.FlagIdentity},
+		{Name: "name"},
+		{Name: "ssid"},
+		{Name: "security"},
+		{Name: "psk_enc", Flags: momo.FlagNullable},
+		{Name: "eap_method", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "identity", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "anonymous_identity", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "password_enc", Flags: momo.FlagNullable},
+		{Name: "ca_cert", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "priority", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "hidden", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "prefer_account", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "verified", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "created_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+		{Name: "dot1x_id", Flags: momo.FlagNullable},
+	},
+	Ptr: func(m *WifiProfile, i int) any {
+		switch i {
+		case 0:
+			return &m.ID
+		case 1:
+			return &m.Name
+		case 2:
+			return &m.SSID
+		case 3:
+			return &m.Security
+		case 4:
+			return &m.PskEnc
+		case 5:
+			return &m.EapMethod
+		case 6:
+			return &m.Identity
+		case 7:
+			return &m.AnonymousIdentity
+		case 8:
+			return &m.PasswordEnc
+		case 9:
+			return &m.CaCert
+		case 10:
+			return &m.Priority
+		case 11:
+			return &m.Hidden
+		case 12:
+			return &m.PreferAccount
+		case 13:
+			return &m.Verified
+		case 14:
+			return &m.CreatedAt
+		case 15:
+			return &m.UpdatedAt
+		case 16:
+			return &m.Dot1xID
+		}
+		return nil
+	},
+	Value: func(m *WifiProfile, i int) any {
+		switch i {
+		case 0:
+			return m.ID
+		case 1:
+			return m.Name
+		case 2:
+			return m.SSID
+		case 3:
+			return m.Security
+		case 4:
+			return m.PskEnc
+		case 5:
+			return m.EapMethod
+		case 6:
+			return m.Identity
+		case 7:
+			return m.AnonymousIdentity
+		case 8:
+			return m.PasswordEnc
+		case 9:
+			return m.CaCert
+		case 10:
+			return m.Priority
+		case 11:
+			return m.Hidden
+		case 12:
+			return m.PreferAccount
+		case 13:
+			return m.Verified
+		case 14:
+			return m.CreatedAt
+		case 15:
+			return m.UpdatedAt
+		case 16:
+			return m.Dot1xID
+		}
+		return nil
+	},
+	TableSchema: &wifiProfileTable,
+	Identity:    0, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var wifiProfileTable = schema.Table{
+	Name: "wifi_profiles",
+	Columns: []schema.Column{
+		{
+			Name:     "id",
+			Type:     "bigint",
+			Identity: "serial",
+		},
+		{
+			Name: "name",
+			Type: "text",
+		},
+		{
+			Name: "ssid",
+			Type: "text",
+		},
+		{
+			Name: "security",
+			Type: "text",
+		},
+		{
+			Name:     "psk_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "eap_method",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "identity",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:    "anonymous_identity",
+			Type:    "text",
+			Default: "''::text",
+		},
+		{
+			Name:     "password_enc",
+			Type:     "bytea",
+			Nullable: true,
+		},
+		{
+			Name:    "ca_cert",
+			Type:    "text",
+			Default: "'system'::text",
+		},
+		{
+			Name:    "priority",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "hidden",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "prefer_account",
+			Type:    "integer",
+			Default: "0",
+		},
+		{
+			Name:    "verified",
+			Type:    "boolean",
+			Default: "false",
+		},
+		{
+			Name:    "created_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+		{
+			Name:     "dot1x_id",
+			Type:     "bigint",
+			Nullable: true,
+		},
+	},
+	PrimaryKey: []string{"id"},
+	Indexes: []schema.Index{
+		{
+			Name: "wifi_profiles_dot1x",
+			Parts: []schema.IndexPart{
+				{
+					Column: "dot1x_id",
+				},
+			},
+			Where: "(dot1x_id IS NOT NULL)",
+		},
+		{
+			Name:   "wifi_profiles_name",
+			Unique: true,
+			Parts: []schema.IndexPart{
+				{
+					Expr: "lower(name)",
+				},
+			},
+		},
+	},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "wifi_profiles_dot1x_id_fkey",
+			Columns:    []string{"dot1x_id"},
+			RefTable:   "dot1x_profiles",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "wifi_profiles_anonymous_identity_check",
+			Expr: "(length(anonymous_identity) <= 128)",
+		},
+		{
+			Name: "wifi_profiles_ca_cert_check",
+			Expr: "\"ca_cert\" IN ('skip','system','tofu')",
+			In: &schema.CheckIn{
+				Column: "ca_cert",
+				Values: []string{"skip", "system", "tofu"},
+			},
+		},
+		{
+			Name: "wifi_profiles_eap_method_check",
+			Expr: "\"eap_method\" IN ('','peap')",
+			In: &schema.CheckIn{
+				Column: "eap_method",
+				Values: []string{"", "peap"},
+			},
+		},
+		{
+			Name: "wifi_profiles_identity_check",
+			Expr: "(length(identity) <= 128)",
+		},
+		{
+			Name: "wifi_profiles_name_check",
+			Expr: "((length(name) >= 1) AND (length(name) <= 64))",
+		},
+		{
+			Name: "wifi_profiles_prefer_account_check",
+			Expr: "((prefer_account >= 0) AND (prefer_account <= 3))",
+		},
+		{
+			Name: "wifi_profiles_priority_check",
+			Expr: "((priority >= 0) AND (priority <= 10))",
+		},
+		{
+			Name: "wifi_profiles_security_check",
+			Expr: "\"security\" IN ('open','owe','wpa2-enterprise','wpa2-psk','wpa3-enterprise','wpa3-sae')",
+			In: &schema.CheckIn{
+				Column: "security",
+				Values: []string{"open", "owe", "wpa2-enterprise", "wpa2-psk", "wpa3-enterprise", "wpa3-sae"},
+			},
+		},
+		{
+			Name: "wifi_profiles_ssid_check",
+			Expr: "((octet_length(ssid) >= 1) AND (octet_length(ssid) <= 32))",
+		},
+	},
+}
+
+func (*WifiRadio) MomoMeta() *momo.Meta[WifiRadio] { return &wifiRadioMeta }
+
+var wifiRadioMeta = momo.Meta[WifiRadio]{
+	Table: "wifi_radio",
+	Columns: []momo.ColumnMeta{
+		{Name: "group_id", Flags: momo.FlagPK},
+		{Name: "band", Flags: momo.FlagNullable},
+		{Name: "roam_mode", Flags: momo.FlagNullable},
+		{Name: "threshold", Flags: momo.FlagNullable},
+		{Name: "poor_scan", Flags: momo.FlagNullable},
+		{Name: "good_scan", Flags: momo.FlagNullable},
+		{Name: "gain", Flags: momo.FlagNullable},
+		{Name: "dot11r", Flags: momo.FlagNullable},
+		{Name: "dot11v", Flags: momo.FlagNullable},
+		{Name: "prompt", Flags: momo.FlagNullable},
+		{Name: "updated_at", Flags: momo.FlagHasDefault | momo.FlagDBDefault},
+	},
+	Ptr: func(m *WifiRadio, i int) any {
+		switch i {
+		case 0:
+			return &m.GroupID
+		case 1:
+			return &m.Band
+		case 2:
+			return &m.RoamMode
+		case 3:
+			return &m.Threshold
+		case 4:
+			return &m.PoorScan
+		case 5:
+			return &m.GoodScan
+		case 6:
+			return &m.Gain
+		case 7:
+			return &m.Dot11r
+		case 8:
+			return &m.Dot11v
+		case 9:
+			return &m.Prompt
+		case 10:
+			return &m.UpdatedAt
+		}
+		return nil
+	},
+	Value: func(m *WifiRadio, i int) any {
+		switch i {
+		case 0:
+			return m.GroupID
+		case 1:
+			return m.Band
+		case 2:
+			return m.RoamMode
+		case 3:
+			return m.Threshold
+		case 4:
+			return m.PoorScan
+		case 5:
+			return m.GoodScan
+		case 6:
+			return m.Gain
+		case 7:
+			return m.Dot11r
+		case 8:
+			return m.Dot11v
+		case 9:
+			return m.Prompt
+		case 10:
+			return m.UpdatedAt
+		}
+		return nil
+	},
+	TableSchema: &wifiRadioTable,
+	Identity:    -1, Version: -1, SoftDelete: -1, CreatedAt: -1, UpdatedAt: -1,
+	PK: []int{0},
+}
+
+var wifiRadioTable = schema.Table{
+	Name: "wifi_radio",
+	Columns: []schema.Column{
+		{
+			Name: "group_id",
+			Type: "bigint",
+		},
+		{
+			Name:     "band",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "roam_mode",
+			Type:     "text",
+			Nullable: true,
+		},
+		{
+			Name:     "threshold",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:     "poor_scan",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:     "good_scan",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:     "gain",
+			Type:     "integer",
+			Nullable: true,
+		},
+		{
+			Name:     "dot11r",
+			Type:     "boolean",
+			Nullable: true,
+		},
+		{
+			Name:     "dot11v",
+			Type:     "boolean",
+			Nullable: true,
+		},
+		{
+			Name:     "prompt",
+			Type:     "boolean",
+			Nullable: true,
+		},
+		{
+			Name:    "updated_at",
+			Type:    "timestamp with time zone",
+			Default: "now()",
+		},
+	},
+	PrimaryKey: []string{"group_id"},
+	ForeignKeys: []schema.ForeignKey{
+		{
+			Name:       "wifi_radio_group_id_fkey",
+			Columns:    []string{"group_id"},
+			RefTable:   "phone_groups",
+			RefColumns: []string{"id"},
+			OnDelete:   "CASCADE",
+		},
+	},
+	Checks: []schema.Check{
+		{
+			Name: "wifi_radio_band_check",
+			Expr: "\"band\" IN ('2.4','5','both')",
+			In: &schema.CheckIn{
+				Column: "band",
+				Values: []string{"2.4", "5", "both"},
+			},
+		},
+		{
+			Name: "wifi_radio_gain_check",
+			Expr: "((gain >= 4) AND (gain <= 20))",
+		},
+		{
+			Name: "wifi_radio_good_scan_check",
+			Expr: "((good_scan >= 5) AND (good_scan <= 600))",
+		},
+		{
+			Name: "wifi_radio_poor_scan_check",
+			Expr: "((poor_scan >= 5) AND (poor_scan <= 300))",
+		},
+		{
+			Name: "wifi_radio_roam_mode_check",
+			Expr: "\"roam_mode\" IN ('boost','custom','default','fast')",
+			In: &schema.CheckIn{
+				Column: "roam_mode",
+				Values: []string{"boost", "custom", "default", "fast"},
+			},
+		},
+		{
+			Name: "wifi_radio_threshold_check",
+			Expr: "((threshold >= '-100'::integer) AND (threshold <= '-30'::integer))",
 		},
 	},
 }

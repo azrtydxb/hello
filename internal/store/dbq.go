@@ -17,8 +17,7 @@ package store
 // Provisioner), and momo never commits or rolls back: the store does, as
 // before. Only three things stay raw database/sql: BEGIN itself, the pinned
 // connection that holds a session advisory lock (TryLock), and the read of
-// goose_db_version (SchemaVersion), which goose owns until the migration
-// engine moves.
+// the migration histories (SchemaVersion), which the engines own.
 
 import (
 	"context"

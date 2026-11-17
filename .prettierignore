@@ -1,3 +1,5 @@
 pnpm-lock.yaml
 # Helm templates are Go templates, not YAML.
 deploy/helm/hello/templates/
+# momo writes the migration snapshots and momo.sum checksums them byte for byte.
+migrations/postgres/
