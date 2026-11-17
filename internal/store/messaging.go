@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/messaging/provider"
@@ -120,7 +122,7 @@ func (s *Store) ListMsgChannels(ctx context.Context) ([]MsgChannel, error) {
 
 // GetMsgChannel returns one channel.
 func (s *Store) GetMsgChannel(ctx context.Context, id int64) (MsgChannel, error) {
-	c, err := scanMsgChannel(s.db.QueryRowContext(ctx, `SELECT `+msgChannelCols+msgChannelFrom+` WHERE c.id = $1`, id))
+	c, err := scanMsgChannel(s.db.QueryRowContext(ctx, `SELECT `+msgChannelCols+msgChannelFrom+` WHERE c.id = @id`, momo.Named("id", id)))
 	return c, mapErr(err)
 }
 
@@ -153,7 +155,7 @@ func checkChannelTrunk(ctx context.Context, tx *dbTx, in MsgChannelInput) error 
 		return fieldError("trunkId", "a SIP trunk channel needs a trunk")
 	}
 	var ok bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM trunks WHERE id = $1)`, *in.TrunkID).Scan(&ok); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM trunks WHERE id = @id)`, momo.Named("id", *in.TrunkID)).Scan(&ok); err != nil {
 		return err
 	}
 	if !ok {
@@ -178,8 +180,9 @@ func (s *Store) CreateMsgChannel(ctx context.Context, actor string, in MsgChanne
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO msg_channels (kind, provider, name, enabled, hook_id, trunk_id)
-			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-			in.Kind, in.Provider, in.Name, in.Enabled, hook, in.TrunkID).Scan(&id); err != nil {
+			VALUES (@kind, @provider, @name, @enabled, @hook_id, @trunk_id) RETURNING id`,
+			momo.Named("kind", in.Kind), momo.Named("provider", in.Provider), momo.Named("name", in.Name),
+			momo.Named("enabled", in.Enabled), momo.Named("hook_id", hook), momo.Named("trunk_id", in.TrunkID)).Scan(&id); err != nil {
 			return err
 		}
 		if in.Credentials != nil {
@@ -200,7 +203,7 @@ func (s *Store) CreateMsgChannel(ctx context.Context, actor string, in MsgChanne
 func (s *Store) UpdateMsgChannel(ctx context.Context, actor string, id int64, in MsgChannelInput) (MsgChannel, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var provider string
-		if err := tx.QueryRowContext(ctx, `SELECT provider FROM msg_channels WHERE id = $1 FOR UPDATE`, id).Scan(&provider); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT provider FROM msg_channels WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&provider); err != nil {
 			return err
 		}
 		in.Provider = provider
@@ -208,8 +211,9 @@ func (s *Store) UpdateMsgChannel(ctx context.Context, actor string, id int64, in
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE msg_channels SET name = $2, enabled = $3, trunk_id = $4, updated_at = now()
-			WHERE id = $1`, id, in.Name, in.Enabled, in.TrunkID); err != nil {
+			UPDATE msg_channels SET name = @name, enabled = @enabled, trunk_id = @trunk_id, updated_at = now()
+			WHERE id = @id`, momo.Named("id", id), momo.Named("name", in.Name), momo.Named("enabled", in.Enabled),
+			momo.Named("trunk_id", in.TrunkID)); err != nil {
 			return err
 		}
 		if in.Credentials != nil {
@@ -234,14 +238,14 @@ func (s *Store) UpdateMsgChannel(ctx context.Context, actor string, id int64, in
 func (s *Store) DeleteMsgChannel(ctx context.Context, actor string, id int64) error {
 	return s.tx(ctx, func(tx *dbTx) error {
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE channel_id = $1`, id).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE channel_id = @id`, momo.Named("id", id)).Scan(&n); err != nil {
 			return err
 		}
 		if n > 0 {
 			return &InUseError{Msg: fmt.Sprintf("the channel has %s; they are removed by retention or an erase request",
 				plural(n, "a conversation", strconv.Itoa(n)+" conversations"))}
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM msg_channels WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM msg_channels WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return err
 		}
@@ -326,7 +330,7 @@ func scanMsgAddress(r interface{ Scan(...any) error }) (MsgAddress, error) {
 // when channelID is 0.
 func (s *Store) ListMsgAddresses(ctx context.Context, channelID int64) ([]MsgAddress, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+msgAddressCols+msgAddressFrom+`
-		WHERE $1 = 0 OR a.channel_id = $1 ORDER BY lower(c.name), a.address, a.id`, channelID)
+		WHERE @channel_id::bigint = 0 OR a.channel_id = @channel_id::bigint ORDER BY lower(c.name), a.address, a.id`, momo.Named("channel_id", channelID))
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +348,7 @@ func (s *Store) ListMsgAddresses(ctx context.Context, channelID int64) ([]MsgAdd
 
 // GetMsgAddress returns one number.
 func (s *Store) GetMsgAddress(ctx context.Context, id int64) (MsgAddress, error) {
-	a, err := scanMsgAddress(s.db.QueryRowContext(ctx, `SELECT `+msgAddressCols+msgAddressFrom+` WHERE a.id = $1`, id))
+	a, err := scanMsgAddress(s.db.QueryRowContext(ctx, `SELECT `+msgAddressCols+msgAddressFrom+` WHERE a.id = @id`, momo.Named("id", id)))
 	return a, mapErr(err)
 }
 
@@ -353,14 +357,14 @@ func (s *Store) CreateMsgAddress(ctx context.Context, actor string, in MsgAddres
 	var id int64
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var ok bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM msg_channels WHERE id = $1)`, in.ChannelID).Scan(&ok); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM msg_channels WHERE id = @id)`, momo.Named("id", in.ChannelID)).Scan(&ok); err != nil {
 			return err
 		}
 		if !ok {
 			return fieldError("channelId", "no such channel")
 		}
 		var chat bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM msg_channels WHERE id = $1 AND provider = 'chat')`, in.ChannelID).Scan(&chat); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM msg_channels WHERE id = @id AND provider = 'chat')`, momo.Named("id", in.ChannelID)).Scan(&chat); err != nil {
 			return err
 		}
 		if chat {
@@ -372,9 +376,13 @@ func (s *Store) CreateMsgAddress(ctx context.Context, actor string, in MsgAddres
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO msg_addresses (channel_id, address, address_key, address_suffix, label, enabled, optout_keywords, help_text, optout_text, sends_per_minute,
 				desk_phone_delivery, owner_extension_id)
-			VALUES ($1, $2, $3, $9, $4, $5, $6::text[], $7, $8, coalesce(NULLIF($10::int, 0), 60), $11, $12) RETURNING id`,
-			in.ChannelID, in.Address, in.Key, in.Label, in.Enabled, keywordsArg(in.OptOutWords), in.HelpText, in.OptOutText, in.Suffix, in.SendsPerMinute,
-			in.DeskPhoneDelivery, ownerArg(in.OwnerExtensionID)).Scan(&id); err != nil {
+			VALUES (@channel_id, @address, @address_key, @address_suffix, @label, @enabled, @optout_keywords::text[], @help_text, @optout_text,
+				coalesce(NULLIF(@sends_per_minute::int, 0), 60), @desk_phone_delivery, @owner_extension_id) RETURNING id`,
+			momo.Named("channel_id", in.ChannelID), momo.Named("address", in.Address), momo.Named("address_key", in.Key),
+			momo.Named("address_suffix", in.Suffix), momo.Named("label", in.Label), momo.Named("enabled", in.Enabled),
+			momo.Named("optout_keywords", keywordsArg(in.OptOutWords)), momo.Named("help_text", in.HelpText),
+			momo.Named("optout_text", in.OptOutText), momo.Named("sends_per_minute", in.SendsPerMinute),
+			momo.Named("desk_phone_delivery", in.DeskPhoneDelivery), momo.Named("owner_extension_id", ownerArg(in.OwnerExtensionID))).Scan(&id); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "msg_address", strconv.FormatInt(id, 10))
@@ -400,7 +408,7 @@ func checkOwnerExtension(ctx context.Context, tx *dbTx, id *int64) error {
 		return nil
 	}
 	var kind string
-	err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = $1`, *id).Scan(&kind)
+	err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = @id`, momo.Named("id", *id)).Scan(&kind)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && kind == ExtensionDoor) {
 		return fieldError("ownerExtensionId", "no such extension that can text")
 	}
@@ -427,11 +435,13 @@ func (s *Store) UpdateMsgAddress(ctx context.Context, actor string, id int64, in
 			return err
 		}
 		res, err := tx.ExecContext(ctx, `
-			UPDATE msg_addresses SET label = $2, enabled = $3, optout_keywords = $4::text[], help_text = $5, optout_text = $6,
-				sends_per_minute = coalesce(NULLIF($7::int, 0), sends_per_minute),
-				desk_phone_delivery = $8, owner_extension_id = $9
-			WHERE id = $1`, id, in.Label, in.Enabled, keywordsArg(in.OptOutWords), in.HelpText, in.OptOutText, in.SendsPerMinute,
-			in.DeskPhoneDelivery, ownerArg(in.OwnerExtensionID))
+			UPDATE msg_addresses SET label = @label, enabled = @enabled, optout_keywords = @optout_keywords::text[], help_text = @help_text,
+				optout_text = @optout_text, sends_per_minute = coalesce(NULLIF(@sends_per_minute::int, 0), sends_per_minute),
+				desk_phone_delivery = @desk_phone_delivery, owner_extension_id = @owner_extension_id
+			WHERE id = @id`, momo.Named("id", id), momo.Named("label", in.Label), momo.Named("enabled", in.Enabled),
+			momo.Named("optout_keywords", keywordsArg(in.OptOutWords)), momo.Named("help_text", in.HelpText),
+			momo.Named("optout_text", in.OptOutText), momo.Named("sends_per_minute", in.SendsPerMinute),
+			momo.Named("desk_phone_delivery", in.DeskPhoneDelivery), momo.Named("owner_extension_id", ownerArg(in.OwnerExtensionID)))
 		if err != nil {
 			return err
 		}
@@ -450,14 +460,14 @@ func (s *Store) UpdateMsgAddress(ctx context.Context, actor string, id int64, in
 func (s *Store) DeleteMsgAddress(ctx context.Context, actor string, id int64) error {
 	return s.tx(ctx, func(tx *dbTx) error {
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE address_id = $1`, id).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE address_id = @id`, momo.Named("id", id)).Scan(&n); err != nil {
 			return err
 		}
 		if n > 0 {
 			return &InUseError{Msg: fmt.Sprintf("the number has %s; they are removed by retention or an erase request",
 				plural(n, "a conversation", strconv.Itoa(n)+" conversations"))}
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM msg_addresses WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM msg_addresses WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return err
 		}
@@ -503,10 +513,14 @@ func getMessagingSettings(ctx context.Context, q rowQuerier) (MessagingSettings,
 func (s *Store) PutMessagingSettings(ctx context.Context, actor string, m MessagingSettings) (MessagingSettings, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE messaging_settings SET retention_sms_days = $1, retention_chat_days = $2, reopen_days = $3, email_notify = $4,
-				first_contact = $5, first_contact_user_hour = $6, first_contact_address_day = $7, retention_media_days = $8`,
-			m.RetentionSMSDays, m.RetentionChatDays, m.ReopenDays, m.EmailNotify,
-			m.FirstContact, m.FirstContactPerUserHour, m.FirstContactPerAddressDay, m.RetentionMediaDays); err != nil {
+			UPDATE messaging_settings SET retention_sms_days = @retention_sms_days, retention_chat_days = @retention_chat_days,
+				reopen_days = @reopen_days, email_notify = @email_notify, first_contact = @first_contact,
+				first_contact_user_hour = @first_contact_user_hour, first_contact_address_day = @first_contact_address_day,
+				retention_media_days = @retention_media_days`,
+			momo.Named("retention_sms_days", m.RetentionSMSDays), momo.Named("retention_chat_days", m.RetentionChatDays),
+			momo.Named("reopen_days", m.ReopenDays), momo.Named("email_notify", m.EmailNotify), momo.Named("first_contact", m.FirstContact),
+			momo.Named("first_contact_user_hour", m.FirstContactPerUserHour), momo.Named("first_contact_address_day", m.FirstContactPerAddressDay),
+			momo.Named("retention_media_days", m.RetentionMediaDays)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update", "messaging_settings", "1")
@@ -551,9 +565,10 @@ func (s *Store) ListOptOuts(ctx context.Context, f OptOutFilter, limit int) ([]M
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT o.id, o.address_id, a.address, c.name, coalesce(o.peer_key, ''), o.state, o.source, o.note, o.at
 		FROM sms_opt_outs o JOIN msg_addresses a ON a.id = o.address_id JOIN msg_channels c ON c.id = a.channel_id
-		WHERE ($1 = 0 OR o.address_id = $1) AND ($2 OR o.state = 'out')
-		  AND ($3 = '' OR o.peer_key LIKE '%' || $3)
-		ORDER BY o.at DESC, o.id DESC LIMIT $4`, f.AddressID, f.All, escapeLike(f.Q), limit)
+		WHERE (@address_id::bigint = 0 OR o.address_id = @address_id::bigint) AND (@all OR o.state = 'out')
+		  AND (@q::text = '' OR o.peer_key LIKE '%' || @q::text)
+		ORDER BY o.at DESC, o.id DESC LIMIT @limit`, momo.Named("address_id", f.AddressID), momo.Named("all", f.All),
+		momo.Named("q", escapeLike(f.Q)), momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
@@ -585,7 +600,7 @@ func (s *Store) RecordOptOut(ctx context.Context, actor string, addressID int64,
 	var id int64
 	err = s.tx(ctx, func(tx *dbTx) error {
 		var ok bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM msg_addresses WHERE id = $1)`, addressID).Scan(&ok); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM msg_addresses WHERE id = @id)`, momo.Named("id", addressID)).Scan(&ok); err != nil {
 			return err
 		}
 		if !ok {
@@ -593,10 +608,11 @@ func (s *Store) RecordOptOut(ctx context.Context, actor string, addressID int64,
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO sms_opt_outs (address_id, peer_key, peer_hash, state, source, note)
-			VALUES ($1, $2, $3, 'out', 'admin', $4)
-			ON CONFLICT (address_id, peer_hash) DO UPDATE SET state = 'out', source = 'admin', note = $4, at = now(),
-				peer_key = coalesce(sms_opt_outs.peer_key, $2)
-			RETURNING id`, addressID, peerKey, h, note).Scan(&id); err != nil {
+			VALUES (@address_id, @peer_key, @peer_hash, 'out', 'admin', @note)
+			ON CONFLICT (address_id, peer_hash) DO UPDATE SET state = 'out', source = 'admin', note = @note, at = now(),
+				peer_key = coalesce(sms_opt_outs.peer_key, @peer_key)
+			RETURNING id`, momo.Named("address_id", addressID), momo.Named("peer_key", peerKey), momo.Named("peer_hash", h),
+			momo.Named("note", note)).Scan(&id); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "optout", "msg_optout", strconv.FormatInt(id, 10))
@@ -612,7 +628,7 @@ func (s *Store) getOptOut(ctx context.Context, id int64) (MsgOptOut, error) {
 	err := s.db.QueryRowContext(ctx, `
 		SELECT o.id, o.address_id, a.address, c.name, coalesce(o.peer_key, ''), o.state, o.source, o.note, o.at
 		FROM sms_opt_outs o JOIN msg_addresses a ON a.id = o.address_id JOIN msg_channels c ON c.id = a.channel_id
-		WHERE o.id = $1`, id).Scan(&o.ID, &o.AddressID, &o.Address, &o.Channel, &o.Peer, &o.State, &o.Source, &o.Note, &o.At)
+		WHERE o.id = @id`, momo.Named("id", id)).Scan(&o.ID, &o.AddressID, &o.Address, &o.Channel, &o.Peer, &o.State, &o.Source, &o.Note, &o.At)
 	return o, mapErr(err)
 }
 
@@ -620,7 +636,8 @@ func (s *Store) getOptOut(ctx context.Context, id int64) (MsgOptOut, error) {
 // opt-out. It is audited, with the note an administrator wrote.
 func (s *Store) Reconsent(ctx context.Context, actor string, id int64, note string) (MsgOptOut, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE sms_opt_outs SET state = 'in', source = 'admin', note = $2, at = now() WHERE id = $1`, id, note)
+		res, err := tx.ExecContext(ctx, `UPDATE sms_opt_outs SET state = 'in', source = 'admin', note = @note, at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("note", note))
 		if err != nil {
 			return err
 		}
@@ -693,15 +710,13 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 	var providers []string
 	err = s.tx(ctx, func(tx *dbTx) error {
 		var err error
-		providers, err = queryStrings(ctx, tx, `
-			SELECT DISTINCT ch.provider FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id
-			WHERE c.peer_key = $1 ORDER BY 1`, peerKey)
+		providers, err = queryStrings(ctx, tx, erasePeerProviders, momo.Named("peer_key", peerKey))
 		if err != nil {
 			return err
 		}
 		if err := tx.QueryRowContext(ctx, `
-			SELECT count(*) FROM conversation_messages WHERE conversation_id IN (SELECT id FROM conversations WHERE peer_key = $1)`,
-			peerKey).Scan(&rep.Messages); err != nil {
+			SELECT count(*) FROM conversation_messages WHERE conversation_id IN (SELECT id FROM conversations WHERE peer_key = @peer_key)`,
+			momo.Named("peer_key", peerKey)).Scan(&rep.Messages); err != nil {
 			return err
 		}
 		// The attachments' rows stay, orphaned, until their files are gone:
@@ -710,12 +725,12 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE message_media SET attached_at = coalesce(attached_at, now())
-			WHERE id = ANY($1::bigint[])`, garbageIDs(rep.Media)); err != nil {
+			WHERE id = ANY(@ids::bigint[])`, momo.Named("ids", garbageIDs(rep.Media))); err != nil {
 			return err
 		}
 		// A public link to an erased file stops working now, not when the
 		// file is gone.
-		if _, err := tx.ExecContext(ctx, `DELETE FROM media_links WHERE media_id = ANY($1::bigint[])`, garbageIDs(rep.Media)); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM media_links WHERE media_id = ANY(@ids::bigint[])`, momo.Named("ids", garbageIDs(rep.Media))); err != nil {
 			return err
 		}
 		if err := queueRedactions(ctx, tx, rep.Batch, `
@@ -728,24 +743,25 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 		// through SIP trunks, and the trunk texts of the number itself.
 		res, err := tx.ExecContext(ctx, `
 			DELETE FROM messages WHERE conversation_message_id IN (
-				SELECT m.id FROM conversation_messages m JOIN conversations c ON c.id = m.conversation_id WHERE c.peer_key = $1)
-			   OR (sender_kind = 'external' AND sender = $1) OR (recipient_kind = 'external' AND recipient = $1)`, peerKey)
+				SELECT m.id FROM conversation_messages m JOIN conversations c ON c.id = m.conversation_id WHERE c.peer_key = @peer_key)
+			   OR (sender_kind = 'external' AND sender = @peer_key) OR (recipient_kind = 'external' AND recipient = @peer_key)`,
+			momo.Named("peer_key", peerKey))
 		if err != nil {
 			return err
 		}
 		n, _ := res.RowsAffected()
 		rep.SIPMessages = int(n)
-		res, err = tx.ExecContext(ctx, `DELETE FROM conversations WHERE peer_key = $1`, peerKey)
+		res, err = tx.ExecContext(ctx, `DELETE FROM conversations WHERE peer_key = @peer_key`, momo.Named("peer_key", peerKey))
 		if err != nil {
 			return err
 		}
 		n, _ = res.RowsAffected()
 		rep.Conversations = int(n)
 		// A chat visitor's own record goes with their conversations.
-		if _, err := tx.ExecContext(ctx, `DELETE FROM chat_visitors WHERE 'visitor:' || id::text = $1`, peerKey); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM chat_visitors WHERE 'visitor:' || id::text = @peer_key`, momo.Named("peer_key", peerKey)); err != nil {
 			return err
 		}
-		res, err = tx.ExecContext(ctx, `UPDATE sms_opt_outs SET peer_key = NULL, note = '' WHERE peer_hash = $1`, h)
+		res, err = tx.ExecContext(ctx, `UPDATE sms_opt_outs SET peer_key = NULL, note = '' WHERE peer_hash = @peer_hash`, momo.Named("peer_hash", h))
 		if err != nil {
 			return err
 		}
@@ -763,7 +779,15 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 	return rep, nil
 }
 
+// erasePeerProviders is the providers of a customer's conversations, read
+// through queryStrings (TestMessagingStatementsOffline builds it); it binds
+// @peer_key.
+const erasePeerProviders = `
+			SELECT DISTINCT ch.provider FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id
+			WHERE c.peer_key = @peer_key ORDER BY 1`
+
 func garbageIDs(gs []media.Garbage) []int64 {
+
 	out := make([]int64, len(gs))
 	for i, g := range gs {
 		out[i] = g.ID
@@ -829,8 +853,10 @@ func (s *Store) MaintainMessaging(ctx context.Context) (MessagingMaintenance, er
 				SELECT c.id FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id
 				WHERE c.status IN ('resolved', 'spam')
 				  AND coalesce(c.resolved_at, c.last_message_at) < now() - make_interval(days => CASE WHEN ch.kind = 'webchat'
-					THEN coalesce((SELECT cs.retention_days FROM chat_sites cs WHERE cs.channel_id = ch.id), $1::int) ELSE $2::int END)
-				ORDER BY c.id LIMIT $3::int)`, set.RetentionChatDays, set.RetentionSMSDays, purgeBatch)
+					THEN coalesce((SELECT cs.retention_days FROM chat_sites cs WHERE cs.channel_id = ch.id), @chat_days::int) ELSE @sms_days::int END)
+				ORDER BY c.id LIMIT @limit::int)`, momo.Named("chat_days", set.RetentionChatDays), momo.Named("sms_days", set.RetentionSMSDays),
+			momo.Named("limit", purgeBatch))
+
 		if err != nil {
 			return out, err
 		}

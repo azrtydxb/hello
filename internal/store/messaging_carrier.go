@@ -27,6 +27,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/provider"
 	"github.com/azrtydxb/hello/internal/secret"
@@ -118,10 +120,11 @@ func (s *Store) sealChannelCredentials(ctx context.Context, tx *dbTx, channelID 
 	hint := cfg.Hint()
 	fp := hex.EncodeToString(s.box.MAC("messaging-credential", cfg.Secret()))[:12]
 	_, err = tx.ExecContext(ctx, `
-		UPDATE msg_channels SET credentials_enc = $2, credential_fp = $3,
-			config = config || jsonb_build_object('accountHint', $4::text, 'messagingService', $5::boolean),
+		UPDATE msg_channels SET credentials_enc = @credentials_enc, credential_fp = @credential_fp,
+			config = config || jsonb_build_object('accountHint', @account_hint::text, 'messagingService', @messaging_service::boolean),
 			status = 'ok', status_detail = '', fail_streak = 0, updated_at = now()
-		WHERE id = $1`, channelID, sealed, fp, hint, cfg.Pooled())
+		WHERE id = @id`, momo.Named("id", channelID), momo.Named("credentials_enc", sealed), momo.Named("credential_fp", fp),
+		momo.Named("account_hint", hint), momo.Named("messaging_service", cfg.Pooled()))
 	return err
 }
 
@@ -132,7 +135,7 @@ func (s *Store) ChannelProviderConfig(ctx context.Context, channelID int64) (pro
 		return cfg, ErrNoSecretBox
 	}
 	var sealed []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT credentials_enc FROM msg_channels WHERE id = $1`, channelID).Scan(&sealed); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT credentials_enc FROM msg_channels WHERE id = @id`, momo.Named("id", channelID)).Scan(&sealed); err != nil {
 		return cfg, mapErr(err)
 	}
 	if sealed == nil {
@@ -151,7 +154,7 @@ func (s *Store) ChannelProviderConfig(ctx context.Context, channelID int64) (pro
 // ChannelProvider returns the provider of a channel.
 func (s *Store) ChannelProvider(ctx context.Context, channelID int64) (string, error) {
 	var p string
-	err := s.db.QueryRowContext(ctx, `SELECT provider FROM msg_channels WHERE id = $1`, channelID).Scan(&p)
+	err := s.db.QueryRowContext(ctx, `SELECT provider FROM msg_channels WHERE id = @id`, momo.Named("id", channelID)).Scan(&p)
 	return p, mapErr(err)
 }
 
@@ -172,7 +175,7 @@ func (s *Store) ClaimOutbound(ctx context.Context, limit int) ([]messaging.Outbo
 	var jobs []messaging.OutboundJob
 	err := s.tx(ctx, func(tx *dbTx) error {
 		jobs = nil
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(outboundClaimLock)); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(outboundClaimLock))); err != nil {
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, `
@@ -183,7 +186,7 @@ func (s *Store) ClaimOutbound(ctx context.Context, limit int) ([]messaging.Outbo
 			JOIN msg_addresses a ON a.id = c.address_id
 			WHERE cm.status = 'queued' AND cm.direction = 'out' AND cm.kind = 'message'
 			  AND ch.provider <> 'sip_trunk' AND ch.enabled AND ch.status <> 'credentials_invalid' AND a.enabled
-			ORDER BY cm.id LIMIT $1 FOR UPDATE OF cm SKIP LOCKED`, maxClaimScan)
+			ORDER BY cm.id LIMIT @limit FOR UPDATE OF cm SKIP LOCKED`, momo.Named("limit", maxClaimScan))
 		if err != nil {
 			return err
 		}
@@ -215,7 +218,7 @@ func (s *Store) ClaimOutbound(ctx context.Context, limit int) ([]messaging.Outbo
 			if !seen {
 				if err := tx.QueryRowContext(ctx, `
 					SELECT count(*) FROM conversation_messages x JOIN conversations xc ON xc.id = x.conversation_id
-					WHERE xc.address_id = $1 AND x.claimed_at > now() - interval '1 minute'`, c.AddressID).Scan(&n); err != nil {
+					WHERE xc.address_id = @address_id AND x.claimed_at > now() - interval '1 minute'`, momo.Named("address_id", c.AddressID)).Scan(&n); err != nil {
 					return err
 				}
 			}
@@ -244,8 +247,8 @@ func (s *Store) ClaimOutbound(ctx context.Context, limit int) ([]messaging.Outbo
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, `
-				UPDATE conversation_messages SET status = 'sending', attempt_id = $2, claimed_at = now() WHERE id = $1`,
-				c.MessageID, attempt); err != nil {
+				UPDATE conversation_messages SET status = 'sending', attempt_id = @attempt_id, claimed_at = now() WHERE id = @id`,
+				momo.Named("id", c.MessageID), momo.Named("attempt_id", attempt)); err != nil {
 				return err
 			}
 			used[c.AddressID] = n + 1
@@ -260,8 +263,8 @@ func (s *Store) ClaimOutbound(ctx context.Context, limit int) ([]messaging.Outbo
 
 // failQueued fails a queued text that never reached the carrier.
 func (s *Store) failQueued(ctx context.Context, tx *dbTx, msgID, convID int64, code string) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE conversation_messages SET status = 'failed', error_code = $2 WHERE id = $1 AND status = 'queued'`,
-		msgID, code); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE conversation_messages SET status = 'failed', error_code = @error_code WHERE id = @id AND status = 'queued'`,
+		momo.Named("id", msgID), momo.Named("error_code", code)); err != nil {
 		return err
 	}
 	return emitConversationEvent(ctx, tx, convID, msgID, "message.status", nil)
@@ -275,7 +278,7 @@ func (s *Store) FinishOutbound(ctx context.Context, job messaging.OutboundJob, r
 	var kind string
 	err := s.tx(ctx, func(tx *dbTx) error {
 		kind = ""
-		if err := tx.QueryRowContext(ctx, `SELECT kind FROM msg_channels WHERE id = $1`, job.ChannelID).Scan(&kind); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT kind FROM msg_channels WHERE id = @id`, momo.Named("id", job.ChannelID)).Scan(&kind); err != nil {
 			return err
 		}
 		if err := s.recordChannelHealth(ctx, tx, job.ChannelID, res); err != nil {
@@ -292,11 +295,12 @@ func (s *Store) FinishOutbound(ctx context.Context, job messaging.OutboundJob, r
 			}
 			final := st != messaging.DeliverySent
 			r, err := tx.ExecContext(ctx, `
-				UPDATE conversation_messages SET status = $3, provider_message_id = $4, sent_at = now(),
-					delivered_at = CASE WHEN $3 = 'delivered' THEN now() ELSE delivered_at END,
-					next_poll_at = CASE WHEN $5 THEN NULL ELSE now() + interval '5 seconds' END, poll_count = 0
-				WHERE id = $1 AND attempt_id = $2 AND status = 'sending'`,
-				job.MessageID, job.AttemptID, st, res.ProviderID, final)
+				UPDATE conversation_messages SET status = @status, provider_message_id = @provider_message_id, sent_at = now(),
+					delivered_at = CASE WHEN @status::text = 'delivered' THEN now() ELSE delivered_at END,
+					next_poll_at = CASE WHEN @final THEN NULL ELSE now() + interval '5 seconds' END, poll_count = 0
+				WHERE id = @id AND attempt_id = @attempt_id AND status = 'sending'`,
+				momo.Named("id", job.MessageID), momo.Named("attempt_id", job.AttemptID), momo.Named("status", st),
+				momo.Named("provider_message_id", res.ProviderID), momo.Named("final", final))
 			if err != nil {
 				return err
 			}
@@ -305,8 +309,9 @@ func (s *Store) FinishOutbound(ctx context.Context, job messaging.OutboundJob, r
 			}
 		case messaging.OutcomeFailed:
 			r, err := tx.ExecContext(ctx, `
-				UPDATE conversation_messages SET status = 'failed', error_code = $3
-				WHERE id = $1 AND attempt_id = $2 AND status = 'sending'`, job.MessageID, job.AttemptID, res.ErrorCode)
+				UPDATE conversation_messages SET status = 'failed', error_code = @error_code
+				WHERE id = @id AND attempt_id = @attempt_id AND status = 'sending'`,
+				momo.Named("id", job.MessageID), momo.Named("attempt_id", job.AttemptID), momo.Named("error_code", res.ErrorCode))
 			if err != nil {
 				return err
 			}
@@ -341,19 +346,19 @@ func (s *Store) recordChannelHealth(ctx context.Context, tx *dbTx, channelID int
 	switch {
 	case res.BadCredentials:
 		_, err := tx.ExecContext(ctx, `UPDATE msg_channels SET status = 'credentials_invalid',
-			status_detail = 'the carrier refused the account login; enter the SID and token again', fail_streak = 0 WHERE id = $1`, channelID)
+			status_detail = 'the carrier refused the account login; enter the SID and token again', fail_streak = 0 WHERE id = @id`, momo.Named("id", channelID))
 		return err
 	case res.Outcome == messaging.OutcomeSent:
 		_, err := tx.ExecContext(ctx, `UPDATE msg_channels SET fail_streak = 0,
 			status = CASE WHEN status = 'degraded' THEN 'ok' ELSE status END,
 			status_detail = CASE WHEN status = 'degraded' THEN '' ELSE status_detail END,
-			last_event_at = now() WHERE id = $1`, channelID)
+			last_event_at = now() WHERE id = @id`, momo.Named("id", channelID))
 		return err
 	case res.ChannelFailure:
 		_, err := tx.ExecContext(ctx, `UPDATE msg_channels SET fail_streak = fail_streak + 1,
-			status = CASE WHEN status = 'ok' AND fail_streak + 1 >= $2 THEN 'degraded' ELSE status END,
-			status_detail = CASE WHEN status = 'ok' AND fail_streak + 1 >= $2 THEN 'the carrier failed several sends in a row' ELSE status_detail END
-			WHERE id = $1`, channelID, failStreakDegraded)
+			status = CASE WHEN status = 'ok' AND fail_streak + 1 >= @degraded_after::int THEN 'degraded' ELSE status END,
+			status_detail = CASE WHEN status = 'ok' AND fail_streak + 1 >= @degraded_after::int THEN 'the carrier failed several sends in a row' ELSE status_detail END
+			WHERE id = @id`, momo.Named("id", channelID), momo.Named("degraded_after", failStreakDegraded))
 		return err
 	}
 	return nil
@@ -368,7 +373,7 @@ func (s *Store) recordProviderOptOut(ctx context.Context, tx *dbTx, convID int64
 		peerKey   string
 		channelID int64
 	)
-	if err := tx.QueryRowContext(ctx, `SELECT address_id, peer_key, channel_id FROM conversations WHERE id = $1`, convID).
+	if err := tx.QueryRowContext(ctx, `SELECT address_id, peer_key, channel_id FROM conversations WHERE id = @id`, momo.Named("id", convID)).
 		Scan(&addressID, &peerKey, &channelID); err != nil {
 		return err
 	}
@@ -377,13 +382,15 @@ func (s *Store) recordProviderOptOut(ctx context.Context, tx *dbTx, convID int64
 		return err
 	}
 	var was sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT state FROM sms_opt_outs WHERE address_id = $1 AND peer_hash = $2`, addressID, h).Scan(&was); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, `SELECT state FROM sms_opt_outs WHERE address_id = @address_id AND peer_hash = @peer_hash`,
+		momo.Named("address_id", addressID), momo.Named("peer_hash", h)).Scan(&was); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO sms_opt_outs (address_id, peer_key, peer_hash, state, source) VALUES ($1, $2, $3, 'out', 'provider')
+		INSERT INTO sms_opt_outs (address_id, peer_key, peer_hash, state, source) VALUES (@address_id, @peer_key, @peer_hash, 'out', 'provider')
 		ON CONFLICT (address_id, peer_hash) DO UPDATE SET state = 'out', source = 'provider', note = '', at = now(),
-			peer_key = coalesce(sms_opt_outs.peer_key, $2)`, addressID, peerKey, h); err != nil {
+			peer_key = coalesce(sms_opt_outs.peer_key, @peer_key)`,
+		momo.Named("address_id", addressID), momo.Named("peer_key", peerKey), momo.Named("peer_hash", h)); err != nil {
 		return err
 	}
 	if was.String == "out" {
@@ -406,8 +413,9 @@ func (s *Store) ClaimPolls(ctx context.Context, limit int) ([]messaging.PollJob,
 			SELECT m.id FROM conversation_messages m JOIN msg_channels c ON c.id = m.channel_id
 			WHERE m.next_poll_at <= now() AND m.status = 'sent' AND m.provider_message_id IS NOT NULL
 			  AND c.provider <> 'sip_trunk' AND c.status <> 'credentials_invalid'
-			ORDER BY m.next_poll_at LIMIT $1 FOR UPDATE OF m SKIP LOCKED)
-		RETURNING cm.id, cm.conversation_id, cm.channel_id, ch.provider, cm.provider_message_id, cm.poll_count, coalesce(cm.sent_at, cm.created_at)`, limit)
+			ORDER BY m.next_poll_at LIMIT @limit FOR UPDATE OF m SKIP LOCKED)
+		RETURNING cm.id, cm.conversation_id, cm.channel_id, ch.provider, cm.provider_message_id, cm.poll_count, coalesce(cm.sent_at, cm.created_at)`,
+		momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +443,7 @@ func (s *Store) FinishPoll(ctx context.Context, job messaging.PollJob, res messa
 		changed, final = false, ""
 		if res.BadCredentials {
 			_, err := tx.ExecContext(ctx, `UPDATE msg_channels SET status = 'credentials_invalid',
-				status_detail = 'the carrier refused the account login; enter the SID and token again' WHERE id = $1`, job.ChannelID)
+				status_detail = 'the carrier refused the account login; enter the SID and token again' WHERE id = @id`, momo.Named("id", job.ChannelID))
 			return err
 		}
 		switch {
@@ -445,9 +453,9 @@ func (s *Store) FinishPoll(ctx context.Context, job messaging.PollJob, res messa
 				st, code = messaging.DeliveryFailed, res.State.ErrorCode
 			}
 			r, err := tx.ExecContext(ctx, `
-				UPDATE conversation_messages SET status = $2, error_code = $3, next_poll_at = NULL, poll_count = poll_count + 1,
-					delivered_at = CASE WHEN $2 = 'delivered' THEN now() ELSE delivered_at END
-				WHERE id = $1 AND status = 'sent'`, job.MessageID, st, code)
+				UPDATE conversation_messages SET status = @status, error_code = @error_code, next_poll_at = NULL, poll_count = poll_count + 1,
+					delivered_at = CASE WHEN @status::text = 'delivered' THEN now() ELSE delivered_at END
+				WHERE id = @id AND status = 'sent'`, momo.Named("id", job.MessageID), momo.Named("status", st), momo.Named("error_code", code))
 			if err != nil {
 				return err
 			}
@@ -462,13 +470,13 @@ func (s *Store) FinishPoll(ctx context.Context, job messaging.PollJob, res messa
 			}
 			return emitConversationEvent(ctx, tx, job.ConversationID, job.MessageID, "message.status", nil)
 		case res.Stop:
-			_, err := tx.ExecContext(ctx, `UPDATE conversation_messages SET next_poll_at = NULL WHERE id = $1 AND status = 'sent'`, job.MessageID)
+			_, err := tx.ExecContext(ctx, `UPDATE conversation_messages SET next_poll_at = NULL WHERE id = @id AND status = 'sent'`, momo.Named("id", job.MessageID))
 			return err
 		default:
 			next := messaging.PollDelay(job.Polls+1, time.Since(job.SentAt))
 			_, err := tx.ExecContext(ctx, `
-				UPDATE conversation_messages SET poll_count = poll_count + 1, next_poll_at = now() + make_interval(secs => $2)
-				WHERE id = $1 AND status = 'sent'`, job.MessageID, next.Seconds())
+				UPDATE conversation_messages SET poll_count = poll_count + 1, next_poll_at = now() + make_interval(secs => @delay_secs)
+				WHERE id = @id AND status = 'sent'`, momo.Named("id", job.MessageID), momo.Named("delay_secs", next.Seconds()))
 			return err
 		}
 	})
@@ -498,8 +506,8 @@ func (s *Store) SettleCarrierTexts(ctx context.Context) (unknown, failed int64, 
 	res, err = s.db.ExecContext(ctx, `
 		UPDATE conversation_messages cm SET status = 'failed', error_code = 'not_sent'
 		WHERE cm.status = 'queued' AND cm.direction = 'out' AND cm.kind = 'message'
-		  AND cm.created_at < now() - make_interval(secs => $1)
-		  AND cm.channel_id IN (SELECT id FROM msg_channels WHERE provider <> 'sip_trunk')`, queuedTooLong.Seconds())
+		  AND cm.created_at < now() - make_interval(secs => @queued_secs)
+		  AND cm.channel_id IN (SELECT id FROM msg_channels WHERE provider <> 'sip_trunk')`, momo.Named("queued_secs", queuedTooLong.Seconds()))
 	if err != nil {
 		return unknown, 0, err
 	}
@@ -531,7 +539,7 @@ func (s *Store) StartConversation(ctx context.Context, acc InboxAccess, in Start
 	var sinkEvent *messaging.Event
 	err := s.tx(ctx, func(tx *dbTx) error {
 		sinkEvent = nil
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(firstContactLock)); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(firstContactLock))); err != nil {
 			return err
 		}
 		set, err := getMessagingSettings(ctx, tx)
@@ -548,7 +556,7 @@ func (s *Store) StartConversation(ctx context.Context, acc InboxAccess, in Start
 		)
 		if err := tx.QueryRowContext(ctx, `
 			SELECT ch.id, ch.provider, ch.kind, ch.enabled, ch.status, a.enabled
-			FROM msg_addresses a JOIN msg_channels ch ON ch.id = a.channel_id WHERE a.id = $1`, in.AddressID).
+			FROM msg_addresses a JOIN msg_channels ch ON ch.id = a.channel_id WHERE a.id = @id`, momo.Named("id", in.AddressID)).
 			Scan(&channelID, &prov, &kind, &chEnabled, &chStatus, &adEnabled); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return fieldError("addressId", "no such number")
@@ -567,8 +575,8 @@ func (s *Store) StartConversation(ctx context.Context, acc InboxAccess, in Start
 			return ErrOptedOut
 		}
 		var existing int64
-		err = tx.QueryRowContext(ctx, `SELECT id FROM conversations WHERE address_id = $1 AND peer_key = $2 AND status NOT IN ('resolved', 'spam')`,
-			in.AddressID, in.PeerKey).Scan(&existing)
+		err = tx.QueryRowContext(ctx, `SELECT id FROM conversations WHERE address_id = @address_id AND peer_key = @peer_key AND status NOT IN ('resolved', 'spam')`,
+			momo.Named("address_id", in.AddressID), momo.Named("peer_key", in.PeerKey)).Scan(&existing)
 		if err == nil {
 			return &ConversationExistsError{ID: existing}
 		}
@@ -577,9 +585,9 @@ func (s *Store) StartConversation(ctx context.Context, acc InboxAccess, in Start
 		}
 		var perUser, perAddress int
 		if err := tx.QueryRowContext(ctx, `
-			SELECT (SELECT count(*) FROM conversations WHERE origin = 'outbound' AND created_by_user_id = $1 AND created_at > now() - interval '1 hour'),
-			       (SELECT count(*) FROM conversations WHERE origin = 'outbound' AND address_id = $2 AND created_at > now() - interval '24 hours')`,
-			acc.UserID, in.AddressID).Scan(&perUser, &perAddress); err != nil {
+			SELECT (SELECT count(*) FROM conversations WHERE origin = 'outbound' AND created_by_user_id = @user_id AND created_at > now() - interval '1 hour'),
+			       (SELECT count(*) FROM conversations WHERE origin = 'outbound' AND address_id = @address_id AND created_at > now() - interval '24 hours')`,
+			momo.Named("user_id", acc.UserID), momo.Named("address_id", in.AddressID)).Scan(&perUser, &perAddress); err != nil {
 			return err
 		}
 		if perUser >= set.FirstContactPerUserHour || perAddress >= set.FirstContactPerAddressDay {
@@ -587,23 +595,26 @@ func (s *Store) StartConversation(ctx context.Context, acc InboxAccess, in Start
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO conversations (channel_id, address_id, peer_key, peer_kind, status, assignee_user_id, origin, created_by_user_id, consent_note)
-			VALUES ($1, $2, $3, 'phone', 'open', $4, 'outbound', $4, $5) RETURNING id`,
-			channelID, in.AddressID, in.PeerKey, acc.UserID, in.ConsentNote).Scan(&convID); err != nil {
+			VALUES (@channel_id, @address_id, @peer_key, 'phone', 'open', @user_id, 'outbound', @user_id, @consent_note) RETURNING id`,
+			momo.Named("channel_id", channelID), momo.Named("address_id", in.AddressID), momo.Named("peer_key", in.PeerKey),
+			momo.Named("user_id", acc.UserID), momo.Named("consent_note", in.ConsentNote)).Scan(&convID); err != nil {
 			return err
 		}
 		var msgID int64
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_user_id, sender_name, body, status)
-			VALUES ($1, $2, 'out', 'message', 'user', $3, $4, $5, 'queued') RETURNING id`,
-			convID, channelID, acc.UserID, acc.Name, in.Body).Scan(&msgID); err != nil {
+			VALUES (@conversation_id, @channel_id, 'out', 'message', 'user', @user_id, @sender_name, @body, 'queued') RETURNING id`,
+			momo.Named("conversation_id", convID), momo.Named("channel_id", channelID), momo.Named("user_id", acc.UserID),
+			momo.Named("sender_name", acc.Name), momo.Named("body", in.Body)).Scan(&msgID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET last_message_id = $2, last_message_at = now(), first_response_at = now() WHERE id = $1`,
-			convID, msgID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET last_message_id = @message_id, last_message_at = now(), first_response_at = now() WHERE id = @id`,
+			momo.Named("id", convID), momo.Named("message_id", msgID)); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES ($1, $2, 'first_contact')`,
-			convID, acc.UserID); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES (@conversation_id, @user_id, 'first_contact')`,
+			momo.Named("conversation_id", convID), momo.Named("user_id", acc.UserID)); err != nil {
+
 			return err
 		}
 		if err := insertAudit(ctx, tx, acc.Actor, "first_contact attested", "msg_conversation", strconv.FormatInt(convID, 10)); err != nil {
