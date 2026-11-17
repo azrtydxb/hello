@@ -1,4 +1,4 @@
-// momo:fromdb sha256=a77b9d29618f175f2a536fe975e04f7ce589b23f2daabecceb49e6f699cde658
+// momo:fromdb sha256=e1291ed7672053b099bf25c578da515259fa9006b09636897a838fdfedfc9b2b
 // Written by momo generate --from-db. A re-run keeps this file if you edit it, and reports a conflict when the database changed the model.
 
 package models
@@ -20,5 +20,8 @@ type CrmUserMap struct {
 
 // MomoConfig declares what a tag cannot: the other indexes, constraints, enums and defaults.
 func (m *CrmUserMap) MomoConfig(c *momo.Config) {
-	c.Check("crm_user_map_source_check", "(source = ANY (ARRAY['email'::text, 'manual'::text]))")
+	c.CheckIn(&m.Source,
+		"email",
+		"manual",
+	)
 }

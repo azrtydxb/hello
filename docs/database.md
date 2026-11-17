@@ -176,6 +176,15 @@ regenerate. A foreign key to a table that has no model cannot be declared,
 so the generator leaves it out with a warning; the test lists the known ones
 (`droppedConstraints`) and fails on a new one so it is looked at.
 
+`introspect.only` narrows the tables, but `momo generate --from-db` (v0.16.0
+and later) still reads every standalone PostgreSQL sequence of the database
+and declares it with `c.Sequence` on the first model. A sequence that belongs
+to a table with no model (today `prov_redirect_jobs_seq`, the `nextval`
+default of `prov_redirect_jobs.seq`) is listed in `introspect.skip` so the
+models leave it out; a new goose `CREATE SEQUENCE` makes
+`TestMomoModelsDeclareSchema` fail until it is added there. When its table
+moves to momo, remove it from `introspect.skip` and regenerate.
+
 ### Bumping momo
 
 Pin the exact new version in `go.mod`, read momo's `CHANGELOG.md` and
