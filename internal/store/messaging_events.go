@@ -11,6 +11,8 @@ import (
 	"encoding/hex"
 	"errors"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/messaging"
 )
@@ -45,7 +47,7 @@ func (s *Store) InboxEventData(ctx context.Context, e messaging.Event) (d events
 		SELECT c.channel_id, ch.kind, ch.provider, c.address_id, a.address, c.status, c.assignee_user_id, c.queue_id,
 		       c.peer_kind, c.peer_key
 		FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id JOIN msg_addresses a ON a.id = c.address_id
-		WHERE c.id = $1`, e.ConversationID).Scan(&d.ChannelID, &d.ChannelKind, &d.Provider, &d.AddressID, &d.Address,
+		WHERE c.id = @id`, momo.Named("id", e.ConversationID)).Scan(&d.ChannelID, &d.ChannelKind, &d.Provider, &d.AddressID, &d.Address,
 		&convStatus, &assignee, &queue, &d.PeerKind, &peerKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, false, nil
@@ -67,8 +69,8 @@ func (s *Store) InboxEventData(ctx context.Context, e messaging.Event) (d events
 		return d, true, nil
 	}
 	var dir, status, code string
-	err = s.db.QueryRowContext(ctx, `SELECT direction, status, error_code FROM conversation_messages WHERE id = $1 AND conversation_id = $2`,
-		e.MessageID, e.ConversationID).Scan(&dir, &status, &code)
+	err = s.db.QueryRowContext(ctx, `SELECT direction, status, error_code FROM conversation_messages WHERE id = @id AND conversation_id = @conversation_id`,
+		momo.Named("id", e.MessageID), momo.Named("conversation_id", e.ConversationID)).Scan(&dir, &status, &code)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, true, nil
 	}
@@ -92,7 +94,7 @@ func (s *Store) InboxEventData(ctx context.Context, e messaging.Event) (d events
 // customer-facing message has text to give; an internal note never does.
 func (s *Store) InboxEventContent(ctx context.Context, conversationID, messageID int64, peer, body bool) (peerOut, bodyOut string, err error) {
 	if peer {
-		err = s.db.QueryRowContext(ctx, `SELECT peer_key FROM conversations WHERE id = $1`, conversationID).Scan(&peerOut)
+		err = s.db.QueryRowContext(ctx, `SELECT peer_key FROM conversations WHERE id = @id`, momo.Named("id", conversationID)).Scan(&peerOut)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return "", "", err
 		}
@@ -100,8 +102,9 @@ func (s *Store) InboxEventContent(ctx context.Context, conversationID, messageID
 	if body && messageID != 0 {
 		err = s.db.QueryRowContext(ctx, `
 			SELECT body FROM conversation_messages
-			WHERE id = $1 AND conversation_id = $2 AND kind = 'message' AND redacted_at IS NULL`,
-			messageID, conversationID).Scan(&bodyOut)
+			WHERE id = @id AND conversation_id = @conversation_id AND kind = 'message' AND redacted_at IS NULL`,
+			momo.Named("id", messageID), momo.Named("conversation_id", conversationID)).Scan(&bodyOut)
+
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return "", "", err
 		}

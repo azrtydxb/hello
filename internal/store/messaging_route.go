@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/provider"
 	"github.com/azrtydxb/hello/internal/messaging/router"
@@ -104,23 +106,31 @@ func routeName(ctx context.Context, q rowQuerier, kind, target string) (string, 
 	var query string
 	switch kind {
 	case messaging.RouteQueue, messaging.RouteAITriage:
-		query = `SELECT name FROM queues WHERE id = $1`
+		query = routeNameQueue
 	case messaging.RouteUser:
-		query = `SELECT coalesce(NULLIF(display_name, ''), username) FROM users WHERE id = $1`
+		query = routeNameUser
 	case messaging.RouteExtension:
-		query = `SELECT number || ' ' || name FROM extensions WHERE id = $1`
+		query = routeNameExtension
 	case messaging.RouteRingGroup:
-		query = `SELECT name FROM ring_groups WHERE id = $1`
+		query = routeNameRingGroup
 	default:
 		return "", nil
 	}
 	var name string
-	err = q.QueryRowContext(ctx, query, id).Scan(&name)
+	err = q.QueryRowContext(ctx, query, momo.Named("id", id)).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	return name, err
 }
+
+// The reads routeName names a route target with; each binds @id.
+const (
+	routeNameQueue     = `SELECT name FROM queues WHERE id = @id`
+	routeNameUser      = `SELECT coalesce(NULLIF(display_name, ''), username) FROM users WHERE id = @id`
+	routeNameExtension = `SELECT number || ' ' || name FROM extensions WHERE id = @id`
+	routeNameRingGroup = `SELECT name FROM ring_groups WHERE id = @id`
+)
 
 // GetMsgRouting returns how a number routes.
 func (s *Store) GetMsgRouting(ctx context.Context, addressID int64) (MsgRouting, error) {
@@ -131,7 +141,7 @@ func (s *Store) GetMsgRouting(ctx context.Context, addressID int64) (MsgRouting,
 	err := s.db.QueryRowContext(ctx, `
 		SELECT route_kind, route_target, schedule::text, after_hours_action, after_hours_text,
 		       after_hours_route_kind, after_hours_route_target, first_contact_text
-		FROM msg_addresses WHERE id = $1`, addressID).Scan(&r.RouteKind, &r.RouteTarget, &schedule,
+		FROM msg_addresses WHERE id = @id`, momo.Named("id", addressID)).Scan(&r.RouteKind, &r.RouteTarget, &schedule,
 		&r.AfterHours.Action, &r.AfterHours.Text, &r.AfterHours.RouteKind, &r.AfterHours.RouteTarget, &r.FirstContactText)
 	if err != nil {
 		return r, mapErr(err)
@@ -164,7 +174,7 @@ func checkRouteTarget(ctx context.Context, tx *dbTx, path, kind, target string) 
 	switch kind {
 	case messaging.RouteQueue, messaging.RouteAITriage:
 		var on, text bool
-		err := tx.QueryRowContext(ctx, `SELECT enabled, text_enabled FROM queues WHERE id = $1`, id).Scan(&on, &text)
+		err := tx.QueryRowContext(ctx, `SELECT enabled, text_enabled FROM queues WHERE id = @id`, momo.Named("id", id)).Scan(&on, &text)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fieldError(path, "no such queue")
 		}
@@ -182,12 +192,12 @@ func checkRouteTarget(ctx context.Context, tx *dbTx, path, kind, target string) 
 		}
 	case messaging.RouteExtension:
 		var linked bool
-		err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM user_extensions WHERE extension_id = $1)`, id).Scan(&linked)
+		err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM user_extensions WHERE extension_id = @id)`, momo.Named("id", id)).Scan(&linked)
 		if err != nil {
 			return err
 		}
 		var exists bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM extensions WHERE id = $1)`, id).Scan(&exists); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM extensions WHERE id = @id)`, momo.Named("id", id)).Scan(&exists); err != nil {
 			return err
 		}
 		if !exists {
@@ -198,7 +208,7 @@ func checkRouteTarget(ctx context.Context, tx *dbTx, path, kind, target string) 
 		}
 	case messaging.RouteRingGroup:
 		var exists bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM ring_groups WHERE id = $1)`, id).Scan(&exists); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM ring_groups WHERE id = @id)`, momo.Named("id", id)).Scan(&exists); err != nil {
 			return err
 		}
 		if !exists {
@@ -216,7 +226,7 @@ func checkRouteTarget(ctx context.Context, tx *dbTx, path, kind, target string) 
 func (s *Store) PutMsgRouting(ctx context.Context, actor string, addressID int64, in MsgRoutingInput) (MsgRouting, error) {
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM msg_addresses WHERE id = $1 FOR UPDATE`, addressID).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM msg_addresses WHERE id = @id FOR UPDATE`, momo.Named("id", addressID)).Scan(&one); err != nil {
 			return err
 		}
 		if err := checkRouteTarget(ctx, tx, "routeTarget", in.RouteKind, in.RouteTarget); err != nil {
@@ -240,10 +250,13 @@ func (s *Store) PutMsgRouting(ctx context.Context, actor string, addressID int64
 			sched = []byte("{}")
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE msg_addresses SET route_kind = $2, route_target = $3, schedule = $4::jsonb, after_hours_action = $5,
-				after_hours_text = $6, after_hours_route_kind = $7, after_hours_route_target = $8, first_contact_text = $9
-			WHERE id = $1`, addressID, in.RouteKind, in.RouteTarget, string(sched), in.AfterHours.Action, in.AfterHours.Text,
-			in.AfterHours.RouteKind, in.AfterHours.RouteTarget, in.FirstContactText); err != nil {
+			UPDATE msg_addresses SET route_kind = @route_kind, route_target = @route_target, schedule = @schedule::jsonb,
+				after_hours_action = @after_hours_action, after_hours_text = @after_hours_text, after_hours_route_kind = @after_hours_route_kind,
+				after_hours_route_target = @after_hours_route_target, first_contact_text = @first_contact_text
+			WHERE id = @id`, momo.Named("id", addressID), momo.Named("route_kind", in.RouteKind), momo.Named("route_target", in.RouteTarget),
+			momo.Named("schedule", string(sched)), momo.Named("after_hours_action", in.AfterHours.Action),
+			momo.Named("after_hours_text", in.AfterHours.Text), momo.Named("after_hours_route_kind", in.AfterHours.RouteKind),
+			momo.Named("after_hours_route_target", in.AfterHours.RouteTarget), momo.Named("first_contact_text", in.FirstContactText)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update_routing", "msg_address", strconv.FormatInt(addressID, 10))
@@ -289,7 +302,7 @@ func resolvePlacement(ctx context.Context, tx rowQuerier, kind, target string) (
 	switch kind {
 	case messaging.RouteQueue:
 		var name string
-		err := tx.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = $1 AND enabled AND text_enabled`, id).Scan(&name)
+		err := tx.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = @id AND enabled AND text_enabled`, momo.Named("id", id)).Scan(&name)
 		if err == nil {
 			p = placement{queue: id, label: "queue " + name, members: true}
 		} else if !errors.Is(err, sql.ErrNoRows) {
@@ -299,7 +312,7 @@ func resolvePlacement(ctx context.Context, tx rowQuerier, kind, target string) (
 		user := id
 		if kind == messaging.RouteExtension {
 			user = 0
-			err := tx.QueryRowContext(ctx, `SELECT user_id FROM user_extensions WHERE extension_id = $1`, id).Scan(&user)
+			err := tx.QueryRowContext(ctx, `SELECT user_id FROM user_extensions WHERE extension_id = @id`, momo.Named("id", id)).Scan(&user)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return p, err
 			}
@@ -320,7 +333,7 @@ func resolvePlacement(ctx context.Context, tx rowQuerier, kind, target string) (
 				JOIN user_extensions ue ON ue.extension_id = gm.extension_id
 				JOIN users u ON u.id = ue.user_id AND u.enabled AND u.role IN ('user', 'operator', 'admin')
 				WHERE gm.group_id = g.id)
-			FROM ring_groups g WHERE g.id = $1`, id).Scan(&name, &n)
+			FROM ring_groups g WHERE g.id = @id`, momo.Named("id", id)).Scan(&name, &n)
 		if err == nil && n > 0 {
 			p = placement{group: id, label: "ring group " + name, members: true}
 		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -380,8 +393,8 @@ func (s *Store) autoText(ctx context.Context, tx *dbTx, c convRow, body, what, s
 	)
 	err = tx.QueryRowContext(ctx, `
 		SELECT ch.provider, ch.enabled, ch.trunk_id, ch.status, a.address, a.enabled
-		FROM msg_channels ch JOIN msg_addresses a ON a.channel_id = ch.id WHERE ch.id = $1 AND a.id = $2`,
-		c.ChannelID, c.AddressID).Scan(&prov, &chEnabled, &trunk, &chStatus, &address, &adEnabled)
+		FROM msg_channels ch JOIN msg_addresses a ON a.channel_id = ch.id WHERE ch.id = @channel_id AND a.id = @address_id`,
+		momo.Named("channel_id", c.ChannelID), momo.Named("address_id", c.AddressID)).Scan(&prov, &chEnabled, &trunk, &chStatus, &address, &adEnabled)
 	if err != nil {
 		return 0, false, err
 	}
@@ -405,7 +418,9 @@ func (s *Store) autoText(ctx context.Context, tx *dbTx, c convRow, body, what, s
 	case prov == messaging.ProviderChat:
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status, sent_at, ai_run_id)
-			VALUES ($1, $2, 'out', 'message', $4, '', $3, 'sent', now(), $5) RETURNING id`, c.ID, c.ChannelID, body, sender, run).Scan(&id); err != nil {
+			VALUES (@conversation_id, @channel_id, 'out', 'message', @sender_kind, '', @body, 'sent', now(), @ai_run_id) RETURNING id`,
+			momo.Named("conversation_id", c.ID), momo.Named("channel_id", c.ChannelID), momo.Named("body", body),
+			momo.Named("sender_kind", sender), momo.Named("ai_run_id", run)).Scan(&id); err != nil {
 			return 0, false, err
 		}
 		if err := chatEvent(ctx, tx, c.ID, id, "message"); err != nil {
@@ -417,7 +432,9 @@ func (s *Store) autoText(ctx context.Context, tx *dbTx, c convRow, body, what, s
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status, ai_run_id)
-			VALUES ($1, $2, 'out', 'message', $4, '', $3, 'sending', $5) RETURNING id`, c.ID, c.ChannelID, body, sender, run).Scan(&id); err != nil {
+			VALUES (@conversation_id, @channel_id, 'out', 'message', @sender_kind, '', @body, 'sending', @ai_run_id) RETURNING id`,
+			momo.Named("conversation_id", c.ID), momo.Named("channel_id", c.ChannelID), momo.Named("body", body),
+			momo.Named("sender_kind", sender), momo.Named("ai_run_id", run)).Scan(&id); err != nil {
 			return 0, false, err
 		}
 		for _, part := range messaging.SplitText(body, messaging.MaxPartBytes) {
@@ -431,7 +448,7 @@ func (s *Store) autoText(ctx context.Context, tx *dbTx, c convRow, body, what, s
 			if errors.Is(err, ErrMessagesDisabled) || errors.Is(err, ErrNoExternalTrunk) || errors.Is(err, ErrMessageRate) ||
 				errors.Is(err, ErrMessageTarget) || errors.Is(err, ErrMessageForbidden) {
 				// Texting is off or refuses: the message row would never be sent.
-				if _, derr := tx.ExecContext(ctx, `DELETE FROM conversation_messages WHERE id = $1`, id); derr != nil {
+				if _, derr := tx.ExecContext(ctx, `DELETE FROM conversation_messages WHERE id = @id`, momo.Named("id", id)); derr != nil {
 					return 0, false, derr
 				}
 				return 0, false, nil
@@ -450,11 +467,14 @@ func (s *Store) autoText(ctx context.Context, tx *dbTx, c convRow, body, what, s
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status, ai_run_id)
-			VALUES ($1, $2, 'out', 'message', $4, '', $3, 'queued', $5) RETURNING id`, c.ID, c.ChannelID, body, sender, run).Scan(&id); err != nil {
+			VALUES (@conversation_id, @channel_id, 'out', 'message', @sender_kind, '', @body, 'queued', @ai_run_id) RETURNING id`,
+			momo.Named("conversation_id", c.ID), momo.Named("channel_id", c.ChannelID), momo.Named("body", body),
+			momo.Named("sender_kind", sender), momo.Named("ai_run_id", run)).Scan(&id); err != nil {
 			return 0, false, err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE conversations SET last_message_id = $2, last_message_at = now() WHERE id = $1`, c.ID, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE conversations SET last_message_id = @message_id, last_message_at = now() WHERE id = @id`,
+		momo.Named("id", c.ID), momo.Named("message_id", id)); err != nil {
 		return 0, false, err
 	}
 	return id, true, nil
@@ -512,10 +532,10 @@ func (s *Store) routeOne(ctx context.Context, tx *dbTx, now time.Time, placed *m
 		WHERE c.routed_at IS NULL
 		  -- A number that routes through the AI waits for the triage of the
 		  -- first text, at most aiTriageWait.
-		  AND NOT (a.route_kind = 'ai_triage' AND c.created_at > now() - make_interval(secs => $1)
+		  AND NOT (a.route_kind = 'ai_triage' AND c.created_at > now() - make_interval(secs => @wait_secs)
 		       AND EXISTS (SELECT 1 FROM ai_message_runs t WHERE t.conversation_id = c.id AND t.kind = 'triage'
 		                   AND t.state IN ('queued', 'running')))
-		ORDER BY c.id LIMIT 1 FOR UPDATE OF c SKIP LOCKED`, aiTriageWait.Seconds()).Scan(
+		ORDER BY c.id LIMIT 1 FOR UPDATE OF c SKIP LOCKED`, momo.Named("wait_secs", aiTriageWait.Seconds())).Scan(
 		&c.ID, &c.ChannelID, &c.AddressID, &c.PeerKey, &status, &assignee, &addrOn, &kind, &target, &sched, &action, &text, &ahKind, &ahTarget, &firstText)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, false, nil
@@ -527,7 +547,7 @@ func (s *Store) routeOne(ctx context.Context, tx *dbTx, now time.Time, placed *m
 	// Done with already: a person answered or took it before the router got
 	// to it, or it ended.
 	if assignee.Valid || status == messaging.StatusResolved || status == messaging.StatusSpam {
-		_, err = tx.ExecContext(ctx, `UPDATE conversations SET routed_at = now() WHERE id = $1`, c.ID)
+		_, err = tx.ExecContext(ctx, `UPDATE conversations SET routed_at = now() WHERE id = @id`, momo.Named("id", c.ID))
 		return true, false, err
 	}
 	var schedule messaging.Schedule
@@ -551,8 +571,8 @@ func (s *Store) routeOne(ctx context.Context, tx *dbTx, now time.Time, placed *m
 	// the closed-hours reply already went (one automatic text is enough).
 	if !replied && strings.TrimSpace(firstText) != "" {
 		var earlier bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE address_id = $1 AND peer_key = $2 AND id <> $3)`,
-			c.AddressID, c.PeerKey, c.ID).Scan(&earlier); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE address_id = @address_id AND peer_key = @peer_key AND id <> @id)`,
+			momo.Named("address_id", c.AddressID), momo.Named("peer_key", c.PeerKey), momo.Named("id", c.ID)).Scan(&earlier); err != nil {
 			return true, false, err
 		}
 		if !earlier {
@@ -569,8 +589,8 @@ func (s *Store) routeOne(ctx context.Context, tx *dbTx, now time.Time, placed *m
 		var q int64
 		err := tx.QueryRowContext(ctx, `
 			SELECT q.id FROM conversations c JOIN queues q ON lower(q.name) = lower(c.ai_triage ->> 'suggestedQueue')
-			WHERE c.id = $1 AND q.enabled AND q.text_enabled AND coalesce(c.ai_triage ->> 'suggestedQueue', '') <> ''
-			ORDER BY q.id LIMIT 1`, c.ID).Scan(&q)
+			WHERE c.id = @id AND q.enabled AND q.text_enabled AND coalesce(c.ai_triage ->> 'suggestedQueue', '') <> ''
+			ORDER BY q.id LIMIT 1`, momo.Named("id", c.ID)).Scan(&q)
 		switch {
 		case err == nil:
 			target, byAI = strconv.FormatInt(q, 10), true
@@ -586,17 +606,18 @@ func (s *Store) routeOne(ctx context.Context, tx *dbTx, now time.Time, placed *m
 		p.label += " (suggested by the AI triage)"
 	}
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE conversations SET routed_at = now(), queue_id = $2, ring_group_id = $3, assignee_user_id = $4,
-			assigned_at = CASE WHEN $4::bigint IS NULL THEN NULL ELSE now() END
-		WHERE id = $1`, c.ID, nilIf(p.queue), nilIf(p.group), nilIf(p.user)); err != nil {
+		UPDATE conversations SET routed_at = now(), queue_id = @queue_id, ring_group_id = @ring_group_id, assignee_user_id = @assignee::bigint,
+			assigned_at = CASE WHEN @assignee::bigint IS NULL THEN NULL ELSE now() END
+		WHERE id = @id`, momo.Named("id", c.ID), momo.Named("queue_id", nilIf(p.queue)), momo.Named("ring_group_id", nilIf(p.group)),
+		momo.Named("assignee", nilIf(p.user))); err != nil {
 		return true, replied, err
 	}
 	if p.label == "" {
 		return true, replied, nil // the supervisors' pool: the ingest told them already
 	}
 	if p.user > 0 {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES ($1, $2, $3)`,
-			c.ID, p.user, assignRoute); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES (@conversation_id, @user_id, @reason)`,
+			momo.Named("conversation_id", c.ID), momo.Named("user_id", p.user), momo.Named("reason", assignRoute)); err != nil {
 			return true, replied, err
 		}
 	}
@@ -616,17 +637,17 @@ func (s *Store) routeOne(ctx context.Context, tx *dbTx, now time.Time, placed *m
 // or the pool it waits in get "new conversation" (the notice an agent is
 // emailed about), the supervisors get "assigned" so their lists refresh.
 func announceRouted(ctx context.Context, tx *dbTx, convID, assignee int64) error {
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(inboxEventLock)); err != nil {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(inboxEventLock))); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO conversation_events (user_id, type, conversation_id, message_id)
-		SELECT u.id, CASE WHEN u.role IN ('operator', 'admin') AND u.id IS DISTINCT FROM $2::bigint
+		SELECT u.id, CASE WHEN u.role IN ('operator', 'admin') AND u.id IS DISTINCT FROM @assignee::bigint
 		                       AND NOT `+poolMemberUser+` THEN 'conversation.assigned' ELSE 'conversation.new' END,
 		       c.id, c.last_message_id
 		FROM conversations c JOIN users u ON u.enabled
-		WHERE c.id = $1 AND (u.id = $2::bigint OR u.role IN ('operator', 'admin') OR `+poolMemberUser+`)`,
-		convID, nilIf(assignee))
+		WHERE c.id = @id AND (u.id = @assignee::bigint OR u.role IN ('operator', 'admin') OR `+poolMemberUser+`)`,
+		momo.Named("id", convID), momo.Named("assignee", nilIf(assignee)))
 	return err
 }
 
@@ -664,7 +685,7 @@ func (rs routerStore) Agents(ctx context.Context, queueID int64) ([]router.Agent
 		JOIN user_extensions ue ON ue.extension_id = m.extension_id
 		JOIN users u ON u.id = ue.user_id AND u.enabled AND u.role IN ('user', 'operator', 'admin')
 		LEFT JOIN msg_agent_stats st ON st.user_id = ue.user_id AND st.queue_id = m.queue_id
-		WHERE m.queue_id = $1 ORDER BY m.position, ue.user_id`, queueID)
+		WHERE m.queue_id = @queue_id ORDER BY m.position, ue.user_id`, momo.Named("queue_id", queueID))
 	if err != nil {
 		return nil, err
 	}
@@ -690,14 +711,14 @@ func (rs routerStore) Agents(ctx context.Context, queueID int64) ([]router.Agent
 // queue shares its pool: nothing waits to be assigned.
 func (rs routerStore) Waiting(ctx context.Context, queueID int64, limit int) ([]router.Waiting, error) {
 	rows, err := rs.s.db.QueryContext(ctx, `
-		SELECT c.id, coalesce(CASE WHEN la.reason = $3 THEN la.from_user_id END, 0)
+		SELECT c.id, coalesce(CASE WHEN la.reason = @reason THEN la.from_user_id END, 0)
 		FROM conversations c
 		JOIN queues q ON q.id = c.queue_id
 		LEFT JOIN LATERAL (SELECT a.reason, a.from_user_id FROM conversation_assignments a
 			WHERE a.conversation_id = c.id ORDER BY a.id DESC LIMIT 1) la ON TRUE
-		WHERE c.queue_id = $1 AND c.assignee_user_id IS NULL AND c.status IN ('open', 'pending')
+		WHERE c.queue_id = @queue_id AND c.assignee_user_id IS NULL AND c.status IN ('open', 'pending')
 		  AND c.routed_at IS NOT NULL AND q.strategy <> 'ring_all'
-		ORDER BY c.routed_at, c.id LIMIT $2`, queueID, limit, assignTimeout)
+		ORDER BY c.routed_at, c.id LIMIT @limit`, momo.Named("queue_id", queueID), momo.Named("limit", limit), momo.Named("reason", assignTimeout))
 	if err != nil {
 		return nil, err
 	}
@@ -720,13 +741,14 @@ func (rs routerStore) Assign(ctx context.Context, convID, userID int64, q router
 	out := messaging.AssignGone
 	err := rs.s.tx(ctx, func(tx *dbTx) error {
 		out = messaging.AssignGone
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1::int, ($2::bigint % 2147483647)::int)`, agentLock, userID); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@lock::int, (@user_id::bigint % 2147483647)::int)`,
+			momo.Named("lock", agentLock), momo.Named("user_id", userID)); err != nil {
 			return err
 		}
 		var c convRow
 		var queueID sql.NullInt64
 		err := tx.QueryRowContext(ctx, `SELECT id, channel_id, address_id, peer_key, status, assignee_user_id, queue_id
-			FROM conversations WHERE id = $1 FOR UPDATE`, convID).Scan(&c.ID, &c.ChannelID, &c.AddressID, &c.PeerKey, &c.Status, &c.Assignee, &queueID)
+			FROM conversations WHERE id = @id FOR UPDATE`, momo.Named("id", convID)).Scan(&c.ID, &c.ChannelID, &c.AddressID, &c.PeerKey, &c.Status, &c.Assignee, &queueID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -746,30 +768,30 @@ func (rs routerStore) Assign(ctx context.Context, convID, userID int64, q router
 			return err
 		}
 		var open int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE assignee_user_id = $1 AND status IN ('open', 'pending')`,
-			userID).Scan(&open); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE assignee_user_id = @user_id AND status IN ('open', 'pending')`,
+			momo.Named("user_id", userID)).Scan(&open); err != nil {
 			return err
 		}
 		if open >= q.Capacity {
 			out = messaging.AssignFull
 			return nil
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE conversations SET assignee_user_id = $2, assigned_at = now() WHERE id = $1 AND assignee_user_id IS NULL`,
-			convID, userID)
+		res, err := tx.ExecContext(ctx, `UPDATE conversations SET assignee_user_id = @user_id, assigned_at = now() WHERE id = @id AND assignee_user_id IS NULL`,
+			momo.Named("id", convID), momo.Named("user_id", userID))
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES ($1, $2, $3)`,
-			convID, userID, assignACD); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES (@conversation_id, @user_id, @reason)`,
+			momo.Named("conversation_id", convID), momo.Named("user_id", userID), momo.Named("reason", assignACD)); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO msg_agent_stats (user_id, queue_id, text_answered, last_end) VALUES ($1, $2, 1, now())
+			INSERT INTO msg_agent_stats (user_id, queue_id, text_answered, last_end) VALUES (@user_id, @queue_id, 1, now())
 			ON CONFLICT (user_id, queue_id) DO UPDATE SET text_answered = msg_agent_stats.text_answered + 1, last_end = now()`,
-			userID, q.ID); err != nil {
+			momo.Named("user_id", userID), momo.Named("queue_id", q.ID)); err != nil {
 			return err
 		}
 		if _, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", "Assigned to "+name+" from queue "+q.Name); err != nil {
@@ -794,8 +816,8 @@ func (rs routerStore) Assign(ctx context.Context, convID, userID int64, q router
 func (rs routerStore) NextRotation(ctx context.Context, queueID int64) (uint64, error) {
 	var rr int64
 	err := rs.s.db.QueryRowContext(ctx, `
-		INSERT INTO msg_queue_rr (queue_id, rr) VALUES ($1, 1)
-		ON CONFLICT (queue_id) DO UPDATE SET rr = msg_queue_rr.rr + 1 RETURNING rr - 1`, queueID).Scan(&rr)
+		INSERT INTO msg_queue_rr (queue_id, rr) VALUES (@queue_id, 1)
+		ON CONFLICT (queue_id) DO UPDATE SET rr = msg_queue_rr.rr + 1 RETURNING rr - 1`, momo.Named("queue_id", queueID)).Scan(&rr)
 	return uint64(max(rr, 0)), err
 }
 
@@ -805,25 +827,26 @@ func (rs routerStore) NextRotation(ctx context.Context, queueID int64) (uint64, 
 // pool returns an assigned conversation to the waiting list: the assignee is
 // cleared, the history says why, the thread says so and the pool is told.
 func (s *Store) pool(ctx context.Context, tx *dbTx, c convRow, from int64, reason, line string) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET assignee_user_id = NULL, assigned_at = NULL WHERE id = $1 AND assignee_user_id = $2`,
-		c.ID, from); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET assignee_user_id = NULL, assigned_at = NULL WHERE id = @id AND assignee_user_id = @user_id`,
+		momo.Named("id", c.ID), momo.Named("user_id", from)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, from_user_id, reason) VALUES ($1, $2, $3)`,
-		c.ID, from, reason); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, from_user_id, reason) VALUES (@conversation_id, @user_id, @reason)`,
+		momo.Named("conversation_id", c.ID), momo.Named("user_id", from), momo.Named("reason", reason)); err != nil {
 		return err
 	}
 	if _, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", line); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(inboxEventLock)); err != nil {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(inboxEventLock))); err != nil {
 		return err
 	}
 	// The one who lost it, the supervisors and the pool see it move.
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO conversation_events (user_id, type, conversation_id)
 		SELECT u.id, 'conversation.assigned', c.id FROM conversations c JOIN users u ON u.enabled
-		WHERE c.id = $1 AND (u.id = $2 OR u.role IN ('operator', 'admin') OR `+poolMemberUser+`)`, c.ID, from)
+		WHERE c.id = @id AND (u.id = @user_id OR u.role IN ('operator', 'admin') OR `+poolMemberUser+`)`,
+		momo.Named("id", c.ID), momo.Named("user_id", from))
 	return err
 }
 
@@ -846,11 +869,11 @@ func (rs routerStore) ReturnStale(ctx context.Context, now time.Time) (int, erro
 			FROM conversations c JOIN queues q ON q.id = c.queue_id AND q.text_enabled AND q.text_reassign_seconds > 0
 			WHERE c.assignee_user_id IS NOT NULL AND c.status = 'open' AND c.last_inbound_at IS NOT NULL
 			  AND greatest(c.last_inbound_at, coalesce(c.assigned_at, c.last_inbound_at))
-			      < $1::timestamptz - make_interval(secs => q.text_reassign_seconds)
+			      < @now::timestamptz - make_interval(secs => q.text_reassign_seconds)
 			  AND `+latestRouterAssignment+`
 			  AND NOT EXISTS (SELECT 1 FROM conversation_messages m WHERE m.conversation_id = c.id AND m.direction = 'out'
 			      AND m.kind = 'message' AND m.sender_kind = 'user' AND m.created_at > c.last_inbound_at)
-			ORDER BY c.last_inbound_at LIMIT $2 FOR UPDATE OF c SKIP LOCKED`, now, staleBatch)
+			ORDER BY c.last_inbound_at LIMIT @limit FOR UPDATE OF c SKIP LOCKED`, momo.Named("now", now), momo.Named("limit", staleBatch))
 		if err != nil {
 			return err
 		}
@@ -948,7 +971,8 @@ func (rs routerStore) ReleaseOrphans(ctx context.Context) (int, error) {
 			        JOIN user_extensions ue ON ue.extension_id = m.extension_id
 			        JOIN users u ON u.id = ue.user_id AND u.enabled AND u.role IN ('user', 'operator', 'admin')
 			        WHERE m.queue_id = c.queue_id AND ue.user_id = c.assignee_user_id)
-			ORDER BY c.id LIMIT $1 FOR UPDATE OF c SKIP LOCKED`, staleBatch)
+			ORDER BY c.id LIMIT @limit FOR UPDATE OF c SKIP LOCKED`, momo.Named("limit", staleBatch))
+
 		if err != nil {
 			return err
 		}

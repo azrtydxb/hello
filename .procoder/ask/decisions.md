@@ -6647,6 +6647,69 @@ The old `($1 = 0 OR id < $1)` typed the paging cursor as integer, so a cursor id
   export, nameBooks and queueRedactions, on a stub driver, so a misspelled
   name fails on the pull request tier.
 
+## momo Phase 3, domain 10: internal/store messaging core on @name (2026-11-17, momo/store-messaging)
+
+- **Scope.** `messages.go`, `messaging.go`, `messaging_route.go`,
+  `messaging_route_views.go`, `messaging_carrier.go` and
+  `messaging_events.go` bind by name (`@name` with `momo.Named`) and are in
+  `namedFiles`; `messaging_calls.go` binds by name but for one read. The SQL
+  text, `FOR UPDATE` / `SKIP LOCKED`, Scan targets and error handling are
+  unchanged. No schema change, no migration, `go.mod` and `internal/db`
+  unchanged.
+- **Advisory locks keep their keys.** The inbox event lock
+  (`inboxEventLock`), the carrier claim lock (`outboundClaimLock`), the
+  first-contact lock (`firstContactLock`) and the per-agent capacity lock
+  (`agentLock` with the user id) bind `@key`, `@lock` and `@user_id`; momo
+  renders them as the same `SELECT pg_advisory_xact_lock($1)` and
+  `pg_advisory_xact_lock($1::int, ($2::bigint % 2147483647)::int)` with the
+  same values. The SIP message NOTIFY is `pg_notify(@channel, @batch)`,
+  sent as the same `pg_notify($1, $2)`.
+- **Casts for reused binds.** A reused `@name` is one bind per use, so a use
+  whose type no column fixes carries the type PostgreSQL inferred for the
+  single `$n`: the listings' `lower(@query::text)` (four uses),
+  ConversationCalls' `@digits::text` (one use per CDR column, four), FinishOutbound's
+  and FinishPoll's `CASE WHEN @status::text = 'delivered'` (the `status =`
+  use takes the column's type), recordChannelHealth's
+  `@degraded_after::int` (twice, as `fail_streak` is INT), ListOptOuts'
+  `@q::text` (twice), and routeOne's `@assignee::bigint` (the column use
+  gained the cast its `IS NULL` use had). ListMsgAddresses'
+  `@channel_id::bigint` and ListOptOuts' `@address_id::bigint` were int4
+  before (`$1 = 0` typed them); they are int8 now, which matches the bigint
+  columns and changes no result for an id that fitted. Uses compared with
+  a column on each side (the paging group's `@target`, ErasePeer's
+  `@peer_key`, the upserts' `@note` and `@peer_key`, StartConversation's
+  `@user_id`) need no cast. The SIP message insert's `@status::text` was
+  already cast at both uses.
+- **The listings' assembled WHERE.** messageWhere no longer rewrites `?`
+  to `$n`: each condition carries its own `@name` (`@extension`,
+  `@extensions`, `@conversation`, `@status`, `@query`) and appends its
+  Named only with it; ListMessages adds `@before` and both listings
+  `@limit`. PostgreSQL receives the same statement with each reused value
+  as one bind per use, in order, and the casts above: a one-off check
+  against the old code found no other difference for any of the 64
+  filter combinations. `TestMessageListingsSend` pins the exact SQL and
+  arguments of every combination (and that the conversation list ignores
+  the conversation filter), `TestConversationCallsSends` the CDR read's
+  four forms. The `fmt.Sprintf` placeholder numbering is gone; the gosec
+  suppressions stay, with their reason updated.
+- **Statements the sweep cannot see are constants now and built offline.**
+  routeName's four reads (`routeName*`), the group sends' recipient reads
+  (`ringGroupRecipients`, `pagingGroupRecipients`, `broadcastRecipients`)
+  and ErasePeer's provider read (`erasePeerProviders`) went through a
+  switch or through `queryStrings`; their text is unchanged and
+  `TestMessagingStatementsOffline` builds them with every listing filter.
+- **Left on `$n`, owned by other domains.** ConversationCalls' visibility
+  read joins `visible` (`messaging_inbox.go`), which binds `$1`/`$2`, so it
+  binds `$3` until the inbox converts `visible`; `messaging_calls.go` is
+  therefore not in `namedFiles` (the sweep would refuse that read). ErasePeer's
+  redaction select binds `$1`, because `queueRedactions`
+  (`messaging_privacy.go`) wraps it and numbers its batch `$n+1`.
+  `poolMemberParam` (in `messaging_route.go`) stays `$1::bigint`: only
+  `visible` uses it.
+- **Carrier credentials.** sealChannelCredentials binds the sealed bytes
+  as `@credentials_enc`; nothing logs argument values (momo's logger never
+  does, and the tests print only recorded listing and CDR statements).
+
 ## momo Phase 3, domain 12: internal/store webchat on @name (2026-11-17, momo/store-webchat)
 
 - **Scope.** `webchat.go` and `webchat_sites.go` in `internal/store` bind
