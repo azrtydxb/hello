@@ -42,8 +42,8 @@ import (
 // regenerateModels is how to bring the models up to date; the failure
 // messages and docs/database.md give it.
 const regenerateModels = `regenerate the models against a database goose migrated to the latest version:
-    HELLO_MODELS_DATABASE_URL=postgres://... go run github.com/azrtydxb/momo/cmd/momo@v0.14.0 generate --from-db HELLO_MODELS_DATABASE_URL --no-snapshot --overwrite
-    go run github.com/azrtydxb/momo/cmd/momo@v0.14.0 generate
+    HELLO_MODELS_DATABASE_URL=postgres://... go run github.com/azrtydxb/momo/cmd/momo@v0.16.0 generate --from-db HELLO_MODELS_DATABASE_URL --no-snapshot --overwrite
+    go run github.com/azrtydxb/momo/cmd/momo@v0.16.0 generate
 (docs/database.md, "Regenerating the models")`
 
 // droppedConstraints are the constraints of modeled tables that the models
