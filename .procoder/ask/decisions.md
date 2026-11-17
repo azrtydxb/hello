@@ -6547,6 +6547,8 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   `@before::integer`: the same plan, and the same out-of-range error for
   a cursor above 2^31-1 as before. LookupCalls and LookupRecordings already
   cast theirs to bigint and still do.
+  Superseded (2026-11-17): both now cast `@before::bigint`, as answered
+  under "CDR and recording list cursor type".
 - **Run-time statements.** lookupWhere takes the caller's
   `momo.Named("before")` and `momo.Named("limit")` and appends one Named per
   condition it adds (`@allowed`, `@extension`, `@digits`, `@suffix`,
@@ -6566,6 +6568,8 @@ The old `($1 = 0 OR id < $1)` typed the paging cursor as integer, so a cursor id
 
 - Keep `::integer` (current behaviour, same plan).
 - Switch to `::bigint`, as LookupCalls and LookupRecordings already use: no cursor limit, a behaviour change.
+
+Answer (2026-11-17): switch to `::bigint`.
 
 ## momo Phase 3, domain 13: internal/store AI on @name (2026-11-17, momo/store-ai)
 
@@ -6639,7 +6643,10 @@ The old `($1 = 0 OR id < $1)` typed the paging cursor as integer, so a cursor id
   equal until those files move and the `$n` form goes. `queueRedactions` is
   called from `messaging.go` (on `$n`) as well: it binds the batch as
   `@batch` when its fragment's arguments are `momo.Named`, else as the next
-  `$n`, as before.
+  `$n`, as before. Superseded (2026-11-17, momo/store-followup): with
+  `messaging_calls.go` and ErasePeer on `@name`, `visible`,
+  `poolMemberParam`, `TestVisibleToMatchesVisible` and `queueRedactions`'
+  `$n` branch are gone; `queueRedactions` always binds `@batch`.
 - **Run-time statements.** ListConversations' WHERE fragments each carry
   their `@name` and their Named; the report's grouping keys bind `@tz`
   (the `strings.ReplaceAll` of `$5` is gone); exportMedia binds
@@ -6706,6 +6713,10 @@ The old `($1 = 0 OR id < $1)` typed the paging cursor as integer, so a cursor id
   (`messaging_privacy.go`) wraps it and numbers its batch `$n+1`.
   `poolMemberParam` (in `messaging_route.go`) stays `$1::bigint`: only
   `visible` uses it.
+  Superseded (2026-11-17, momo/store-followup): the visibility read binds
+  `@id` with `visibleTo`, ErasePeer's redaction select binds `@peer_key`,
+  `messaging_calls.go` is in `namedFiles`, and `visible` and
+  `poolMemberParam` are deleted.
 - **Carrier credentials.** sealChannelCredentials binds the sealed bytes
   as `@credentials_enc`; nothing logs argument values (momo's logger never
   does, and the tests print only recorded listing and CDR statements).
@@ -6762,3 +6773,23 @@ passes.
   `SELECT pg_advisory_xact_lock(@key)` with `int64(chatEventLock)`, one
   bigint bind as before.
 - **maintainChat's three deletes** take no arguments and are unchanged.
+
+## momo Phase 3 follow-ups: bigint cursor, messaging cleanup, final $n sweep (2026-11-17, momo/store-followup)
+
+- **Cursor.** ListCDRs and ListRecordings cast `@before::bigint` on both
+  uses, as answered under "CDR and recording list cursor type": a cursor id
+  above 2^31-1 now pages instead of failing out of range. LookupCalls and
+  LookupRecordings were already bigint.
+- **Messaging.** ConversationCalls' visibility read binds `@id` and joins
+  `visibleTo` with `inboxAccessArgs`; `messaging_calls.go` is in
+  `namedFiles`. `visible` (`messaging_inbox.go`) and `poolMemberParam`
+  (`messaging_route.go`) had no other user and are deleted, with
+  `TestVisibleToMatchesVisible`; `poolMemberNamed` and `poolMemberUser` are
+  the two forms left. ErasePeer's redaction select binds `@peer_key`, so
+  `queueRedactions` no longer numbers its batch after a `$n` fragment and
+  always binds `@batch`. `TestConversationCallsSends` now also pins the
+  visibility read's binds.
+- **Sweep.** No non-test file of `internal/store` binds `$n` but
+  `trylock.go` (`TryLock`'s pinned connection, raw `database/sql`); `dbq.go`
+  and `backup.go`'s goose read stay raw `database/sql` and bind nothing
+  positional. Every other file is in `namedFiles`.

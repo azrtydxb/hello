@@ -25,45 +25,27 @@ Moved so far:
   transaction is momo's and whose hooks still get the `*sql.Tx` behind it.
 - The directory sync store (`internal/directory`), the SCIM store
   (`internal/scim`) and the SSO store (`internal/sso`).
-- `internal/store`, at its seam. Its files move to `@name` binds one
-  domain at a time (below); the files still on `$n` are those not listed
-  here. Converted so far:
+- `internal/store`, at its seam. Every domain is converted to `@name`
+  binds, and every file but the raw exceptions below is in `namedFiles`:
   - core and configuration: `store.go`, `batch.go`, `config.go`, `dialspace.go`, `dirprovision.go`, `flow_canvas.go`
+  - faxes, mail and backup: `faxes.go`, `mail.go`, `backup.go`
+  - users and authentication: `users.go`, `totp.go`, `oauth.go`, `ldap.go`, `onboarding.go`, `sidekey.go`
   - phonebook: `phonebook.go`, `phonebook_lookup.go`, `personal_contacts.go`, `locations.go`
+  - call features: `ivr.go`, `queues.go`, `queue_callbacks.go`, `followme.go`, `pickup.go`, `park.go`, `paging.go`, `ringmap.go`, `ringtag.go`, `conference.go`, `multicast.go`
+  - voicemail and media: `pbx.go`, `voicemail_groups.go`, `media.go`, `moh.go`, `ringtones.go`, `tts.go`, `recording_links.go`, `video_recording.go`, `cdr.go`
+  - provisioning: `prov.go`, `prov_admin.go`, `prov_handler.go`, `prov_lines.go`, `prov_push.go`, `prov_overrides.go`, `prov_books.go`, `prov_multicast.go`, `syslog.go`, `rtcpxr.go`, `clientquality.go`, `clients.go`
+  - routing and time: `routing.go`, `timecond.go`, `blocklist.go`, `originate.go`, `boss.go`, `calendar_dnd.go`
   - security and door: `scep.go`, `wifi.go`, `door.go`, `door_open.go`, `door_camera.go`, `door_webhook.go`
-  - AI: `messaging_ai.go`, `ai_core.go`, `ai_sessions.go`, `ai_findings.go` (`TryLock` moved to `trylock.go`, which stays raw and keeps its `$1`)
+  - AI: `messaging_ai.go`, `ai_core.go`, `ai_sessions.go`, `ai_findings.go`
   - messaging inbox: `messaging_inbox.go`, `messaging_media.go`, `messaging_privacy.go`, `messaging_deskphone.go`, `messaging_reports.go`
-  - messaging core: `messages.go`, `messaging.go`, `messaging_route.go`, `messaging_route_views.go`, `messaging_carrier.go`, `messaging_events.go`, and `messaging_calls.go` but for its visibility read, which joins the inbox's `visible` condition and binds `$n` until the inbox moves; ErasePeer's select for `queueRedactions` (privacy) binds `$1` as that helper numbers after it
+  - messaging core: `messages.go`, `messaging.go`, `messaging_route.go`, `messaging_route_views.go`, `messaging_carrier.go`, `messaging_events.go`, `messaging_calls.go`
   - webchat: `webchat.go`, `webchat_sites.go`
-- `internal/store`, at its seam, with the files of the core and
-  configuration domain converted to `@name` binds: `store.go`, `batch.go`,
-  `config.go`, `dialspace.go`, `dirprovision.go` and `flow_canvas.go`, and
-  of the faxes, mail and backup domain: `faxes.go`, `mail.go` and
-  `backup.go`. Its other files still bind `$n` and move one domain at a time (below).
-  `config.go`, `dialspace.go`, `dirprovision.go` and `flow_canvas.go`; and
-  those of the users and authentication domain: `users.go`, `totp.go`,
-  `oauth.go`, `ldap.go`, `onboarding.go` and `sidekey.go`. Its other files
-  still bind `$n` and move one domain at a time (below).
-  those of the phonebook domain: `phonebook.go`, `phonebook_lookup.go`,
-  `personal_contacts.go` and `locations.go`; and those of the call
-  features domain: `ivr.go`, `queues.go`, `queue_callbacks.go`,
-  `followme.go`, `pickup.go`, `park.go`, `paging.go`, `ringmap.go`,
-  `ringtag.go`, `conference.go` and `multicast.go`. Its other files still bind
-  `personal_contacts.go` and `locations.go`; and those of the voicemail and
-  media domain: `pbx.go`, `voicemail_groups.go`, `media.go`, `moh.go`,
-  `ringtones.go`, `tts.go`, `recording_links.go`, `video_recording.go` and
-  `cdr.go`. Its other files still bind
-  `$n` and move one domain at a time (below).
-  `personal_contacts.go` and `locations.go`; and those of the
-  provisioning domain: `prov.go`, `prov_admin.go`, `prov_handler.go`,
-  `prov_lines.go`, `prov_push.go`, `prov_overrides.go`, `prov_books.go`,
-  `prov_multicast.go`, `syslog.go`, `rtcpxr.go`, `clientquality.go` and
-  `clients.go`. Its other files still bind `$n` and move one domain at a
-  time (below).
-  `personal_contacts.go` and `locations.go`; and those of the routing and
-  time domain: `routing.go`, `timecond.go`, `blocklist.go`, `originate.go`,
-  `boss.go` and `calendar_dnd.go`. Its other files still bind `$n` and move
-  one domain at a time (below).
+
+  Raw on purpose: the seam itself (`dbq.go`, which passes every statement
+  through and begins transactions), `TryLock`'s pinned session-lock
+  connection (`trylock.go`, which keeps its native `$1` and is not in
+  `namedFiles`), and `SchemaVersion`'s read of goose's `goose_db_version`
+  (`backup.go`, which binds nothing and goes straight to `database/sql`).
 
 Every package above builds its handle with `db.New` (or `db.NewPool`) where
 the binary constructs it, except `internal/store`, which builds its own in
@@ -73,10 +55,10 @@ the binary constructs it, except `internal/store`, which builds its own in
 pool and its transactions are types with `database/sql`'s method set
 (`ExecContext`, `QueryContext`, `QueryRowContext`, `BeginTx`) whose every
 statement is a momo raw statement, on the store's `*momo.DB` or on momo's
-view of the open `*sql.Tx` (`db.AdoptTx`). A converted file binds `@name`;
-an unconverted one still binds `$n`, which momo accepts on PostgreSQL as
-positional arguments (one placeholder style per statement: a `$n` statement
-cannot also use `?` or `@name`). The handle and the transaction types are
+view of the open `*sql.Tx` (`db.AdoptTx`). Every converted file binds
+`@name`; momo also accepts `$n` on PostgreSQL as positional arguments, which
+only the raw exceptions above still use (one placeholder style per
+statement: a `$n` statement cannot also use `?` or `@name`). The handle and the transaction types are
 `momo.Querier`s, so code can also pass them straight to `momo.Exec`,
 `momo.Query[T]`, `momo.Scalars[V]` and the builders. Transactions are still
 begun by `database/sql` and adopted, so methods that take a caller's

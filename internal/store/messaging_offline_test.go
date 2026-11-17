@@ -207,6 +207,15 @@ func TestConversationCallsSends(t *testing.T) {
 			if err != nil || out == nil || len(out) != 0 {
 				t.Fatalf("ConversationCalls = %v, %v; want an empty list", out, err)
 			}
+			// The visibility read binds @id and visibleTo's @all and
+			// @user_id, one bind per use in order.
+			if len(d.sent) > 0 {
+				wantVis := []any{int64(3), tc.all, int64(7), int64(7), int64(7), int64(7)}
+				if v := d.sent[0]; strings.Contains(v.sql, "@") || !strings.Contains(v.sql, "c.id = $1 AND ($2::boolean") ||
+					fmt.Sprintf("%#v", v.args) != fmt.Sprintf("%#v", wantVis) {
+					t.Errorf("visibility read sent %#v\nwant args %#v", v, wantVis)
+				}
+			}
 			var (
 				conds []string
 				args  []any
