@@ -4,7 +4,7 @@ Hello's schema is built by goose: the SQL files in `migrations/`, applied by
 `hello-control migrate up` (`internal/migrate`). That does not change.
 
 The query layer is moving to [momo](https://github.com/azrtydxb/momo), pinned
-to an exact version in `go.mod` (v0.14.0), one package at a time. A package
+to an exact version in `go.mod` (v0.16.0), one package at a time. A package
 that has moved runs its statements through a `*momo.DB` that `internal/db`
 builds over the binary's existing `*sql.DB` (`pgxdriver.FromSQLDB`), so there
 is no second connection pool. Statements are logged at debug level with the
@@ -158,12 +158,12 @@ developer Mac: use a lab or CI database), from the repository root:
 
 ```sh
 HELLO_MODELS_DATABASE_URL=postgres://... \
-  go run github.com/azrtydxb/momo/cmd/momo@v0.14.0 generate --from-db HELLO_MODELS_DATABASE_URL --no-snapshot --overwrite
-go run github.com/azrtydxb/momo/cmd/momo@v0.14.0 generate
+  go run github.com/azrtydxb/momo/cmd/momo@v0.16.0 generate --from-db HELLO_MODELS_DATABASE_URL --no-snapshot --overwrite
+go run github.com/azrtydxb/momo/cmd/momo@v0.16.0 generate
 ```
 
 The first command writes the model files, the second the generated code.
-`go run ...@v0.14.0` builds the momo command in its own module, so momo's
+`go run ...@v0.16.0` builds the momo command in its own module, so momo's
 MySQL and SQLite drivers never enter Hello's `go.mod`. `--no-snapshot` keeps
 momo from writing an init migration: goose owns migrations.
 
@@ -175,6 +175,15 @@ To model another table, add it to `introspect.only` in `momo.yaml` and
 regenerate. A foreign key to a table that has no model cannot be declared,
 so the generator leaves it out with a warning; the test lists the known ones
 (`droppedConstraints`) and fails on a new one so it is looked at.
+
+`introspect.only` narrows the tables, but `momo generate --from-db` (v0.16.0
+and later) still reads every standalone PostgreSQL sequence of the database
+and declares it with `c.Sequence` on the first model. A sequence that belongs
+to a table with no model (today `prov_redirect_jobs_seq`, the `nextval`
+default of `prov_redirect_jobs.seq`) is listed in `introspect.skip` so the
+models leave it out; a new goose `CREATE SEQUENCE` makes
+`TestMomoModelsDeclareSchema` fail until it is added there. When its table
+moves to momo, remove it from `introspect.skip` and regenerate.
 
 ### Bumping momo
 

@@ -42,8 +42,8 @@ import (
 // regenerateModels is how to bring the models up to date; the failure
 // messages and docs/database.md give it.
 const regenerateModels = `regenerate the models against a database goose migrated to the latest version:
-    HELLO_MODELS_DATABASE_URL=postgres://... go run github.com/azrtydxb/momo/cmd/momo@v0.14.0 generate --from-db HELLO_MODELS_DATABASE_URL --no-snapshot --overwrite
-    go run github.com/azrtydxb/momo/cmd/momo@v0.14.0 generate
+    HELLO_MODELS_DATABASE_URL=postgres://... go run github.com/azrtydxb/momo/cmd/momo@v0.16.0 generate --from-db HELLO_MODELS_DATABASE_URL --no-snapshot --overwrite
+    go run github.com/azrtydxb/momo/cmd/momo@v0.16.0 generate
 (docs/database.md, "Regenerating the models")`
 
 // droppedConstraints are the constraints of modeled tables that the models
@@ -209,10 +209,12 @@ func TestMomoModelsDeclareSchema(t *testing.T) {
 		t.Errorf("the models declare %d tables, introspect.only matches %d: add the new model to declaredTables, and %s",
 			len(declared.Tables), len(r.res.Snapshot.Tables), regenerateModels)
 	}
-	if schema.Equal(r.res.Snapshot, declared) {
+	goose := valueListChecks(r.res.Snapshot)
+	declared = valueListChecks(declared)
+	if schema.Equal(goose, declared) {
 		return
 	}
-	changes, _, err := momomigrate.Diff(declared, r.res.Snapshot, momomigrate.DiffOptions{AllowDestructive: true})
+	changes, _, err := momomigrate.Diff(declared, goose, momomigrate.DiffOptions{AllowDestructive: true})
 	if err != nil {
 		t.Fatalf("diff the declared and the goose schema: %v", err)
 	}
@@ -223,8 +225,28 @@ func TestMomoModelsDeclareSchema(t *testing.T) {
 	}
 	if len(changes) == 0 {
 		a, _ := json.MarshalIndent(schema.Normalized(declared), "", "  ")
-		b, _ := json.MarshalIndent(schema.Normalized(r.res.Snapshot), "", "  ")
+		b, _ := json.MarshalIndent(schema.Normalized(goose), "", "  ")
 		t.Errorf("the declared schema differs from the goose schema in a way Diff does not report:\ndeclared:\n%s\ngoose:\n%s", a, b)
 	}
 	t.Errorf("the generated code in internal/db/models does not match the goose schema: %s", regenerateModels)
+}
+
+// valueListChecks returns a copy of s in which every CHECK with a value list
+// (schema.Check.In, `c.CheckIn` in a model) has the expression momo renders
+// for that list (Check.ExprFor). A value-list check is defined by its column
+// and values: migrate.Diff compares it as a set, but schema.Equal (momo
+// v0.16.0) still compares the expression text, which differs between the
+// declaration (`"status" IN (...)`) and PostgreSQL's spelling of the goose
+// constraint (`status = ANY (ARRAY[...])`). s is not modified.
+func valueListChecks(s *schema.Schema) *schema.Schema {
+	c := *s
+	c.Tables = slices.Clone(s.Tables)
+	for i := range c.Tables {
+		t := &c.Tables[i]
+		t.Checks = slices.Clone(t.Checks)
+		for j := range t.Checks {
+			t.Checks[j].Expr = t.Checks[j].ExprFor(s.Dialect)
+		}
+	}
+	return &c
 }

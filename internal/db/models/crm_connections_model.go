@@ -1,4 +1,4 @@
-// momo:fromdb sha256=694305941535abfccaaa3c514cfd30943465af2ab4405694fe5c9c1bf1517319
+// momo:fromdb sha256=38ca686e5d1dbab97641c784a3b37a4fba20f94f91ffeaa3ecb46b29cd240c50
 // Written by momo generate --from-db. A re-run keeps this file if you edit it, and reports a conflict when the database changed the model.
 
 package models
@@ -37,8 +37,15 @@ type CrmConnection struct {
 // MomoConfig declares what a tag cannot: the other indexes, constraints, enums and defaults.
 func (m *CrmConnection) MomoConfig(c *momo.Config) {
 	c.Check("crm_connections_check", "((scope = 'user'::text) = (user_id IS NOT NULL))")
-	c.Check("crm_connections_scope_check", "(scope = ANY (ARRAY['org'::text, 'user'::text]))")
-	c.Check("crm_connections_status_check", "(status = ANY (ARRAY['connected'::text, 'needs_reauth'::text, 'revoked'::text]))")
+	c.CheckIn(&m.Scope,
+		"org",
+		"user",
+	)
+	c.CheckIn(&m.Status,
+		"connected",
+		"needs_reauth",
+		"revoked",
+	)
 	c.Unique("crm_connections_org", &m.ConnectorID).Where("(scope = 'org'::text)")
 	c.Unique("crm_connections_user", &m.ConnectorID, &m.UserID).Where("(scope = 'user'::text)")
 }
