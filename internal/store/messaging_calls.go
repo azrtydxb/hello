@@ -25,11 +25,10 @@ func cdrDigits(x string) string {
 // and so no calls.
 func (s *Store) ConversationCalls(ctx context.Context, acc InboxAccess, convID int64, limit int) ([]CDR, error) {
 	var peerKey, peerKind string
-	// The visibility condition is the inbox's (visible, messaging_inbox.go),
-	// which still binds $1 and $2, so this read binds $n until the inbox
-	// moves to @name.
-	err := s.db.QueryRowContext(ctx, `SELECT c.peer_key, c.peer_kind FROM conversations c WHERE c.id = $3 AND `+visible,
-		acc.UserID, acc.All, convID).Scan(&peerKey, &peerKind)
+	// The visibility condition is the inbox's (visibleTo, messaging_inbox.go),
+	// which binds @user_id and @all.
+	err := s.db.QueryRowContext(ctx, `SELECT c.peer_key, c.peer_kind FROM conversations c WHERE c.id = @id AND `+visibleTo,
+		append(inboxAccessArgs(acc.UserID, acc.All), momo.Named("id", convID))...).Scan(&peerKey, &peerKind)
 	if err != nil {
 		return nil, mapErr(err)
 	}

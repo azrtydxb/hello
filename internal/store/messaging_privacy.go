@@ -34,23 +34,16 @@ func newRedactionBatch(what string) string {
 // under batch. A message queued before and not yet done joins this batch
 // and starts its tries again; one already done stays done.
 //
-// q binds by name (args are momo.Named) and the batch is then bound as
-// @batch, a name q must not use; a q of a file not yet converted to @name
-// (messaging.go) binds with $n, and the batch is then the next $n.
+// q binds by name (args are momo.Named) and the batch is bound as @batch, a
+// name q must not use.
 func queueRedactions(ctx context.Context, tx *dbTx, batch, q string, args ...any) error {
-	bind, arg := "@batch", any(momo.Named("batch", batch))
-	if len(args) > 0 {
-		if _, named := args[0].(momo.NamedArg); !named {
-			bind, arg = "$"+strconv.Itoa(len(args)+1), batch
-		}
-	}
 	//nolint:gosec // G202: q is a fixed query of this package with bound parameters.
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO msg_provider_redactions (channel_id, provider, provider_message_id, batch)
-		SELECT x.channel_id, x.provider, x.provider_message_id, `+bind+` FROM (`+q+`) AS x(channel_id, provider, provider_message_id)
+		SELECT x.channel_id, x.provider, x.provider_message_id, @batch FROM (`+q+`) AS x(channel_id, provider, provider_message_id)
 		ON CONFLICT (channel_id, provider_message_id) DO UPDATE SET batch = EXCLUDED.batch, state = 'pending', attempts = 0,
 			next_attempt_at = now(), claimed_until = NULL, last_error = '', finished_at = NULL
-		WHERE msg_provider_redactions.state <> 'done'`, append(args, arg)...)
+		WHERE msg_provider_redactions.state <> 'done'`, append(args, momo.Named("batch", batch))...)
 	return err
 }
 

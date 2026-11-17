@@ -64,7 +64,7 @@ func (s *Store) ListRecordings(ctx context.Context, extension string, before int
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+recordingCols+recordingFrom+`
 		WHERE (@extension::text = '' OR EXISTS (SELECT 1 FROM cdrs c
 			WHERE c.correlation_id = r.correlation_id AND (c.source = @extension::text OR c.destination = @extension::text)))
-		AND (@before::integer = 0 OR r.id < @before::integer)
+		AND (@before::bigint = 0 OR r.id < @before::bigint)
 		ORDER BY r.id DESC LIMIT @limit`, momo.Named("extension", extension), momo.Named("before", before), momo.Named("limit", limit+1))
 	if err != nil {
 		return nil, "", err

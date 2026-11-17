@@ -42,24 +42,17 @@ const (
 // capacity count of one agent.
 const agentLock = 0x6d736700 // "msg"
 
-// The condition "the user is one of the people who may take the unassigned
-// conversation c": a member of its text queue, or of its ring group, through
-// the user their extension is linked to. The two forms differ only in how the
-// user is named: poolMemberParam for the caller ($1 of the inbox queries),
-// poolMemberUser for a row u of users. They are constants so the queries that
-// use them stay constants.
-const (
-	poolMemberParam = `(EXISTS (SELECT 1 FROM queues pq JOIN queue_members pm ON pm.queue_id = pq.id
-			JOIN user_extensions pe ON pe.extension_id = pm.extension_id
-			WHERE pq.id = c.queue_id AND pq.enabled AND pq.text_enabled AND pe.user_id = $1::bigint)
-		OR EXISTS (SELECT 1 FROM ring_group_members pg JOIN user_extensions pge ON pge.extension_id = pg.extension_id
-			WHERE pg.group_id = c.ring_group_id AND pge.user_id = $1::bigint))`
-	poolMemberUser = `(EXISTS (SELECT 1 FROM queues pq JOIN queue_members pm ON pm.queue_id = pq.id
+// poolMemberUser is the condition "the user is one of the people who may
+// take the unassigned conversation c": a member of its text queue, or of its
+// ring group, through the user their extension is linked to, for a row u of
+// users. poolMemberNamed (messaging_inbox.go) is the same for the caller,
+// bound as @user_id. It is a constant so the queries that use it stay
+// constants.
+const poolMemberUser = `(EXISTS (SELECT 1 FROM queues pq JOIN queue_members pm ON pm.queue_id = pq.id
 			JOIN user_extensions pe ON pe.extension_id = pm.extension_id
 			WHERE pq.id = c.queue_id AND pq.enabled AND pq.text_enabled AND pe.user_id = u.id)
 		OR EXISTS (SELECT 1 FROM ring_group_members pg JOIN user_extensions pge ON pge.extension_id = pg.extension_id
 			WHERE pg.group_id = c.ring_group_id AND pge.user_id = u.id))`
-)
 
 // MsgRouting is how a number routes new conversations and when it is open.
 type MsgRouting struct {
