@@ -373,11 +373,11 @@ func catalog(t *testing.T, ctx context.Context, db *sql.DB) map[string]string {
 	const ns = `(SELECT oid FROM pg_namespace WHERE nspname = current_schema())`
 	const notHistory = ` NOT IN ('goose_db_version', 'goose_db_version_id_seq', 'momo_migrations')`
 	for _, q := range []string{
-		`SELECT 'table ' || c.relname, c.relkind || ' ' || c.relpersistence || ' ' || coalesce(array_to_string(c.reloptions, ','), '') || ' ' || coalesce(obj_description(c.oid, 'pg_class'), '')
+		`SELECT 'table ' || c.relname, c.relkind::text || ' ' || c.relpersistence::text || ' ' || coalesce(array_to_string(c.reloptions, ','), '') || ' ' || coalesce(obj_description(c.oid, 'pg_class'), '')
 		   FROM pg_class c WHERE c.relnamespace = ` + ns + ` AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND c.relname` + notHistory,
 		`SELECT 'column ' || c.relname || '.' || a.attname,
-		        row_number() OVER (PARTITION BY c.oid ORDER BY a.attnum) || ' ' || format_type(a.atttypid, a.atttypmod) || ' ' || a.attnotnull || ' ' ||
-		        coalesce(pg_get_expr(d.adbin, d.adrelid), '') || ' ' || a.attidentity || ' ' || a.attgenerated || ' ' || coalesce(co.collname, '') || ' ' ||
+		        (row_number() OVER (PARTITION BY c.oid ORDER BY a.attnum))::text || ' ' || format_type(a.atttypid, a.atttypmod) || ' ' || a.attnotnull::text || ' ' ||
+		        coalesce(pg_get_expr(d.adbin, d.adrelid), '') || ' ' || a.attidentity::text || ' ' || a.attgenerated::text || ' ' || coalesce(co.collname, '') || ' ' ||
 		        coalesce(col_description(c.oid, a.attnum), '')
 		   FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
 		   LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
@@ -391,8 +391,8 @@ func catalog(t *testing.T, ctx context.Context, db *sql.DB) map[string]string {
 		   FROM pg_trigger tg JOIN pg_class c ON c.oid = tg.tgrelid WHERE c.relnamespace = ` + ns + ` AND NOT tg.tgisinternal`,
 		`SELECT 'function ' || p.oid::regprocedure::text, pg_get_functiondef(p.oid)
 		   FROM pg_proc p WHERE p.pronamespace = ` + ns,
-		`SELECT 'sequence ' || s.sequencename, s.data_type || ' ' || s.start_value || ' ' || s.min_value || ' ' || s.max_value || ' ' ||
-		        s.increment_by || ' ' || s.cycle || ' ' || s.cache_size
+		`SELECT 'sequence ' || s.sequencename, s.data_type::text || ' ' || s.start_value::text || ' ' || s.min_value::text || ' ' || s.max_value::text || ' ' ||
+		        s.increment_by::text || ' ' || s.cycle::text || ' ' || s.cache_size::text
 		   FROM pg_sequences s WHERE s.schemaname = current_schema() AND s.sequencename` + notHistory,
 	} {
 		rows, err := db.QueryContext(ctx, q)
