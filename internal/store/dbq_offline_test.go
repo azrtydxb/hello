@@ -93,6 +93,10 @@ var namedFiles = map[string]bool{
 	"tts.go":               true,
 	"video_recording.go":   true,
 	"voicemail_groups.go":  true,
+	"messaging_ai.go":      true,
+	"ai_core.go":           true,
+	"ai_sessions.go":       true,
+	"ai_findings.go":       true,
 }
 
 // TestStatementsBuild renders every statement the store's code passes as a

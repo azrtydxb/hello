@@ -6566,3 +6566,40 @@ The old `($1 = 0 OR id < $1)` typed the paging cursor as integer, so a cursor id
 
 - Keep `::integer` (current behaviour, same plan).
 - Switch to `::bigint`, as LookupCalls and LookupRecordings already use: no cursor limit, a behaviour change.
+
+## momo Phase 3, domain 13: internal/store AI on @name (2026-11-17, momo/store-ai)
+
+- **Scope.** `messaging_ai.go`, `ai_core.go`, `ai_sessions.go` and
+  `ai_findings.go` in `internal/store` bind by name: every `$n` became
+  `@name` with `momo.Named`, through the seam, with the SQL text,
+  `FOR UPDATE` / `SKIP LOCKED` (ClaimAIRun, FinishAIRun, the FAQ and
+  settings locks), Scan targets and error handling unchanged. The AI calls
+  themselves (go-ai-sdk) are not in the store and did not change. No schema
+  change, no migration, `go.mod` and `internal/db` unchanged.
+- **Claims and locks unchanged.** ClaimAIRun's two `SKIP LOCKED` claims, the
+  session lock
+  `pg_advisory_xact_lock(hashtext('hello:ai:session:' || @session_id::text))`
+  (CreateAITask and lockAISession) and the `sessionLocked` context marker
+  are the same statements and keys.
+- **TryLock stays raw and moved to `trylock.go`.** Its session lock lives on
+  a connection pinned with raw `database/sql` (dbq.go), where `@name` does
+  not bind, so it keeps `pg_try_advisory_lock(hashtext($1::text))` and its
+  unlock. It moved out of `ai_core.go` unchanged so that file can be in
+  `namedFiles`; `trylock.go` is not.
+- **Reused binds carry the old type.** ListAIFindings casts each filter,
+  `@status::text`, `@severity::text`, `@type::text`, in both its uses
+  (`= ''` and the column comparison); ListMsgFAQ casts `@address_id::bigint`
+  in `= 0` and in its column comparison. Already cast: ListAISessions'
+  `@owner::bigint`, upsertFinding's `@status::text`, queueAITriage's select
+  list. The other repeated uses (upsertFinding's `@severity`, the insert's
+  `@now` twice, the guardrail read's `@conversation_id` and `@address_id`,
+  the holding-line read, `aiFresh`) each compare with or fill a column of
+  the bind's type.
+- **Statements passed through helpers are constants now.**
+  `aiSessionMessages` and `aiMessageHistory` (queryAIMessages) and
+  `aiFindingAcknowledge` and `aiFindingDismiss` (findingAction, which adds
+  `@id`) have the same text; `TestAIStatementsOffline` builds them with
+  their names, since the sweep cannot see a statement passed to a helper.
+  PruneAI's steps each bind `@cutoff`; `TestPruneAISends` runs it on the
+  fake driver and checks every step reaches PostgreSQL with one argument and
+  the usage step with its date.
