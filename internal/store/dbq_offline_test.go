@@ -108,6 +108,8 @@ var namedFiles = map[string]bool{
 	"messaging_events.go":      true,
 	"messaging_route.go":       true,
 	"messaging_route_views.go": true,
+	"webchat.go":               true,
+	"webchat_sites.go":         true,
 }
 
 // TestStatementsBuild renders every statement the store's code passes as a

@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/secret"
 )
@@ -153,14 +155,14 @@ func (s *Store) ListChatSites(ctx context.Context) ([]ChatSite, error) {
 
 // GetChatSite returns one site.
 func (s *Store) GetChatSite(ctx context.Context, id int64) (ChatSite, error) {
-	c, err := scanChatSite(s.db.QueryRowContext(ctx, `SELECT `+chatSiteCols+chatSiteFrom+` WHERE s.id = $1`, id))
+	c, err := scanChatSite(s.db.QueryRowContext(ctx, `SELECT `+chatSiteCols+chatSiteFrom+` WHERE s.id = @id`, momo.Named("id", id)))
 	return c, mapErr(err)
 }
 
 // ChatSiteByKey returns the site a public key names; ErrNotFound for an
 // unknown key. A disabled site is returned with Enabled false.
 func (s *Store) ChatSiteByKey(ctx context.Context, key string) (ChatSite, error) {
-	c, err := scanChatSite(s.db.QueryRowContext(ctx, `SELECT `+chatSiteCols+chatSiteFrom+` WHERE s.site_key = $1`, key))
+	c, err := scanChatSite(s.db.QueryRowContext(ctx, `SELECT `+chatSiteCols+chatSiteFrom+` WHERE s.site_key = @site_key`, momo.Named("site_key", key)))
 	return c, mapErr(err)
 }
 
@@ -171,7 +173,7 @@ func (s *Store) ChatTurnstileSecret(ctx context.Context, siteID int64) (string, 
 		return "", ErrNoSecretBox
 	}
 	var enc []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT turnstile_secret_enc FROM chat_sites WHERE id = $1`, siteID).Scan(&enc); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT turnstile_secret_enc FROM chat_sites WHERE id = @id`, momo.Named("id", siteID)).Scan(&enc); err != nil {
 		return "", mapErr(err)
 	}
 	if len(enc) == 0 {
@@ -221,7 +223,7 @@ func (s *Store) sealTurnstile(ctx context.Context, tx *dbTx, siteID int64, secre
 		return nil
 	}
 	if *secretKey == "" {
-		_, err := tx.ExecContext(ctx, `UPDATE chat_sites SET turnstile_secret_enc = NULL WHERE id = $1`, siteID)
+		_, err := tx.ExecContext(ctx, `UPDATE chat_sites SET turnstile_secret_enc = NULL WHERE id = @id`, momo.Named("id", siteID))
 		return err
 	}
 	if s.box == nil {
@@ -231,7 +233,8 @@ func (s *Store) sealTurnstile(ctx context.Context, tx *dbTx, siteID int64, secre
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE chat_sites SET turnstile_secret_enc = $2 WHERE id = $1`, siteID, sealed)
+	_, err = tx.ExecContext(ctx, `UPDATE chat_sites SET turnstile_secret_enc = @sealed WHERE id = @id`,
+		momo.Named("id", siteID), momo.Named("sealed", sealed))
 	return err
 }
 
@@ -258,22 +261,32 @@ func (s *Store) CreateChatSite(ctx context.Context, actor string, in ChatSiteInp
 		var channelID, addressID int64
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO msg_channels (kind, provider, name, enabled, hook_id)
-			VALUES ('webchat', 'chat', $1, $2, $3) RETURNING id`, in.Name, in.Enabled, hook).Scan(&channelID); err != nil {
+			VALUES ('webchat', 'chat', @name, @enabled, @hook_id) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("enabled", in.Enabled), momo.Named("hook_id", hook)).Scan(&channelID); err != nil {
 			return err
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO msg_addresses (channel_id, address, address_key, label, enabled, route_kind, schedule)
-			VALUES ($1, $2, $2, $3, $4, 'inbox', $5::jsonb) RETURNING id`, channelID, key, in.Name, in.Enabled, string(hours)).Scan(&addressID); err != nil {
+			VALUES (@channel_id, @address, @address, @label, @enabled, 'inbox', @schedule::jsonb) RETURNING id`,
+			momo.Named("channel_id", channelID), momo.Named("address", key), momo.Named("label", in.Name),
+			momo.Named("enabled", in.Enabled), momo.Named("schedule", string(hours))).Scan(&addressID); err != nil {
 			return err
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO chat_sites (channel_id, address_id, site_key, allowed_origins, greeting, accent, position, collect,
 				offline_mode, privacy_url, challenge, pow_bits, turnstile_site_key, strip_links, max_open_unassigned,
 				transcripts, retention_days, attachments)
-			VALUES ($1, $2, $3, $4::text[], $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id`,
-			channelID, addressID, key, originsArg(in.AllowedOrigins), in.Greeting, in.Accent, in.Position, in.Collect,
-			in.OfflineMode, in.PrivacyURL, in.Challenge, in.PowBits, in.TurnstileSiteKey, in.StripLinks,
-			in.MaxOpenUnassigned, in.Transcripts, in.RetentionDays, in.Attachments).Scan(&id); err != nil {
+			VALUES (@channel_id, @address_id, @site_key, @allowed_origins::text[], @greeting, @accent, @position, @collect,
+				@offline_mode, @privacy_url, @challenge, @pow_bits, @turnstile_site_key, @strip_links, @max_open_unassigned,
+				@transcripts, @retention_days, @attachments) RETURNING id`,
+			momo.Named("channel_id", channelID), momo.Named("address_id", addressID), momo.Named("site_key", key),
+			momo.Named("allowed_origins", originsArg(in.AllowedOrigins)), momo.Named("greeting", in.Greeting),
+			momo.Named("accent", in.Accent), momo.Named("position", in.Position), momo.Named("collect", in.Collect),
+			momo.Named("offline_mode", in.OfflineMode), momo.Named("privacy_url", in.PrivacyURL),
+			momo.Named("challenge", in.Challenge), momo.Named("pow_bits", in.PowBits),
+			momo.Named("turnstile_site_key", in.TurnstileSiteKey), momo.Named("strip_links", in.StripLinks),
+			momo.Named("max_open_unassigned", in.MaxOpenUnassigned), momo.Named("transcripts", in.Transcripts),
+			momo.Named("retention_days", in.RetentionDays), momo.Named("attachments", in.Attachments)).Scan(&id); err != nil {
 			return err
 		}
 		if err := s.sealTurnstile(ctx, tx, id, in.TurnstileSecret); err != nil {
@@ -296,30 +309,37 @@ func (s *Store) UpdateChatSite(ctx context.Context, actor string, id int64, in C
 	err = s.tx(ctx, func(tx *dbTx) error {
 		var channelID, addressID int64
 		var hasSecret bool
-		if err := tx.QueryRowContext(ctx, `SELECT channel_id, address_id, turnstile_secret_enc IS NOT NULL FROM chat_sites WHERE id = $1 FOR UPDATE`,
-			id).Scan(&channelID, &addressID, &hasSecret); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT channel_id, address_id, turnstile_secret_enc IS NOT NULL FROM chat_sites WHERE id = @id FOR UPDATE`,
+			momo.Named("id", id)).Scan(&channelID, &addressID, &hasSecret); err != nil {
 			return err
 		}
 		if err := checkChatTurnstile(in, hasSecret); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE msg_channels SET name = $2, enabled = $3, updated_at = now() WHERE id = $1`,
-			channelID, in.Name, in.Enabled); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE msg_channels SET name = @name, enabled = @enabled, updated_at = now() WHERE id = @id`,
+			momo.Named("id", channelID), momo.Named("name", in.Name), momo.Named("enabled", in.Enabled)); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE msg_addresses SET label = $2, enabled = $3, schedule = $4::jsonb WHERE id = $1`,
-			addressID, in.Name, in.Enabled, string(hours)); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE msg_addresses SET label = @label, enabled = @enabled, schedule = @schedule::jsonb WHERE id = @id`,
+			momo.Named("id", addressID), momo.Named("label", in.Name), momo.Named("enabled", in.Enabled),
+			momo.Named("schedule", string(hours))); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE chat_sites SET allowed_origins = $2::text[], greeting = $3, accent = $4, position = $5, collect = $6,
-				offline_mode = $7, privacy_url = $8, challenge = $9, pow_bits = $10,
-				turnstile_site_key = $11, strip_links = $12, max_open_unassigned = $13, transcripts = $14,
-				retention_days = $15, attachments = $16, updated_at = now()
-			WHERE id = $1`,
-			id, originsArg(in.AllowedOrigins), in.Greeting, in.Accent, in.Position, in.Collect,
-			in.OfflineMode, in.PrivacyURL, in.Challenge, in.PowBits, in.TurnstileSiteKey, in.StripLinks,
-			in.MaxOpenUnassigned, in.Transcripts, in.RetentionDays, in.Attachments); err != nil {
+			UPDATE chat_sites SET allowed_origins = @allowed_origins::text[], greeting = @greeting, accent = @accent,
+				position = @position, collect = @collect, offline_mode = @offline_mode, privacy_url = @privacy_url,
+				challenge = @challenge, pow_bits = @pow_bits, turnstile_site_key = @turnstile_site_key,
+				strip_links = @strip_links, max_open_unassigned = @max_open_unassigned, transcripts = @transcripts,
+				retention_days = @retention_days, attachments = @attachments, updated_at = now()
+			WHERE id = @id`,
+			momo.Named("id", id), momo.Named("allowed_origins", originsArg(in.AllowedOrigins)),
+			momo.Named("greeting", in.Greeting), momo.Named("accent", in.Accent), momo.Named("position", in.Position),
+			momo.Named("collect", in.Collect), momo.Named("offline_mode", in.OfflineMode),
+			momo.Named("privacy_url", in.PrivacyURL), momo.Named("challenge", in.Challenge),
+			momo.Named("pow_bits", in.PowBits), momo.Named("turnstile_site_key", in.TurnstileSiteKey),
+			momo.Named("strip_links", in.StripLinks), momo.Named("max_open_unassigned", in.MaxOpenUnassigned),
+			momo.Named("transcripts", in.Transcripts), momo.Named("retention_days", in.RetentionDays),
+			momo.Named("attachments", in.Attachments)); err != nil {
 			return err
 		}
 		if err := s.sealTurnstile(ctx, tx, id, in.TurnstileSecret); err != nil {
@@ -342,11 +362,11 @@ func (s *Store) UpdateChatSite(ctx context.Context, actor string, id int64, in C
 func (s *Store) DeleteChatSite(ctx context.Context, actor string, id int64) error {
 	return s.tx(ctx, func(tx *dbTx) error {
 		var channelID int64
-		if err := tx.QueryRowContext(ctx, `SELECT channel_id FROM chat_sites WHERE id = $1 FOR UPDATE`, id).Scan(&channelID); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT channel_id FROM chat_sites WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&channelID); err != nil {
 			return err
 		}
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE channel_id = $1`, channelID).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE channel_id = @channel_id`, momo.Named("channel_id", channelID)).Scan(&n); err != nil {
 			return err
 		}
 		if n > 0 {
@@ -354,7 +374,7 @@ func (s *Store) DeleteChatSite(ctx context.Context, actor string, id int64) erro
 				plural(n, "a conversation", strconv.Itoa(n)+" conversations"))}
 		}
 		// The channel's delete cascades to the address and the site.
-		if _, err := tx.ExecContext(ctx, `DELETE FROM msg_channels WHERE id = $1`, channelID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM msg_channels WHERE id = @id`, momo.Named("id", channelID)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "delete", "chat_site", strconv.FormatInt(id, 10))
@@ -374,12 +394,12 @@ type ChatBlock struct {
 // ListChatBlocks returns a site's blocks that still hold.
 func (s *Store) ListChatBlocks(ctx context.Context, siteID int64) ([]ChatBlock, error) {
 	var one int
-	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM chat_sites WHERE id = $1`, siteID).Scan(&one); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM chat_sites WHERE id = @id`, momo.Named("id", siteID)).Scan(&one); err != nil {
 		return nil, mapErr(err)
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, site_id, visitor_id, ip_hash IS NOT NULL, until, created_at FROM chat_blocks
-		WHERE site_id = $1 AND until > now() ORDER BY id DESC LIMIT 500`, siteID)
+		WHERE site_id = @site_id AND until > now() ORDER BY id DESC LIMIT 500`, momo.Named("site_id", siteID))
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +424,7 @@ func (s *Store) ListChatBlocks(ctx context.Context, siteID int64) ([]ChatBlock, 
 // DeleteChatBlock lifts a block.
 func (s *Store) DeleteChatBlock(ctx context.Context, actor string, id int64) error {
 	return s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM chat_blocks WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM chat_blocks WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return err
 		}
