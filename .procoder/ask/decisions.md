@@ -6810,6 +6810,39 @@ passes.
   `BenchmarkStoreDriver` keeps running in the dispatch-only bench job. A
   later switch must keep the cached-statement exec mode.
 
+## momo Phase 5: migration engine takeover inputs (2026-11-17, momo/phase5-decisions)
+
+- **Upstream gaps closed.** momo v0.16.0 (2026-11-16) closes G1
+  (azrtydxb/momo#205: `momo.sum` format 2, merged line by line with
+  `momo.sum merge=union`; independent branches validate, dependent ones fail
+  at validate; `migrate rebase --renumber`), G2 (#206: `c.CheckIn`, a
+  value-list CHECK diffed as a set, so adding a value is additive) and G12
+  (#207: `c.Sequence`, so `prov_redirect_jobs_seq` is modelled and the init
+  migration applies on an empty database). Hello bumps to v0.16.0 first.
+- **Workflow (decided by the user, 2026-11-17).** Model-first after cutover: edit the model,
+  `momo generate`, `momo migrate diff <name>`, `validate` in CI; parallel
+  PRs rely on format 2 plus union merge, and a PR that loses the race runs
+  `momo migrate rebase --renumber`. Data steps are custom or Go migrations.
+  Additive CHECK lists use `c.CheckIn`.
+- **Legacy retention (decided by the user, 2026-11-17): one release.** The
+  frozen goose set and the takeover path ship in the cutover release and the
+  one after it only; later, a pre-cutover install or backup must first be
+  upgraded or restored with an image from that window.
+- **Migrator role (user, 2026-11-17).** The role in the kw `hello-store`
+  DSN owns the Hello database, so Baseline runs from the normal
+  hello-control start; no privileged one-off step.
+
+## File a momo issue: schema.Equal compares CHECK expression text, schema.Diff compares value lists as sets (2026-11-18)
+
+Found while bumping to momo v0.16.0 (PR #405): a `c.CheckIn` constraint
+and PostgreSQL's stored `col = ANY (ARRAY[...])` diff as equal but are not
+`schema.Equal`, so Hello's test normalises both sides.
+
+- File it upstream in azrtydxb/momo (Recommended): a short issue with the
+  reproduction; Hello keeps its test-side normalisation until it is fixed.
+  **Chosen by the user, 2026-11-18; filed as azrtydxb/momo#227.**
+- Don't file: keep the normalisation in Hello only.
+
 ## momo Phase 5: migration engine takeover, design (2026-11-18, momo/phase5-takeover)
 
 Inputs: "momo Phase 5: migration engine takeover inputs" (PR #406). Choices
