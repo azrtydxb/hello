@@ -6831,3 +6831,13 @@ passes.
 - **Migrator role (user, 2026-11-17).** The role in the kw `hello-store`
   DSN owns the Hello database, so Baseline runs from the normal
   hello-control start; no privileged one-off step.
+
+## File a momo issue: schema.Equal compares CHECK expression text, schema.Diff compares value lists as sets (2026-11-18)
+
+Found while bumping to momo v0.16.0 (PR #405): a `c.CheckIn` constraint
+and PostgreSQL's stored `col = ANY (ARRAY[...])` diff as equal but are not
+`schema.Equal`, so Hello's test normalises both sides.
+
+- File it upstream in azrtydxb/momo (Recommended): a short issue with the
+  reproduction; Hello keeps its test-side normalisation until it is fixed.
+- Don't file: keep the normalisation in Hello only.
