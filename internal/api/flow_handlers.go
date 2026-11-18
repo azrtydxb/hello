@@ -170,6 +170,11 @@ func (s *server) flowInput(ctx context.Context, devices bool) (flow.Input, error
 	if in.FeatureCodes, err = st.ListFeatureCodes(ctx); err != nil {
 		return in, err
 	}
+	if s.Fax.Store != nil {
+		if in.FaxDestinations, err = s.Fax.Store.ListFaxDestinations(ctx); err != nil {
+			return in, err
+		}
+	}
 	if devices {
 		if in.Devices, err = st.ListDevices(ctx, ""); err != nil {
 			return in, err

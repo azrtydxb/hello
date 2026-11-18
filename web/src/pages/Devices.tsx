@@ -50,7 +50,7 @@ type ListState =
   | { status: "ready"; devices: Device[]; extensions: Extension[] };
 
 /** A secret that has just been issued; held only while its dialog is open. */
-interface Issued {
+export interface Issued {
   title: string;
   description: string;
   sipUsername: string;
@@ -61,7 +61,7 @@ interface Issued {
 type Pending = { kind: "rotate" | "delete"; device: Device } | null;
 
 /** Drop the secret from a create/rotate response before keeping the device. */
-function withoutSecret(issued: IssuedDevice): Device {
+export function withoutSecret(issued: IssuedDevice): Device {
   const {
     id,
     extensionId,
@@ -83,6 +83,18 @@ function withoutSecret(issued: IssuedDevice): Device {
     mediaIce,
     createdAt,
     updatedAt,
+  };
+}
+
+/** What the secret dialog says after a device is created. */
+export function issuedDevice(created: IssuedDevice): Issued {
+  return {
+    title: "Device created",
+    description: created.sipDomain
+      ? `Enter the username and secret in the phone, with ${created.sipDomain} as the domain.`
+      : "Enter the username and secret in the phone.",
+    sipUsername: created.sipUsername,
+    secret: created.secret,
   };
 }
 
@@ -431,14 +443,7 @@ export function Devices() {
           onCreated={(created) => {
             updateDevices((devices) => [...devices, withoutSecret(created)]);
             setCreating(false);
-            setIssued({
-              title: "Device created",
-              description: created.sipDomain
-                ? `Enter the username and secret in the phone, with ${created.sipDomain} as the domain.`
-                : "Enter the username and secret in the phone.",
-              sipUsername: created.sipUsername,
-              secret: created.secret,
-            });
+            setIssued(issuedDevice(created));
           }}
         />
       )}
@@ -483,7 +488,7 @@ export function Devices() {
   );
 }
 
-function NewDevice({
+export function NewDevice({
   extensions,
   onClose,
   onCreated,
@@ -601,7 +606,7 @@ function NewDevice({
   );
 }
 
-function SecretModal({
+export function SecretModal({
   issued,
   onCopied,
   onClose,

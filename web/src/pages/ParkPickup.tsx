@@ -430,14 +430,17 @@ function validateLot(d: LotDraft): {
   };
 }
 
-function ParkLotDrawer({
+export function ParkLotDrawer({
   lot,
   onClose,
   onSaved,
+  commit,
 }: {
   lot: ParkLot | null;
   onClose: () => void;
   onSaved: (l: ParkLot, created: boolean) => void;
+  /** The canvas stages the body in its draft instead of saving it here. */
+  commit?: (body: object) => Promise<void>;
 }) {
   useRestoreFocus();
   const [d, setD] = useState(() => lotDraft(lot));
@@ -460,6 +463,11 @@ function ParkLotDrawer({
     }
     setBusy(true);
     try {
+      if (commit) {
+        await commit(found.body);
+        onClose();
+        return;
+      }
       onSaved(
         lot
           ? await putParkLot(lot.id, found.body)
@@ -726,18 +734,21 @@ function PickupGroups({ toast }: { toast: (message: string) => void }) {
   );
 }
 
-function PickupDrawer({
+export function PickupDrawer({
   group,
   extensions,
   extReady,
   onClose,
   onSaved,
+  commit,
 }: {
   group: PickupGroup | null;
   extensions: Extension[];
   extReady: boolean;
   onClose: () => void;
   onSaved: (g: PickupGroup, created: boolean) => void;
+  /** The canvas stages the body in its draft instead of saving it here. */
+  commit?: (body: object) => Promise<void>;
 }) {
   useRestoreFocus();
   const [name, setName] = useState(group?.name ?? "");
@@ -771,6 +782,11 @@ function PickupDrawer({
     setBusy(true);
     try {
       const body = { name, members };
+      if (commit) {
+        await commit(body);
+        onClose();
+        return;
+      }
       onSaved(
         group
           ? await putPickupGroup(group.id, body)

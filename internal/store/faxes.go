@@ -40,7 +40,7 @@ func scanFaxDest(r interface{ Scan(...any) error }) (fax.Destination, error) {
 
 // ListFaxDestinations returns every destination by name.
 func (s *Store) ListFaxDestinations(ctx context.Context) ([]fax.Destination, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+faxDestCols+faxDestFrom+` ORDER BY d.name`)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+faxDestCols+faxDestFrom+` ORDER BY d.name`)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func (s *Store) ListFaxDestinations(ctx context.Context) ([]fax.Destination, err
 
 // GetFaxDestination returns one destination.
 func (s *Store) GetFaxDestination(ctx context.Context, id int64) (fax.Destination, error) {
-	d, err := scanFaxDest(s.db.QueryRowContext(ctx, `SELECT `+faxDestCols+faxDestFrom+` WHERE d.id = @id`, momo.Named("id", id)))
+	d, err := scanFaxDest(s.q(ctx).QueryRowContext(ctx, `SELECT `+faxDestCols+faxDestFrom+` WHERE d.id = @id`, momo.Named("id", id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}

@@ -24,6 +24,50 @@ An applied change can be reverted from **History**. Under the hood this is one
 configuration batch (`POST /api/v1/config/batch`, see
 [config-batch.md](config-batch.md)).
 
+### What the canvas edits
+
+Every stored object of a call flow can be created, edited and deleted from the
+canvas. **Add object** offers a short form for the common kinds, and **All
+fields…** (or, for the other kinds, **Open the form**) opens the object's own
+form: the same drawer its page uses, with every field. In the side panel,
+**Edit all settings** opens that form for the selected node. The panel's
+**Where it goes** wires every output the catalogue allows, also to the
+dial-by-name directory and, for an inbound route, to the dialled DID looked up
+as an extension.
+
+| Node kind                                                                     | Create                    | Edit                    | Delete                  |
+| ----------------------------------------------------------------------------- | ------------------------- | ----------------------- | ----------------------- |
+| Extension, trunk, inbound and outbound route, ring group, IVR menu, queue     | draft                     | draft (own form)        | draft                   |
+| Time condition, schedule, holiday calendar, hold music class, conference room | draft                     | draft (own form)        | draft                   |
+| Park lot, pickup group, multicast channel, paging group, voicemail group, fax | draft                     | draft (own form)        | draft                   |
+| Feature code                                                                  | draft (a row of the list) | draft (the list's form) | draft (its row removed) |
+| Device                                                                        | at once (own form)        | draft (own form)        | draft                   |
+| Phone                                                                         | at once (own form)        | draft (own form)        | draft                   |
+| Announcement                                                                  | at once (own form)        | at once (own form)      | at once (own form)      |
+
+"Draft" means the change is staged and applied with the rest in one batch.
+"At once" is for what a batch cannot carry; the form saves it directly, exactly
+as its page does, and the canvas reloads and places the new node:
+
+- a new **device** answers with its SIP secret and a new **phone** with its
+  provisioning URL; the form shows it once, as the Devices and Phones pages
+  do, and it is never stored in a draft;
+- an **announcement's** audio (an upload, a replacement or speech made from
+  text) and its deletion touch object storage and a speech provider, which do
+  not roll back.
+
+A trunk's password is not part of a draft (a draft is kept in the browser):
+set it on the Trunks page. A holiday calendar's date import saves at once and
+stays on the Holiday calendars page. A fax destination's name is fixed once it
+exists: routes and IVR keys refer to it.
+
+These nodes are not configurable objects and have no form; they cannot be
+created or deleted, only reached by the outputs that lead to them: **Any
+trunk** (an inbound route without a trunk), **Internal callers** (every
+outbound route is dialled by them), an **External number** or **SIP URI**
+(typed into the output that dials it), **DID as extension**, the **Dial-by-name
+directory** and a **Missing target** (a destination that names nothing).
+
 ## Tracing a call
 
 **Trace a call** asks where a call would go: who calls (an extension or a

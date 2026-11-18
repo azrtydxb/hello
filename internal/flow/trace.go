@@ -259,6 +259,8 @@ func (w *walker) visit(in Ref, via *Edge, digits string, depth int, st *state) [
 		return []TraceStep{{Node: in.Node, Text: "Dials the external number " + n.Label}}
 	case KindSIPURI:
 		return []TraceStep{{Node: in.Node, Text: "Sends the call to the SIP address " + n.Label}}
+	case KindFax:
+		return []TraceStep{{Node: in.Node, Text: "Receives the fax for fax destination " + n.Label}}
 	case KindInternalDID:
 		return []TraceStep{{Node: in.Node, Text: "The dialled DID is looked up as an internal extension"}}
 	case KindMissing:

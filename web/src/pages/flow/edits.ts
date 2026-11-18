@@ -544,7 +544,15 @@ export function connectChoices(
   const cat = ctx.catalogue;
   const out: { value: string; label: string; kind: string }[] = [];
   for (const t of outPort(cat, kind, port)?.targets ?? []) {
-    if (t.requires || t.kind === "external" || t.kind === "sipUri") continue;
+    // Typed numbers and the DID dialled as an extension (one node per
+    // route) are offered by typedTargets and fixedTargets instead.
+    if (
+      t.requires ||
+      t.kind === "external" ||
+      t.kind === "sipUri" ||
+      t.kind === "internalDid"
+    )
+      continue;
     if (!adapterFor(kind, port, t.kind, t.port)) continue;
     const portLabel = inPort(cat, t.kind, t.port)?.label;
     for (const n of ctx.graph.nodes) {
@@ -577,6 +585,40 @@ export function typedTargets(
     if (t.kind === "external")
       out.push({ kind: "external", label: "External number" });
     if (t.kind === "sipUri") out.push({ kind: "sipUri", label: "SIP URI" });
+  }
+  return out;
+}
+
+/**
+ * The destinations an output may reach that are not objects and need no
+ * typed value: the dial-by-name directory (while the graph does not draw it
+ * yet) and, for an inbound route, the dialled DID looked up as an extension.
+ */
+export function fixedTargets(
+  ctx: Pick<EditCtx, "graph" | "catalogue">,
+  src: FlowNode,
+  port: string,
+): FlowNode[] {
+  const out: FlowNode[] = [];
+  for (const t of outPort(ctx.catalogue, src.kind, port)?.targets ?? []) {
+    if (t.requires || !adapterFor(src.kind, port, t.kind, t.port)) continue;
+    if (
+      t.kind === "directory" &&
+      !ctx.graph.nodes.some((n) => n.kind === "directory")
+    ) {
+      out.push({
+        id: "directory:names",
+        kind: "directory",
+        label: "Dial-by-name directory",
+      });
+    }
+    if (t.kind === "internalDid") {
+      out.push({
+        id: `internalDid:${idOf(src.id)}`,
+        kind: "internalDid",
+        label: "DID as extension",
+      });
+    }
   }
   return out;
 }
@@ -720,4 +762,106 @@ export function createNode(
   }).then((res) =>
     res.ok ? { ok: true as const, ops: [create, ...res.ops], node: id } : res,
   );
+}
+
+/** The scalar fields of a body a new node's summary shows. */
+const SUMMARY_KEYS = [
+  "number",
+  "name",
+  "label",
+  "code",
+  "did",
+  "didKind",
+  "enabled",
+  "strategy",
+  "extension",
+  "mode",
+];
+
+/**
+ * Stages a new object from the body its own form produced (every field, the
+ * same form its page uses): one create in the draft, with the edges the
+ * body's values draw, as a new node to place.
+ */
+export function createFromBody(
+  ctx: EditCtx,
+  kind: string,
+  body: Body,
+): EditResult {
+  const def = OBJECTS[kind];
+  if (!def?.create) return fail("This kind of object is not made in a draft.");
+  const { ref } = nextRef(ctx.draft);
+  const id = `${kind}:~${ref}`;
+  const text = (v: unknown) =>
+    typeof v === "string" && v.trim() !== "" ? v.trim() : "";
+  const key = def.nameKey ?? "name";
+  const label =
+    kind === "extension"
+      ? `${text(body.number)} ${text(body.name)}`.trim()
+      : text(body[key]) ||
+        text(body.name) ||
+        text(body.label) ||
+        text(body.number) ||
+        ref;
+  const summary: Record<string, unknown> = {};
+  for (const k of SUMMARY_KEYS) {
+    const v = body[k];
+    if (
+      typeof v === "string" ||
+      typeof v === "number" ||
+      typeof v === "boolean"
+    )
+      summary[k] = v;
+  }
+  const node: FlowNode = { id, kind, label, summary };
+  const rec = reconcile(ctx.graph, node, body);
+  const edges: EdgeChange[] =
+    rec && rec.add.length > 0
+      ? [
+          {
+            remove: [],
+            add: rec.add.map((w) => w.edge),
+            nodes: rec.add.flatMap((w) => (w.node ? [w.node] : [])),
+          },
+        ]
+      : [];
+  const create: DraftOp = {
+    key: `create|${ref}`,
+    kind: "create",
+    node: id,
+    ref,
+    operationId: def.create,
+    body,
+    touches: {},
+    edges,
+    pending: node,
+    summary: `Create ${kindLabel(ctx.catalogue, kind).toLowerCase()} ${label}`,
+  };
+  return { ok: true, ops: [create], node: id };
+}
+
+/** The node the feature-code list is staged on when no code is drawn. */
+export const FEATURE_CODES_NODE: FlowNode = {
+  id: "featureCode:*",
+  kind: "featureCode",
+  label: "Feature codes",
+};
+
+/**
+ * Stages what an object's own form produced (FormHost): an edit of `node`,
+ * or, with no node, a new object of `kind`. A new feature code is a row of
+ * the one list the draft replaces, so it is staged as an edit of the list.
+ */
+export function stageForm(
+  ctx: EditCtx,
+  kind: string,
+  node: FlowNode | null,
+  body: Body,
+): Promise<EditResult> {
+  if (node) return stageBody(ctx, node, body);
+  if (OBJECTS[kind]?.listCreate) {
+    const any = ctx.graph.nodes.find((n) => n.kind === kind);
+    return stageBody(ctx, any ?? FEATURE_CODES_NODE, body);
+  }
+  return Promise.resolve(createFromBody(ctx, kind, body));
 }

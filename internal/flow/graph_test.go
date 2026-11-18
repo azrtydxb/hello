@@ -5,6 +5,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -274,5 +275,52 @@ func TestGraphDirectory(t *testing.T) {
 		if w.Code == WarnDangling {
 			t.Fatalf("dangling warning: %s", w.Message)
 		}
+	}
+}
+
+// TestGraphFax fails if a fax destination is not a node of its own (by id,
+// carrying its version, so the canvas can edit it in a batch), if a route
+// naming it does not reach it, or if a route naming no destination is not a
+// dangling reference.
+func TestGraphFax(t *testing.T) {
+	in := Input{
+		FaxDestinations: []fax.Destination{{ID: 7, Name: "office", Extension: "100"}, {ID: 8, Name: "spare", Extension: "100"}},
+		Inbound: []store.InboundRoute{
+			{ID: 1, Name: "fax line", DID: "5", DestinationKind: "fax", Destination: "office"},
+			{ID: 2, Name: "old fax", DID: "6", DestinationKind: "fax", Destination: "gone"},
+		},
+	}
+	g, err := Build(in, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Node{}
+	for _, n := range g.Nodes {
+		byID[n.ID] = n
+	}
+	for _, id := range []string{"fax:7", "fax:8"} {
+		n, ok := byID[id]
+		if !ok || n.Kind != KindFax || n.Version == "" {
+			t.Fatalf("fax node %s = %+v, want a versioned fax destination", id, n)
+		}
+	}
+	if byID["fax:7"].Label != "office" || byID["fax:7"].Summary["extension"] != "100" {
+		t.Errorf("fax:7 = %+v", byID["fax:7"])
+	}
+	edges := edgeIDs(g)
+	if !slices.Contains(edges, "inboundRoute:1.destination->fax:7.call") {
+		t.Errorf("the route does not reach its fax destination: %v", edges)
+	}
+	if !slices.Contains(edges, "inboundRoute:2.destination->missing:gone.call") {
+		t.Errorf("a route naming no fax destination is not dangling: %v", edges)
+	}
+	dangling := 0
+	for _, w := range g.Warnings {
+		if w.Code == WarnDangling && w.Node == "inboundRoute:2" {
+			dangling++
+		}
+	}
+	if dangling != 1 {
+		t.Errorf("%d dangling warnings on the route to a missing fax destination, want 1", dangling)
 	}
 }

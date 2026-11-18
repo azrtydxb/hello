@@ -248,18 +248,21 @@ export function VoicemailGroups() {
 
 const KEYS = ["number", "name", "maxSeconds", "members"];
 
-function GroupDrawer({
+export function GroupDrawer({
   group,
   extensions,
   extReady,
   onClose,
   onSaved,
+  commit,
 }: {
   group: VoicemailGroup | null;
   extensions: Extension[];
   extReady: boolean;
   onClose: () => void;
   onSaved: (g: VoicemailGroup, created: boolean) => void;
+  /** The canvas stages the body in its draft instead of saving it here. */
+  commit?: (body: object) => Promise<void>;
 }) {
   useRestoreFocus();
   const [number, setNumber] = useState(group?.number ?? "");
@@ -323,6 +326,11 @@ function GroupDrawer({
         maxSeconds: secs,
         members,
       };
+      if (commit) {
+        await commit(body);
+        onClose();
+        return;
+      }
       onSaved(
         group
           ? await putVoicemailGroup(group.id, body)

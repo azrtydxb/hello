@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
+	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -34,6 +35,9 @@ type Input struct {
 	FeatureCodes      []store.FeatureCode
 	Devices           []store.Device
 	Phones            []store.Phone
+	// FaxDestinations are the named fax inboxes a route or IVR key sends
+	// a fax call to.
+	FaxDestinations []fax.Destination
 }
 
 // Ref names a port of a node.

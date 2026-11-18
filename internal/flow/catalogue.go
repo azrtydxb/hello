@@ -329,7 +329,7 @@ func buildCatalogue() Catalogue {
 			{Kind: KindSIPURI, Label: "SIP URI", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
 			{Kind: KindInternalDID, Label: "DID as extension", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
 			{Kind: KindDirectory, Label: "Dial-by-name directory", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
-			{Kind: KindFax, Label: "Fax destination", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
+			{Kind: KindFax, Label: "Fax destination", Ports: []Port{in("call", PortCall, true, "Receive a fax")}},
 			{Kind: KindMissing, Label: "Missing target", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
 		},
 	}

@@ -283,16 +283,22 @@ function validate(name: string, entries: EntryDraft[]): Record<string, string> {
   return out;
 }
 
-function CalendarDrawer({
+export function CalendarDrawer({
   item,
   onClose,
   onSaved,
   onImported,
+  commit,
 }: {
   item: Calendar | null;
   onClose: () => void;
   onSaved: (c: Calendar, created: boolean) => void;
   onImported: (c: Calendar, imported: number) => void;
+  /**
+   * The canvas stages the body in its draft instead of saving it here; the
+   * import, which saves at once, is then left to the Calendars page.
+   */
+  commit?: (body: object) => Promise<void>;
 }) {
   useRestoreFocus();
   const [name, setName] = useState(item?.name ?? "");
@@ -327,6 +333,11 @@ function CalendarDrawer({
     setBusy(true);
     const body = { name, description, entries: entries.map(entryBody) };
     try {
+      if (commit) {
+        await commit(body);
+        onClose();
+        return;
+      }
       onSaved(
         item ? await putCalendar(item.id, body) : await createCalendar(body),
         item === null,
@@ -619,7 +630,12 @@ function CalendarDrawer({
 
         <fieldset className="cf-form__section">
           <legend className="az-eyebrow">Import dates</legend>
-          {item === null ? (
+          {commit ? (
+            <p className="cf-form__note">
+              Importing saves at once: import dates on the Holiday calendars
+              page.
+            </p>
+          ) : item === null ? (
             <p className="cf-form__note">
               Save the calendar first, then import a list of dates into it.
             </p>

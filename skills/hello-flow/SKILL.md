@@ -18,9 +18,9 @@ of it, and the dry run shows exactly what it will do first.
 - MCP server: `https://<hello host>/mcp` (on kw: `https://hello.kw.watteel.lab/mcp`).
 - Reading the flow and tracing calls: scope `read`, role `viewer`.
 - Applying a batch: scope `write`, role `operator`. Every operation inside
-  the batch also needs its own role: paging groups, conferences and
-  multicast channels need `admin`, and one refused operation refuses the
-  whole batch with nothing applied.
+  the batch also needs its own role: paging groups, conferences, multicast
+  channels, voicemail groups and fax destinations need `admin`, and one
+  refused operation refuses the whole batch with nothing applied.
 
 ## Tools
 

@@ -454,13 +454,14 @@ function validate(d: Draft): Record<string, string> {
   return out;
 }
 
-function PagingDrawer({
+export function PagingDrawer({
   group,
   extensions,
   extReady,
   channels,
   onClose,
   onSaved,
+  commit,
 }: {
   group: PagingGroup | null;
   extensions: Extension[];
@@ -468,6 +469,8 @@ function PagingDrawer({
   channels: CatalogChannel[];
   onClose: () => void;
   onSaved: (g: PagingGroup, created: boolean) => void;
+  /** The canvas stages the body in its draft instead of saving it here. */
+  commit?: (body: object) => Promise<void>;
 }) {
   useRestoreFocus();
   const [d, setD] = useState(() => draftOf(group));
@@ -508,6 +511,12 @@ function PagingDrawer({
         ...rest,
         ...(multicastChannelId === null ? {} : { multicastChannelId }),
       };
+      if (commit) {
+        // The draft replaces the whole group: a cleared channel is sent.
+        await commit({ ...body, multicastChannelId });
+        onClose();
+        return;
+      }
       onSaved(
         group
           ? await putPagingGroup(group.id, body)

@@ -42,6 +42,7 @@ type builder struct {
 	mohByID         map[int64]string
 	schedByID       map[int64]string
 	mcByID          map[int64]string
+	faxByName       map[string]string
 }
 
 // Build draws the configuration. The result is deterministic: nodes and
@@ -69,6 +70,7 @@ func Build(in Input, opt Options) (Graph, error) {
 		mohByID:         map[int64]string{},
 		schedByID:       map[int64]string{},
 		mcByID:          map[int64]string{},
+		faxByName:       map[string]string{},
 	}
 	b.addObjects(in)
 	b.addRoutes(in)
@@ -183,6 +185,12 @@ func (b *builder) addObjects(in Input) {
 			sum["modelId"] = a.ModelID
 		}
 		b.node(id, KindAnnouncement, a.Name, sum, a)
+	}
+	for _, d := range in.FaxDestinations {
+		id := nid(KindFax, d.ID)
+		b.faxByName[d.Name] = id
+		b.ends[id] = true // the fax is received and kept
+		b.node(id, KindFax, d.Name, map[string]any{"name": d.Name, "extension": d.Extension, "email": d.Email}, d)
 	}
 	for _, c := range in.Conferences {
 		id := nid(KindConference, c.ID)
@@ -375,12 +383,9 @@ func (b *builder) resolve(owner, kind, target string) Ref {
 	case "conference":
 		return lookup(b.confByNumber, "call", "conference room")
 	case "fax":
-		// A fax destination names an owner extension and an address; the
-		// node shows the destination, with no further edge.
-		id := KindFax + ":" + target
-		b.node(id, KindFax, "Fax "+target, map[string]any{"name": target}, nil)
-		b.ends[id] = true
-		return Ref{id, "call"}
+		// A fax destination is named; it keeps the received document for
+		// its owner extension and address, with no further edge.
+		return lookup(b.faxByName, "call", "fax destination")
 	case "directory":
 		// One node for the whole directory: it names no stored object, and
 		// the extensions it can reach are every one not hidden from it.

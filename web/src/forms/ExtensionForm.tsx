@@ -104,9 +104,12 @@ export function serverFieldErrors(err: unknown): Errors {
 export function NewExtension({
   onClose,
   onCreated,
+  commit,
 }: {
   onClose: () => void;
   onCreated: (ext: Extension) => void;
+  /** The canvas stages the body in its draft instead of creating it here. */
+  commit?: (body: object) => Promise<void>;
 }) {
   const [number, setNumber] = useState("");
   const [name, setName] = useState("");
@@ -131,16 +134,20 @@ export function NewExtension({
     setErrors(found);
     if (hasErrors(found)) return;
     setBusy(true);
+    const body = {
+      number,
+      name: name.trim(),
+      // Sent only when given, so a create without one stays the Phase 1 shape.
+      ...(external.trim() ? { externalNumber: external.trim() } : {}),
+      ...(door ? { kind: "door" as const } : {}),
+    };
     try {
-      onCreated(
-        await createExtension({
-          number,
-          name: name.trim(),
-          // Sent only when given, so a create without one stays the Phase 1 shape.
-          ...(external.trim() ? { externalNumber: external.trim() } : {}),
-          ...(door ? { kind: "door" as const } : {}),
-        }),
-      );
+      if (commit) {
+        await commit(body);
+        onClose();
+        return;
+      }
+      onCreated(await createExtension(body));
     } catch (err) {
       setErrors(serverFieldErrors(err));
       setServerError(errorMessage(err));
@@ -233,6 +240,7 @@ export function ExtensionDrawer({
   onClose,
   onSaved,
   onDeleted,
+  commit,
 }: {
   ext: Extension;
   devices: Device[];
@@ -241,6 +249,11 @@ export function ExtensionDrawer({
   onClose: () => void;
   onSaved: (ext: Extension) => void;
   onDeleted: () => void;
+  /**
+   * The canvas stages the changed fields in its draft instead of saving
+   * them here; it deletes through its own draft, so there is no Delete.
+   */
+  commit?: (body: object) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<Draft>({
     number: ext.number,
@@ -336,6 +349,11 @@ export function ExtensionDrawer({
     }
     setBusy(true);
     try {
+      if (commit) {
+        await commit(patch);
+        onClose();
+        return;
+      }
       onSaved(await updateExtension(ext.id, patch));
     } catch (err) {
       setErrors(serverFieldErrors(err));
@@ -351,17 +369,19 @@ export function ExtensionDrawer({
 
   const footer = (
     <>
-      <Can>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="dir-danger"
-          disabled={busy}
-          onClick={() => setConfirmDelete(true)}
-        >
-          Delete
-        </Button>
-      </Can>
+      {!commit && (
+        <Can>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="dir-danger"
+            disabled={busy}
+            onClick={() => setConfirmDelete(true)}
+          >
+            Delete
+          </Button>
+        </Can>
+      )}
       <Button variant="secondary" disabled={busy} onClick={onClose}>
         Cancel
       </Button>

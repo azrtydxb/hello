@@ -219,14 +219,17 @@ function validate(d: Draft): Record<string, string> {
   return out;
 }
 
-function ScheduleDrawer({
+export function ScheduleDrawer({
   item,
   onClose,
   onSaved,
+  commit,
 }: {
   item: HoursSchedule | null;
   onClose: () => void;
   onSaved: (s: HoursSchedule, created: boolean) => void;
+  /** The canvas stages the body in its draft instead of saving it here. */
+  commit?: (body: object) => Promise<void>;
 }) {
   useRestoreFocus();
   const calendars = useQuietList(listCalendars);
@@ -277,6 +280,11 @@ function ScheduleDrawer({
     setBusy(true);
     try {
       const body = { ...d, timeZone: d.timeZone.trim() };
+      if (commit) {
+        await commit(body);
+        onClose();
+        return;
+      }
       onSaved(
         item ? await putSchedule(item.id, body) : await createSchedule(body),
         item === null,

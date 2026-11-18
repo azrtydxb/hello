@@ -92,7 +92,7 @@ import {
   disconnect,
   referrersOf,
   setSetting,
-  stageBody,
+  stageForm,
   type EditCtx,
   type EditResult,
   type FormValues,
@@ -309,6 +309,8 @@ function CanvasView({
   >(null);
   const [deleting, setDeleting] = useState<FlowNode | null>(null);
   const [formNode, setFormNode] = useState<FlowNode | null>(null);
+  // The kind of a new object whose own form is open (formNode is then null).
+  const [formNew, setFormNew] = useState<string | null>(null);
   // A prompt being written: an announcement node, or null for a new one.
   const [promptFor, setPromptFor] = useState<FlowNode | null | undefined>(
     undefined,
@@ -714,8 +716,11 @@ function CanvasView({
   const createFromDialog = async (
     kind: string,
     values: FormValues,
-  ): Promise<string | null> => {
-    const r = await createNode(ctx, kind, values);
+  ): Promise<string | null> =>
+    stageCreated(await createNode(ctx, kind, values));
+
+  /** Stages a new object as one step and places its node in the middle. */
+  const stageCreated = (r: EditResult): string | null => {
     if (!r.ok) return r.error;
     const group = `g${Date.now().toString(36)}-${++gestures.current}`;
     dispatchDraft({
@@ -1393,6 +1398,10 @@ function CanvasView({
         <CreateDialog
           ctx={ctx}
           onCreate={createFromDialog}
+          onOpenForm={(kind) => {
+            setDialog(null);
+            setFormNew(kind);
+          }}
           onClose={() => setDialog(null)}
         />
       )}
@@ -1433,19 +1442,40 @@ function CanvasView({
           onClose={() => setDialog(null)}
         />
       )}
-      {formNode && (
+      {(formNode || formNew) && (
         <Suspense fallback={null}>
           <FormHost
             node={formNode}
+            kind={formNode?.kind ?? formNew ?? ""}
             draftBody={
-              draft.ops.find(
-                (o) => o.kind === "update" && o.node === formNode.id,
+              draft.ops.find((o) =>
+                (formNode?.kind ?? formNew) === "featureCode"
+                  ? o.key === "list|putFeatureCodes"
+                  : formNode !== null &&
+                    o.kind === "update" &&
+                    o.node === formNode.id,
               )?.body
             }
-            onClose={() => setFormNode(null)}
+            onClose={() => {
+              setFormNode(null);
+              setFormNew(null);
+            }}
             onCommit={async (body) => {
-              const err = await run(stageBody(ctx, formNode, body));
+              const kind = formNode?.kind ?? formNew ?? "";
+              const r = await stageForm(ctx, kind, formNode, body);
+              const err =
+                r.ok && r.node
+                  ? stageCreated(r)
+                  : await run(Promise.resolve(r));
               if (err) throw new Error(err);
+            }}
+            onDone={async (id, message) => {
+              const fresh = id !== null && !(id in layout.positions);
+              setFormNode(null);
+              setFormNew(null);
+              setNote(message);
+              await reload().catch(() => undefined);
+              if (id !== null && fresh) addFromList(id);
             }}
           />
         </Suspense>

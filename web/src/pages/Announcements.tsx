@@ -284,7 +284,11 @@ export function Announcements() {
 }
 
 /** The design's upload card: name, WAV drop field, upload button. */
-function UploadCard({ onUploaded }: { onUploaded: (a: Announcement) => void }) {
+export function UploadCard({
+  onUploaded,
+}: {
+  onUploaded: (a: Announcement) => void;
+}) {
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [errors, setErrors] = useState<{ name?: string; file?: string }>({});
@@ -362,7 +366,7 @@ function UploadCard({ onUploaded }: { onUploaded: (a: Announcement) => void }) {
 }
 
 /** Replace an announcement's audio: same name, new WAV. */
-function ReplaceAudio({
+export function ReplaceAudio({
   announcement,
   onClose,
   onReplaced,
