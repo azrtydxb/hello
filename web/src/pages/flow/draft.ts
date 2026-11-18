@@ -65,6 +65,38 @@ export type DraftAction =
 
 const MAX_HISTORY = 60;
 
+/**
+ * A property named password, pin or secret, or ending in one of them: the
+ * same names a batch withholds (internal/configbatch IsCredentialKey). A
+ * draft is kept in the browser's local storage, so it never holds one; a
+ * password, PIN or secret is set on the object's own page.
+ */
+export function isCredentialKey(k: string): boolean {
+  const l = k.toLowerCase();
+  return l.endsWith("password") || l.endsWith("pin") || l.endsWith("secret");
+}
+
+function stripValue(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(stripValue);
+  if (typeof v !== "object" || v === null) return v;
+  const out: Body = {};
+  for (const [k, x] of Object.entries(v as Body)) {
+    if (!isCredentialKey(k)) out[k] = stripValue(x);
+  }
+  return out;
+}
+
+/** The body without any credential property, at any depth. */
+export const withoutCredentials = (body: Body): Body =>
+  stripValue(body) as Body;
+
+/** An operation whose body holds no credential. */
+function clean(op: DraftOp): DraftOp {
+  return op.body ? { ...op, body: withoutCredentials(op.body) } : op;
+}
+
+const cleanAll = (ops: readonly DraftOp[]): DraftOp[] => ops.map(clean);
+
 export const emptyDraft = (baseRevision: number): DraftState => ({
   baseRevision,
   seq: 0,
@@ -136,7 +168,7 @@ export function draftReducer(
       let ops = state.ops;
       let seq = state.seq;
       for (const op of action.ops) {
-        ops = stageOp(ops, op);
+        ops = stageOp(ops, clean(op));
         const ref = op.ref ? Number(/^n(\d+)$/.exec(op.ref)?.[1]) : NaN;
         if (Number.isFinite(ref)) seq = Math.max(seq, ref);
       }
@@ -176,12 +208,17 @@ export function draftReducer(
       return {
         ...state,
         baseRevision: action.baseRevision,
-        ops: [...action.ops],
+        ops: cleanAll(action.ops),
         past: [],
         future: [],
       };
     case "load":
-      return action.state;
+      return {
+        ...action.state,
+        ops: cleanAll(action.state.ops),
+        past: action.state.past.map(cleanAll),
+        future: action.state.future.map(cleanAll),
+      };
   }
 }
 
@@ -338,12 +375,13 @@ export function loadDraft(
     if (typeof v.baseRevision !== "number" || !Array.isArray(v.ops)) {
       return null;
     }
+    // A draft saved before credentials were kept out of it loses them here.
     return {
       baseRevision: v.baseRevision,
       seq: typeof v.seq === "number" ? v.seq : 0,
-      ops: v.ops,
-      past: v.history?.past ?? [],
-      future: v.history?.future ?? [],
+      ops: cleanAll(v.ops),
+      past: (v.history?.past ?? []).map(cleanAll),
+      future: (v.history?.future ?? []).map(cleanAll),
       positions:
         typeof (v as { positions?: unknown }).positions === "object" &&
         (v as { positions?: unknown }).positions !== null
@@ -370,8 +408,11 @@ export function saveDraft(
       JSON.stringify({
         baseRevision: state.baseRevision,
         seq: state.seq,
-        ops: state.ops,
-        history: { past: state.past, future: state.future },
+        ops: cleanAll(state.ops),
+        history: {
+          past: state.past.map(cleanAll),
+          future: state.future.map(cleanAll),
+        },
         positions,
       }),
     );

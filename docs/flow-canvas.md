@@ -56,8 +56,10 @@ as its page does, and the canvas reloads and places the new node:
   text) and its deletion touch object storage and a speech provider, which do
   not roll back.
 
-A trunk's password is not part of a draft (a draft is kept in the browser):
-set it on the Trunks page. A holiday calendar's date import saves at once and
+A draft is kept in the browser, so it never holds a password, PIN or secret:
+every such field is dropped from it, and the canvas forms leave them out. Set
+a trunk's password on the Trunks page and a conference room's PINs on the
+Conferences page. A holiday calendar's date import saves at once and
 stays on the Holiday calendars page. A fax destination's name is fixed once it
 exists: routes and IVR keys refer to it.
 
