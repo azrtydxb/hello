@@ -6894,3 +6894,30 @@ made while building it, one PR:
   the first model where `--from-db` put it.
 - **`momo-bootstrap`** stays as a dispatch-only CI job (input
   `momo_bootstrap`), documented as used once.
+
+## File a momo issue: introspect.only still collects standalone sequences of unlisted tables (2026-11-18)
+
+Found while bumping to momo v0.16.0 (PR #405): with `introspect.only`
+naming the CRM tables, `--from-db` still declares `prov_redirect_jobs_seq`
+(the default of the unmodelled `prov_redirect_jobs.seq`) on the first
+model. Hello lists it under `introspect.skip` as a workaround.
+
+- File it upstream in azrtydxb/momo (Recommended): `only` should also scope
+  sequences to those the listed tables use. **Chosen by the user,
+  2026-11-18; filed as azrtydxb/momo#231.**
+- Don't file: keep the `introspect.skip` entry; Phase 5 models the sequence
+  anyway.
+
+## File a momo issue: deferrable constraints are not modelled (2026-11-18)
+
+Found by Phase 5 (PR #407): momo v0.16.0 `--from-db` drops `DEFERRABLE
+INITIALLY DEFERRED`, generated migrations create plain constraints, and
+Baseline and strict drift do not notice. Four Hello unique constraints are
+deferrable; PR #407's hand-written `legacy_seed` restores them on fresh
+installs.
+
+- File it upstream in azrtydxb/momo (Recommended): model deferrability on
+  unique, primary-key and foreign-key constraints, in `--from-db`, the
+  differ, Baseline and drift. **Chosen by the user, 2026-11-18; filed as
+  azrtydxb/momo#237.**
+- Don't file: keep the hand-written restore in Hello.
