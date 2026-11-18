@@ -6851,6 +6851,20 @@ naming the CRM tables, `--from-db` still declares `prov_redirect_jobs_seq`
 model. Hello lists it under `introspect.skip` as a workaround.
 
 - File it upstream in azrtydxb/momo (Recommended): `only` should also scope
-  sequences to those the listed tables use.
+  sequences to those the listed tables use. **Chosen by the user,
+  2026-11-18; filed as azrtydxb/momo#231.**
 - Don't file: keep the `introspect.skip` entry; Phase 5 models the sequence
   anyway.
+
+## File a momo issue: deferrable constraints are not modelled (2026-11-18)
+
+Found by Phase 5 (PR #407): momo v0.16.0 `--from-db` drops `DEFERRABLE
+INITIALLY DEFERRED`, generated migrations create plain constraints, and
+Baseline and strict drift do not notice. Four Hello unique constraints are
+deferrable; PR #407's hand-written `legacy_seed` restores them on fresh
+installs.
+
+- File it upstream in azrtydxb/momo (Recommended): model deferrability on
+  unique, primary-key and foreign-key constraints, in `--from-db`, the
+  differ, Baseline and drift.
+- Don't file: keep the hand-written restore in Hello.
