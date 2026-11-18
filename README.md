@@ -33,7 +33,7 @@ networking, highly available state, rolling upgrades) see
 | `cmd/hello-control`      | Management/control-plane service: REST API, migrations                                             |
 | `cmd/hello-sip`          | SIP node (Phase 0: ops endpoints and Valkey readiness only)                                        |
 | `internal/`              | `config`, `telemetry` (logs, redaction, metrics), `ops` (health/readiness/drain), `api`, `migrate` |
-| `migrations/`            | PostgreSQL migrations (goose), embedded in hello-control                                           |
+| `migrations/`            | PostgreSQL migrations (momo; the frozen goose set in `legacy/`), embedded in hello-control         |
 | `web/`                   | React + TypeScript UI (Vite, pnpm)                                                                 |
 | `deploy/docker-compose/` | The development lab                                                                                |
 | `test/integration/`      | Tests that need PostgreSQL or Docker                                                               |

@@ -9,7 +9,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/phonebook"
-	"github.com/azrtydxb/hello/migrations"
+	"github.com/azrtydxb/hello/migrations/legacy"
 	"github.com/pressly/goose/v3"
 )
 
@@ -135,7 +135,7 @@ func TestPhonebookMigration(t *testing.T) {
 
 	t.Run("down removes everything and up runs again", func(t *testing.T) {
 		db := scratchDB(t)
-		p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+		p, err := goose.NewProvider(goose.DialectPostgres, db, legacy.FS)
 		if err != nil {
 			t.Fatal(err)
 		}

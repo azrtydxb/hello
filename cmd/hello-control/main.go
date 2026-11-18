@@ -96,13 +96,11 @@ func run(args []string) error {
 		log.Info("migrations applied", "count", n)
 		return nil
 	case len(args) == 2 && args[0] == "migrate" && args[1] == "status":
-		st, err := migrate.Status(ctx, db)
+		rep, err := migrate.Status(ctx, db)
 		if err != nil {
 			return err
 		}
-		for _, s := range st {
-			fmt.Printf("%05d %-8s %s\n", s.Source.Version, s.State, s.Source.Path)
-		}
+		printStatus(os.Stdout, rep)
 		return nil
 	case len(args) >= 2 && args[0] == "backup" && args[1] == "restore":
 		return backupRestore(ctx, cfg, db, log, args[2:], os.Getenv, os.Stdin, os.Stdout)

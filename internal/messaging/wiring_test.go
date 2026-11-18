@@ -26,7 +26,7 @@ import (
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
-	"github.com/azrtydxb/hello/migrations"
+	"github.com/azrtydxb/hello/migrations/legacy"
 )
 
 // tickWith runs one router sweep on st at now with the agents' state.
@@ -414,7 +414,7 @@ func TestChatSiteHoursAreRouting(t *testing.T) {
 // not break the test.
 func oneScheduleVersion(t *testing.T) int64 {
 	t.Helper()
-	names, err := fs.Glob(migrations.FS, "*_messaging_one_schedule.sql")
+	names, err := fs.Glob(legacy.FS, "*_messaging_one_schedule.sql")
 	if err != nil || len(names) != 1 {
 		t.Fatalf("the one-schedule migration: %v %v", names, err)
 	}
@@ -430,10 +430,10 @@ func oneScheduleVersion(t *testing.T) int64 {
 // a site without hours must keep the schedule its address had, and rolling
 // back must give each site its address's schedule as hours again.
 func TestOneScheduleMigration(t *testing.T) {
-	r := newRig(t)
+	r := newLegacyRig(t)
 	ctx := context.Background()
 	v := oneScheduleVersion(t)
-	p, err := goose.NewProvider(goose.DialectPostgres, r.db, migrations.FS)
+	p, err := goose.NewProvider(goose.DialectPostgres, r.db, legacy.FS)
 	if err != nil {
 		t.Fatal(err)
 	}

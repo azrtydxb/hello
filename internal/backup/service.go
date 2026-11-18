@@ -52,8 +52,10 @@ type Config struct {
 	Tools   Tools
 	// Notify sends the failure email; nil when SMTP is not configured.
 	Notify func(ctx context.Context, to, subject, body string) error
-	// Migrate brings an older restored schema up to this binary's.
-	Migrate      func(ctx context.Context) error
+	// Migrate brings an older restored schema up to this binary's; from is
+	// the backup's Manifest.SchemaVersion (a goose version for a backup taken
+	// before the cutover to momo's migration engine, else a momo one).
+	Migrate      func(ctx context.Context, from int64) error
 	Maintenance  *Maintenance
 	Now          func() time.Time
 	Tmp          string

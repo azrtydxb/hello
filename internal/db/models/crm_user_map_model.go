@@ -1,4 +1,4 @@
-// momo:fromdb sha256=e1291ed7672053b099bf25c578da515259fa9006b09636897a838fdfedfc9b2b
+// momo:fromdb sha256=b8501b95a6e91e9855de13aeb635bb289650b2650a172f35d8aadce07e0a97d6
 // Written by momo generate --from-db. A re-run keeps this file if you edit it, and reports a conflict when the database changed the model.
 
 package models
@@ -16,6 +16,7 @@ type CrmUserMap struct {
 	Source         string `momo:"default:'email'::text,dbdefault"`
 
 	Connector *CrmConnector `momo:"belongs_to,fk:ConnectorID,on_delete:cascade"`
+	User      *User         `momo:"belongs_to,fk:UserID,on_delete:cascade"`
 }
 
 // MomoConfig declares what a tag cannot: the other indexes, constraints, enums and defaults.

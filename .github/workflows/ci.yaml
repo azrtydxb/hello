@@ -17,6 +17,11 @@ on:
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
+    inputs:
+      momo_bootstrap:
+        description: "Run momo-bootstrap: generate the models, the init migration and legacy_seed from the frozen goose schema (artifact)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -86,6 +91,23 @@ jobs:
       # Unit tier: hermetic tests only. The database-backed suites and the
       # race detector run in `integration`, off the PR and push-to-main path.
       - run: go test -timeout 10m ./...
+      # The schema is model-first (docs/database.md): the generated code must
+      # be current, the migration directory valid (momo.sum, the snapshot
+      # chain, parallel branches), and the models must need no migration
+      # that is not written yet. None of it needs a database.
+      - name: momo models and migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          MOMO=github.com/azrtydxb/momo/cmd/momo@$(go list -m -f '{{.Version}}' github.com/azrtydxb/momo)
+          go run "$MOMO" generate --check
+          go run "$MOMO" migrate validate
+          go run "$MOMO" migrate diff ci_probe | tee /tmp/momo-diff.txt
+          if [ "$(cat /tmp/momo-diff.txt)" != "no changes" ] || [ -n "$(git status --porcelain migrations/postgres)" ]; then
+            git status --porcelain migrations/postgres
+            echo "::error::the models in internal/db/models differ from the newest migration: run momo migrate diff <name> and commit the migration (docs/database.md)"
+            exit 1
+          fi
       - name: Save the Go caches
         if: github.event_name == 'schedule'
         uses: actions/cache/save@v6
@@ -148,6 +170,10 @@ jobs:
           filters: |
             db:
               - 'migrations/**'
+              - 'momo.yaml'
+              - 'internal/migrate/**'
+              - 'internal/db/**'
+              - 'internal/backup/**'
               - 'internal/store/**'
               - 'internal/api/**'
               - 'internal/ai/**'
@@ -381,6 +407,105 @@ jobs:
       - uses: actions/checkout@v7
       - uses: azrtydxb/ant-setup-action@v1
       - run: node --test integrations/zapier/test/
+
+  momo-bootstrap:
+    # The cutover to momo's migration engine, regenerated on demand: build a
+    # database with goose and the frozen set (migrations/legacy), then write
+    # what `momo generate --from-db` makes of it (the models in
+    # internal/db/models, the init migration and its snapshot) plus
+    # legacy_seed, a hand-written migration holding the rows the goose
+    # migrations inserted. Nothing is committed: the files are the
+    # momo-bootstrap artifact. Dispatch only, with the input set:
+    #   gh workflow run ci.yaml --ref <branch> -f momo_bootstrap=true
+    # docs/database.md, "The cutover from goose".
+    if: github.event_name == 'workflow_dispatch' && inputs.momo_bootstrap
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    container:
+      image: golang:1.27-bookworm
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: hello
+          POSTGRES_PASSWORD: hello
+          POSTGRES_DB: hello
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azrtydxb/ant-setup-action@v1
+      - name: Install the PostgreSQL client
+        shell: bash
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends curl ca-certificates gnupg lsb-release
+          install -d /usr/share/postgresql-common/pgdg
+          curl -fsS -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends postgresql-client-18
+          echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
+      - name: Trust the mounted workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Wait for PostgreSQL
+        shell: bash
+        run: |
+          svc() { if getent hosts "$1" >/dev/null; then echo "$1"; else echo localhost; fi; }
+          pg=$(svc postgres)
+          for _ in $(seq 1 90); do
+            if (exec 3<>"/dev/tcp/$pg/5432") 2>/dev/null; then break; fi
+            sleep 2
+          done
+          echo "HELLO_MOMO_BOOTSTRAP_URL=postgres://hello:hello@$pg:5432/hello?sslmode=disable" >> "$GITHUB_ENV"
+      - name: Build the goose schema
+        run: go test -count=1 -v -run TestBootstrapDatabase ./migrations/legacy/
+      - name: Generate the models, the init migration and legacy_seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          MOMO=github.com/azrtydxb/momo/cmd/momo@$(go list -m -f '{{.Version}}' github.com/azrtydxb/momo)
+          momo() { go run "$MOMO" "$@"; }
+          rm -rf migrations/postgres
+          find internal/db/models -name '*_model.go' -delete
+          momo generate --from-db HELLO_MOMO_BOOTSTRAP_URL --overwrite 2>&1 | tee out/from-db.log
+          momo generate 2>&1 | tee out/generate.log
+          momo migrate new --custom legacy_seed 2>&1 | tee out/new-custom.log
+          seed=$(ls migrations/postgres/*_legacy_seed.up.sql)
+          # The rows the goose migrations inserted, as INSERTs, and every
+          # sequence position. pg_dump's session settings and its \restrict
+          # guard are dropped (a migration must not change the session), and
+          # so is the public. prefix, so the rows go to the migrated schema.
+          # The timestamps are the build's own now() defaults: now() again.
+          pg_dump --data-only --column-inserts --no-owner --no-privileges \
+            --exclude-table='goose_db_version*' -d "$HELLO_MOMO_BOOTSTRAP_URL" > out/seed.pg_dump.sql
+          {
+            echo
+            echo "-- The rows the frozen goose migrations (migrations/legacy) inserted, and the"
+            echo "-- position of every sequence, from pg_dump --data-only of a database goose"
+            echo "-- built (CI job momo-bootstrap). A database taken over from goose records"
+            echo "-- this migration as applied without running it (internal/migrate)."
+            echo
+            grep -v -E '^(SET |SELECT pg_catalog\.set_config\(|\\restrict |\\unrestrict |--)' out/seed.pg_dump.sql \
+              | sed -E 's/^INSERT INTO public\./INSERT INTO /; s/setval\('"'"'public\./setval('"'"'/' \
+              | sed -E "s/'20[0-9]{2}-[0-9]{2}-[0-9]{2} [0-9:.]+\+00'/now()/g" \
+              | cat -s
+          } >> "$seed"
+          momo migrate hash 2>&1 | tee out/hash.log
+          momo migrate validate 2>&1 | tee out/validate.log
+          momo migrate diff ci_probe 2>&1 | tee out/diff.log
+          git status --porcelain > out/status.txt
+          ls -la migrations/postgres > out/migrations.txt
+      - uses: actions/upload-artifact@v5
+        if: ${{ !cancelled() }}
+        with:
+          name: momo-bootstrap
+          path: |
+            out/
+            migrations/postgres/
+            internal/db/models/
+          include-hidden-files: true
 
   bench:
     # TestDetectorLatency (spec ai-agent S-19): every AIOps detector under

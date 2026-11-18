@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -451,5 +452,37 @@ func TestBackupDeadHolder(t *testing.T) {
 	_ = s.Tick1(ctx)
 	if r.tools.dumps != 1 {
 		t.Fatalf("retry: %d", r.tools.dumps)
+	}
+}
+
+// TestRestoreMigratesFromBackupSchema fails if the restore does not hand the
+// backup's schema version to Migrate (internal/migrate needs it to tell a
+// pre-cutover goose backup from a momo one), or migrates a backup of the
+// binary's own schema.
+func TestRestoreMigratesFromBackupSchema(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	if err := r.service(t).RunNow(ctx, RunManual); err != nil {
+		t.Fatal(err)
+	}
+	runs, _ := r.db.Runs(ctx, 10)
+	key := runs[0].ObjectKey
+	for _, tc := range []struct {
+		binary int64
+		want   []int64
+	}{
+		{5, nil},        // the binary's own schema: nothing to migrate
+		{6, []int64{5}}, // an older backup: migrated from its version
+	} {
+		var got []int64
+		s := r.service(t)
+		s.BinarySchema = tc.binary
+		s.Migrate = func(_ context.Context, from int64) error { got = append(got, from); return nil }
+		if _, err := s.Restore(ctx, r.dest, DefaultBucket, key, RestoreOptions{Actor: "x"}); err != nil {
+			t.Fatalf("binary schema %d: %v", tc.binary, err)
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("binary schema %d: Migrate got %v, want %v", tc.binary, got, tc.want)
+		}
 	}
 }

@@ -256,13 +256,31 @@ func (s *Store) AdoptArchive(ctx context.Context, key string, size int64, at tim
 	})
 }
 
-// SchemaVersion is the highest applied migration. goose owns
-// goose_db_version, so the read stays raw database/sql until momo's
-// migration engine takes over.
+// SchemaVersion is the newest applied migration: momo's 14-digit version
+// from momo_migrations, or on a database goose built that was not taken over
+// yet (internal/migrate), goose's newest version. The history tables belong to
+// the migration engines, so the read stays raw database/sql and binds
+// nothing.
 func (s *Store) SchemaVersion(ctx context.Context) (int64, error) {
+	var momoTable, gooseTable bool
+	if err := s.db.raw.QueryRowContext(ctx,
+		`SELECT to_regclass('momo_migrations') IS NOT NULL, to_regclass('goose_db_version') IS NOT NULL`,
+	).Scan(&momoTable, &gooseTable); err != nil {
+		return 0, err
+	}
 	var v sql.NullInt64
-	err := s.db.raw.QueryRowContext(ctx, `SELECT max(version_id) FROM goose_db_version WHERE is_applied`).Scan(&v)
-	return v.Int64, err
+	if momoTable {
+		if err := s.db.raw.QueryRowContext(ctx,
+			`SELECT max(version::bigint) FROM momo_migrations WHERE status = 'applied' AND version ~ '^[0-9]{14}$'`,
+		).Scan(&v); err != nil || v.Valid {
+			return v.Int64, err
+		}
+	}
+	if gooseTable {
+		err := s.db.raw.QueryRowContext(ctx, `SELECT max(version_id) FROM goose_db_version WHERE is_applied`).Scan(&v)
+		return v.Int64, err
+	}
+	return 0, nil
 }
 
 // BumpRevision raises the configuration revision above atLeast and announces

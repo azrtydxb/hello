@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/auth"
-	"github.com/azrtydxb/hello/migrations"
+	"github.com/azrtydxb/hello/migrations/legacy"
 	"github.com/pressly/goose/v3"
 )
 
@@ -22,7 +22,7 @@ func TestUserRoles(t *testing.T) {
 
 	t.Run("migration makes existing users admin", func(t *testing.T) {
 		db := scratchDB(t)
-		p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+		p, err := goose.NewProvider(goose.DialectPostgres, db, legacy.FS)
 		if err != nil {
 			t.Fatal(err)
 		}
