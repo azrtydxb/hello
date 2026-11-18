@@ -6866,5 +6866,6 @@ installs.
 
 - File it upstream in azrtydxb/momo (Recommended): model deferrability on
   unique, primary-key and foreign-key constraints, in `--from-db`, the
-  differ, Baseline and drift.
+  differ, Baseline and drift. **Chosen by the user, 2026-11-18; filed as
+  azrtydxb/momo#237.**
 - Don't file: keep the hand-written restore in Hello.
