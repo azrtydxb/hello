@@ -6921,3 +6921,19 @@ installs.
   differ, Baseline and drift. **Chosen by the user, 2026-11-18; filed as
   azrtydxb/momo#237.**
 - Don't file: keep the hand-written restore in Hello.
+
+## kw: leave the host-network ports 8088 and 5061 unrestricted (2026-11-18)
+
+Kamailio's WSS listener (8088) and hello-sip's TLS listener (5061) run on
+the host network on kw, so any LAN host reaches them on 192.168.10.101 and
+192.168.10.102; a NetworkPolicy cannot restrict host-network pods, and kw's
+Cilium runs without its host firewall (`enable-host-firewall` unset), so a
+CiliumClusterwideNetworkPolicy host policy would have no effect.
+
+- Leave it as is (Recommended): 5061 accepts only mutual TLS with a
+  cluster-ca client certificate; 8088 needs TLS, an allowed origin and SIP
+  digest credentials. **Chosen by the user, 2026-11-18.** Dropped from the
+  open list; docs/webrtc.md keeps the restriction advice for other
+  deployments.
+- Turn on Cilium's host firewall (a cluster-wide change) and add a host
+  policy to Hello's kw manifests.
