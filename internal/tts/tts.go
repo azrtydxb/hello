@@ -87,6 +87,19 @@ func (c *Client) timeout() time.Duration {
 	return DefaultTimeout
 }
 
+// noRetries makes every SDK call a single attempt: an operator is waiting
+// on the answer and retries it themselves.
+var noRetries = 0
+
+// provider is go-ai-sdk's OpenAI-compatible provider for OpenRouter with
+// key (none is sent when key is empty) and the client's HTTP client.
+func (c *Client) provider(key string) *openaicompatible.Provider {
+	return openaicompatible.New(c.base(),
+		openaicompatible.WithAPIKey(key),
+		openaicompatible.WithName("openrouter"),
+		openaicompatible.WithHTTPClient(c.http()))
+}
+
 // ValidateText checks the text of a prompt.
 func ValidateText(text string) error {
 	n := len([]rune(strings.TrimSpace(text)))
@@ -117,11 +130,7 @@ func (c *Client) Synthesize(ctx context.Context, key, model, voice, text string)
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout())
 	defer cancel()
-	p := openaicompatible.New(c.base(),
-		openaicompatible.WithAPIKey(key),
-		openaicompatible.WithName("openrouter"),
-		openaicompatible.WithHTTPClient(c.http()))
-	resp, err := p.Speech(model).GenerateSpeech(ctx, provider.SpeechCall{
+	resp, err := c.provider(key).Speech(model).GenerateSpeech(ctx, provider.SpeechCall{
 		Text: text, Voice: voice, OutputFormat: "mp3",
 	})
 	if err != nil {
@@ -226,75 +235,46 @@ func unwrapURL(err error) error {
 	return err
 }
 
-// CheckKey asks OpenRouter whether the key is valid (GET /key, which costs
-// nothing).
+// CheckKey asks OpenRouter whether the key is valid, through go-ai-sdk's
+// key check (GET /key, which costs nothing).
 func (c *Client) CheckKey(ctx context.Context, key string) error {
 	if key == "" {
 		return ErrNoKey
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base()+"/key", nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+key)
-	resp, err := c.http().Do(req)
-	if err != nil {
+	if _, err := ai.CheckKey(ctx, ai.CheckKeyOpts{
+		Checker:    c.provider(key).KeyChecker(),
+		MaxRetries: &noRetries,
+	}); err != nil {
 		return mapError(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return ErrUnauthorized
-	case resp.StatusCode < 200 || resp.StatusCode >= 300:
-		return fmt.Errorf("OpenRouter answered %d", resp.StatusCode)
 	}
 	return nil
 }
 
 // Voices lists the ElevenLabs text-to-speech models OpenRouter offers and
-// each model's voices (GET /models?output_modalities=speech, the
-// supported_voices field). go-ai-sdk has no listing call, so this is the one
-// request Hello makes itself.
+// each model's voices, through go-ai-sdk's model listing
+// (GET /models?output_modalities=speech, the supported_voices field). The
+// key is optional: OpenRouter's model list is public, so without one no
+// Authorization header is sent.
 func (c *Client) Voices(ctx context.Context, key string) ([]Model, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base()+"/models?output_modalities=speech", nil)
+	list, err := ai.ListModels(ctx, ai.ListModelsOpts{
+		Lister:         c.provider(key).ModelLister(),
+		OutputModality: "speech",
+		MaxRetries:     &noRetries,
+	})
 	if err != nil {
-		return nil, err
-	}
-	if key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
-	}
-	resp, err := c.http().Do(req)
-	if err != nil {
+		var syn *json.SyntaxError
+		var typ *json.UnmarshalTypeError
+		if errors.As(err, &syn) || errors.As(err, &typ) {
+			return nil, errors.New("OpenRouter sent a model list that could not be read")
+		}
 		return nil, mapError(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return nil, mapError(err)
-	}
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return nil, ErrUnauthorized
-	case resp.StatusCode < 200 || resp.StatusCode >= 300:
-		return nil, fmt.Errorf("OpenRouter answered %d", resp.StatusCode)
-	}
-	var doc struct {
-		Data []struct {
-			ID     string   `json:"id"`
-			Name   string   `json:"name"`
-			Voices []string `json:"supported_voices"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, errors.New("OpenRouter sent a model list that could not be read")
 	}
 	out := []Model{}
-	for _, m := range doc.Data {
+	for _, m := range list {
 		if !strings.HasPrefix(m.ID, "elevenlabs/") {
 			continue
 		}
