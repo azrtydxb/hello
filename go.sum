@@ -6,8 +6,8 @@ github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e h1:4dAU9FXIyQktp
 github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e/go.mod h1:cEWa1LVoE5KvSD9ONXsZrj0z6KqySlCCNKHlLzbqAt4=
 github.com/asg017/sqlite-vec-go-bindings v0.1.6 h1:Nx0jAzyS38XpkKznJ9xQjFXz2X9tI7KqjwVxV8RNoww=
 github.com/asg017/sqlite-vec-go-bindings v0.1.6/go.mod h1:A8+cTt/nKFsYCQF6OgzSNpKZrzNo5gQsXBTfsXHXY0Q=
-github.com/azrtydxb/go-ai-sdk v0.8.0 h1:NOyfvXMDeu/M32N4Vf2EirNhk+ai6CRxvO80dkw9RHM=
-github.com/azrtydxb/go-ai-sdk v0.8.0/go.mod h1:p0p1pIpaRC5Ackd8F+/Dqjs11t3oxRh1NBfESYq3nTM=
+github.com/azrtydxb/go-ai-sdk v0.9.1 h1:VLGYH3JwdmrYcU7/zS32PQh7gQvvIm199obhyDVAGUM=
+github.com/azrtydxb/go-ai-sdk v0.9.1/go.mod h1:p0p1pIpaRC5Ackd8F+/Dqjs11t3oxRh1NBfESYq3nTM=
 github.com/azrtydxb/momo v0.16.0 h1:bHBKlNFjqNFRv3Ngq9ASggaraDubxbKWIFoomDSxqGg=
 github.com/azrtydxb/momo v0.16.0/go.mod h1:WqzSMT46Lc01SQTAR9o+39Z8LDVBVf2jE/Sol8W9no8=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
