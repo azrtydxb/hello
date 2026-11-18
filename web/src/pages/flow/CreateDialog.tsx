@@ -27,16 +27,28 @@ export function creatableKinds(catalogue: FlowCatalogue): string[] {
 
 export function CreateDialog({
   ctx,
+  initialKind,
+  at,
   onCreate,
   onClose,
 }: {
   ctx: EditCtx;
+  /** The kind chosen first (a kind dragged or picked from the palette). */
+  initialKind?: string;
+  /** Where on the canvas the new node goes (where the kind was dropped). */
+  at?: { x: number; y: number };
   /** Stages the object; returns the reason it could not. */
-  onCreate: (kind: string, values: FormValues) => Promise<string | null>;
+  onCreate: (
+    kind: string,
+    values: FormValues,
+    at?: { x: number; y: number },
+  ) => Promise<string | null>;
   onClose: () => void;
 }) {
   const kinds = creatableKinds(ctx.catalogue);
-  const [kind, setKind] = useState(kinds[0] ?? "");
+  const [kind, setKind] = useState(
+    initialKind && kinds.includes(initialKind) ? initialKind : (kinds[0] ?? ""),
+  );
   const [values, setValues] = useState<FormValues>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -52,7 +64,7 @@ export function CreateDialog({
       return;
     }
     setBusy(true);
-    const err = await onCreate(kind, values);
+    const err = await onCreate(kind, values, at);
     setBusy(false);
     if (err) setError(err);
     else onClose();

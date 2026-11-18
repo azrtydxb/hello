@@ -4,8 +4,10 @@ The Call flows pages (Call flow, then Call flows) draw Hello's configuration as
 a graph: trunks, inbound and outbound routes, time conditions, IVR menus, ring
 groups, queues, extensions, voicemail, announcements, paging, park and the
 rest, joined by the connections that carry a call. A canvas is a named, shared
-layout of that graph ("Main office", "After hours"); it stores only where nodes
-sit, never the configuration.
+layout of that graph ("Main office", "After hours"). It is also where the
+configuration is edited: changes made on it are drafted, checked, reviewed and
+applied together (see Editing). The canvas itself stores only where nodes sit;
+the configuration lives in the objects, as it always does.
 
 ## Roles
 
@@ -15,6 +17,23 @@ sit, never the configuration.
 | operator | All of that, plus move nodes, draft changes and apply them, ask the AI, apply AI proposals, let the AI apply. |
 | admin    | All of that, including admin-only objects (paging groups, conferences, multicast) in a change.                |
 
+## The stage
+
+The canvas fills the window below the top bar; the page toolbars above it
+scroll away. Three buttons in the top-left corner of the canvas change the
+room it gets:
+
+- **Hide list** / **Show list** folds the side column (the palette and "Not
+  on this canvas") away, so the canvas gets the full width.
+- **Overview** shows a small overview map in the bottom-right corner;
+  **Hide overview** removes it. It is off by default so it never sits over
+  nodes, and while a connection is drawn or a node dragged it fades and lets
+  the pointer through to the ports beneath it.
+- **Full screen** lets the canvas and its side panels cover the whole
+  window; **Exit full screen** or Escape returns. Dialogs still open above it.
+
+The list and overview choices are remembered in the browser.
+
 ## Editing
 
 Changes are drafted on the canvas (create a node from the palette, draw or
@@ -23,6 +42,44 @@ as you go, reviewed as a diff and applied in one transaction with **Apply**.
 An applied change can be reverted from **History**. Under the hood this is one
 configuration batch (`POST /api/v1/config/batch`, see
 [config-batch.md](config-batch.md)).
+
+### New objects: the palette
+
+The side column starts with **New object**, a palette of every kind of object
+the canvas can create (operators and admins only). Drag a kind onto the canvas
+and **Add an object** opens for that kind; the new node is placed where it was
+dropped. Clicking a kind, or Enter on it, opens the same form, and the node
+then goes to the middle of the view. **Add object** above the canvas still
+opens the form with a kind to choose.
+
+### Objects already configured
+
+**Not on this canvas** lists the objects that exist but are not placed here.
+Drag one onto the canvas to place it where it is dropped, or use its **+**
+button to place it in the middle of the view.
+
+### Connections
+
+A connection always leaves its source on the right side of the box and
+enters its target on the left: inputs are drawn on the left of a node,
+outputs on the right. Connections are drawn with right angles and run
+around the boxes of other nodes instead of through them, keeping a little
+clearance; one that goes back to a node further left loops around the boxes
+to come in from the left. When nodes stand too close for any clear way
+round, the line takes the tightest clearance it can find. Moving a node
+reroutes the connections near it as it moves.
+
+Draw a connection by dragging from an output port to an input port; every
+connectable port has a grab area a little larger than its dot, so it can be
+picked up with a mouse, a trackpad or a finger. A port that takes the
+connection is ringed when the pointer reaches it.
+
+### Browsers
+
+Moving nodes, drawing connections and dropping from the side column work in
+Chrome, Edge, Firefox and Safari. Dragging from the side column uses the
+browser's drag and drop, which phones and some tablets do not offer; there
+the **+** button of a listed object and a click on a palette kind do the same.
 
 ## Tracing a call
 

@@ -43,8 +43,6 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: calc(100dvh - 150px);
-  min-height: 460px;
 }
 
 .flow-toolbar {
@@ -64,8 +62,111 @@
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr) auto;
   gap: 12px;
-  flex: 1;
+  /* The stage gets the whole window below the top bar; the toolbars above
+     scroll away. */
+  height: calc(100dvh - var(--az-topbar-h, 64px) - 24px);
+  min-height: 480px;
+}
+
+.flow-shell--noside {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* Full screen: the canvas and its panels cover the window. Dialogs (z-index
+   100 and up) still open above it. */
+.flow-shell--max {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  height: auto;
   min-height: 0;
+  padding: 8px;
+  background: var(--az-bg);
+}
+
+.flow-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.flow-sidebar > .flow-side:last-child {
+  flex: 1;
+}
+
+.flow-side__hint {
+  margin: 0;
+  color: var(--az-muted);
+  font-size: var(--az-text-sm);
+}
+
+.flow-palette {
+  flex: none;
+  max-height: 40%;
+}
+
+.flow-palette__items {
+  flex: 1 1 auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.flow-palette__item {
+  cursor: grab;
+}
+
+.flow-palette__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.flow-palette__label:focus-visible,
+.flow-item__label:focus-visible {
+  outline: 2px solid var(--az-focus-ring);
+  outline-offset: 2px;
+}
+
+.flow-palette__grip {
+  color: var(--az-muted);
+  letter-spacing: -2px;
+}
+
+/* The buttons over the top-left corner of the stage. */
+.flow-stagebar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px;
+}
+
+/* The overview is small, and only there when asked for. While a connection
+   is drawn it lets the pointer through, so a port under it stays reachable. */
+.flow-stage .flow-minimap {
+  width: 160px;
+  height: 110px;
+  margin: 8px;
+  opacity: 0.9;
+}
+
+.flow-stage .flow-minimap svg {
+  width: 160px;
+  height: 110px;
+}
+
+.flow-stage .react-flow:has(.react-flow__connectionline) .flow-minimap,
+.flow-stage .react-flow:has(.react-flow__node.dragging) .flow-minimap {
+  opacity: 0.25;
+  pointer-events: none;
 }
 
 .flow-side {
@@ -115,6 +216,16 @@
 
 .flow-item[draggable="true"] {
   cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.flow-item[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.flow-item__label {
+  cursor: pointer;
 }
 
 .flow-item:hover {
@@ -155,6 +266,15 @@
 
 .flow-stage .react-flow__node {
   border-radius: var(--az-radius-lg);
+  /* Dragging a node must not select its text (Safari) or scroll the page
+     (touch and pen). */
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.flow-stage .react-flow__handle {
+  touch-action: none;
 }
 
 .flow-stage .react-flow__node:focus-visible {
@@ -417,15 +537,35 @@
 
 /* --- port handles: colour from the type, shape from the catalogue --------- */
 
+/* The handle box is the visible size (so connections meet the shape), the
+   shape is drawn by ::before, and ::after widens the area that takes the
+   pointer by 5 px all round: easy to grab with a mouse, a trackpad or a
+   finger, and clipping the shape never shrinks it. */
 .flow-handle.react-flow__handle {
-  width: 14px;
-  height: 14px;
+  --flow-handle-size: 14px;
+  width: var(--flow-handle-size);
+  height: var(--flow-handle-size);
   min-width: 0;
   min-height: 0;
   border: 0;
   border-radius: 0;
-  background: currentColor;
+  background: transparent;
   top: 50%;
+}
+
+.flow-handle.react-flow__handle::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  pointer-events: none;
+}
+
+.flow-handle.react-flow__handle.connectable::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
 }
 
 .flow-handle.react-flow__handle-left {
@@ -438,44 +578,57 @@
   transform: translate(50%, -50%);
 }
 
-.flow-handle--circle,
-.flow-handle--circle-notch {
+.flow-handle--circle::before,
+.flow-handle--circle-notch::before {
   border-radius: 50%;
 }
 
-.flow-handle--circle-notch {
+.flow-handle--circle-notch::before {
   mask: radial-gradient(circle at 100% 50%, transparent 3.5px, #000 4px);
 }
 
-.flow-handle--square {
+.flow-handle--square::before {
   border-radius: 2px;
 }
 
 .flow-handle--diamond.react-flow__handle {
-  width: 17px;
-  height: 17px;
+  --flow-handle-size: 17px;
+}
+
+.flow-handle--diamond::before {
   clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
 }
 
-.flow-handle--triangle {
+.flow-handle--triangle::before {
   clip-path: polygon(50% 0, 100% 100%, 0 100%);
 }
 
 .flow-handle--hexagon.react-flow__handle {
   width: 16px;
+}
+
+.flow-handle--hexagon::before {
   clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
 }
 
 .flow-handle--small-square.react-flow__handle {
-  width: 9px;
-  height: 9px;
+  --flow-handle-size: 9px;
 }
 
 .flow-handle--stub.react-flow__handle {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+  --flow-handle-size: 8px;
   color: var(--az-muted);
+}
+
+.flow-handle--stub::before {
+  border-radius: 50%;
+}
+
+/* A port that takes the connection being drawn is ringed when it is reached. */
+.flow-handle.react-flow__handle.connectingto.valid {
+  outline: 2px solid var(--az-indicator);
+  outline-offset: 3px;
+  border-radius: 50%;
 }
 
 /* --- edges and stubs ------------------------------------------------------ */
@@ -555,8 +708,10 @@
 }
 
 .flow-legend .flow-handle.react-flow__handle {
-  position: static;
+  position: relative;
   display: inline-block;
+  left: auto;
+  top: auto;
   transform: none;
   flex: none;
 }
@@ -564,6 +719,9 @@
 @media (max-width: 1100px) {
   .flow-shell {
     grid-template-columns: 220px minmax(0, 1fr) auto;
+  }
+  .flow-shell--noside {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
   .flow-panel {
     width: 360px;

@@ -60,7 +60,7 @@ export function FlowCanvases() {
       <PageHeader
         eyebrow="Call flow"
         title="Call flows"
-        description="See how calls move through the PBX: trunks, numbers, extensions, ring groups, menus and what they reach. A canvas is a view; the configuration is changed on each object's page."
+        description="See how calls move through the PBX: trunks, numbers, extensions, ring groups, menus and what they reach. A canvas edits the configuration: changes made on it are drafted, checked, reviewed and applied together."
         actions={add}
       />
       {list.status === "loading" && <Spinner label="Loading canvases…" />}
