@@ -6937,3 +6937,22 @@ CiliumClusterwideNetworkPolicy host policy would have no effect.
   deployments.
 - Turn on Cilium's host firewall (a cluster-wide change) and add a host
   policy to Hello's kw manifests.
+
+## Flow canvas: make it a full editor (2026-11-18)
+
+The user reported that dragging, connecting and dropping on the canvas do not
+work and that the canvas cannot configure every flow. In ego on kw
+(sha-b74b920) all three gestures worked; the problems found are the minimap
+covering node ports, a small canvas, no palette for new objects (Add object
+creates 8 kinds; 15 kinds cannot be created and 9 cannot be edited), and the
+Call flows page saying configuration is changed on each object's page.
+
+- Build all of it (Recommended): a larger canvas with the minimap moved off
+  the ports, a palette to drag new objects of every kind, create and edit with
+  full fields for every node kind, the corrected page text, and a fix for the
+  user's browser once it is known. **Chosen by the user, 2026-11-18.** The
+  user added: connection lines are routed around the boxes, and enter a box
+  on its left (inputs) and leave it on its right (outputs).
+- Fix the usability only: minimap, canvas size, palette and text; leave
+  create and edit coverage as it is.
+- Wait for the user's browser details before changing anything.
