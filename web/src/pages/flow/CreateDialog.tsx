@@ -33,22 +33,34 @@ export function creatableKinds(catalogue: FlowCatalogue): string[] {
 
 export function CreateDialog({
   ctx,
+  initialKind,
+  at,
   onCreate,
   onOpenForm,
   onClose,
 }: {
   ctx: EditCtx;
+  /** The kind chosen first (a kind dragged or picked from the palette). */
+  initialKind?: string;
+  /** Where on the canvas the new node goes (where the kind was dropped). */
+  at?: { x: number; y: number };
   /** Stages the object; returns the reason it could not. */
-  onCreate: (kind: string, values: FormValues) => Promise<string | null>;
+  onCreate: (
+    kind: string,
+    values: FormValues,
+    at?: { x: number; y: number },
+  ) => Promise<string | null>;
   /**
-   * Opens the kind's own form (every field, as on its page) for a new one:
-   * the only way for a kind without a short form here.
+   * Opens the kind's own form (every field, as on its page) for a new one,
+   * placed `at`: the only way for a kind without a short form here.
    */
-  onOpenForm?: (kind: string) => void;
+  onOpenForm?: (kind: string, at?: { x: number; y: number }) => void;
   onClose: () => void;
 }) {
   const kinds = creatableKinds(ctx.catalogue);
-  const [kind, setKind] = useState(kinds[0] ?? "");
+  const [kind, setKind] = useState(
+    initialKind && kinds.includes(initialKind) ? initialKind : (kinds[0] ?? ""),
+  );
   const [values, setValues] = useState<FormValues>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -65,7 +77,7 @@ export function CreateDialog({
 
   const submit = async () => {
     if (!form) {
-      full?.(kind);
+      full?.(kind, at);
       return;
     }
     const missing = missingFields(kind, values);
@@ -74,7 +86,7 @@ export function CreateDialog({
       return;
     }
     setBusy(true);
-    const err = await onCreate(kind, values);
+    const err = await onCreate(kind, values, at);
     setBusy(false);
     if (err) setError(err);
     else onClose();
@@ -95,7 +107,7 @@ export function CreateDialog({
               variant="secondary"
               size="sm"
               icon="square-pen"
-              onClick={() => full(kind)}
+              onClick={() => full(kind, at)}
             >
               All fields…
             </Button>

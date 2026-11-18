@@ -1,4 +1,10 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import {
+  createEvent,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { apiError, json, mockApi, renderApp, type Call } from "../../test/api";
 import snapshot from "./catalogue.snapshot.json";
@@ -81,6 +87,50 @@ function api(role: string, extra: Record<string, () => Response> = {}) {
   });
   return calls;
 }
+
+/** A DataTransfer for drag events: what dragstart sets, the drop reads. */
+function transfer() {
+  const data = new Map<string, string>();
+  return {
+    data,
+    get types() {
+      return [...data.keys()];
+    },
+    setData(format: string, value: string) {
+      data.set(format, value);
+    },
+    getData(format: string) {
+      return data.get(format) ?? "";
+    },
+    effectAllowed: "uninitialized",
+    dropEffect: "none",
+  };
+}
+
+/** A drop at a point (jsdom has no DragEvent, so the point is set here). */
+function drop(el: Element, dt: unknown, clientX: number, clientY: number) {
+  const ev = createEvent.drop(el, { dataTransfer: dt });
+  Object.defineProperty(ev, "clientX", { value: clientX });
+  Object.defineProperty(ev, "clientY", { value: clientY });
+  fireEvent(el, ev);
+}
+
+/** The places of new nodes in the drafts kept in the browser. */
+const draftPositions = (): Record<string, { x: number; y: number }> => {
+  const out: Record<string, { x: number; y: number }> = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const raw = localStorage.getItem(localStorage.key(i) ?? "");
+    try {
+      const v = JSON.parse(raw ?? "") as {
+        positions?: Record<string, { x: number; y: number }>;
+      };
+      for (const [id, p] of Object.entries(v.positions ?? {})) out[id] = p;
+    } catch {
+      // not a draft
+    }
+  }
+  return out;
+};
 
 const batchCalls = () =>
   calls.filter((c) => c.method === "POST" && c.url === "/api/v1/config/batch");
@@ -471,6 +521,153 @@ describe("flow canvas editing", { timeout: 90000 }, () => {
     expect(
       document.querySelector('.react-flow__node[data-id="ringGroup:~n1"]'),
     ).not.toBeNull();
+  });
+
+  it("creates an object by dragging a kind from the palette onto the canvas", async () => {
+    api("operator", {
+      "POST /api/v1/config/batch": () => json(RESULT(false)),
+    });
+    await open();
+    const palette = screen.getByRole("region", { name: "New object" });
+    const item = within(palette)
+      .getByRole("button", { name: "New Ring group" })
+      .closest("li")!;
+    expect(item).toHaveAttribute("draggable", "true");
+    const dt = transfer();
+    fireEvent.dragStart(item, { dataTransfer: dt });
+    const stage = screen.getByRole("region", { name: /^Flow canvas/ });
+    // dragover must be cancelled, or no browser lets the drop happen.
+    expect(fireEvent.dragOver(stage, { dataTransfer: dt })).toBe(false);
+    drop(stage, dt, 500, 400);
+    const dialog = await screen.findByRole("dialog", { name: "Add an object" });
+    expect(within(dialog).getByLabelText("Kind")).toHaveValue("ringGroup");
+    fireEvent.change(await within(dialog).findByLabelText("Name"), {
+      target: { value: "night" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Add to draft" }),
+    );
+    await screen.findByText(/1 staged change/);
+    expect(
+      document.querySelector('.react-flow__node[data-id="ringGroup:~n1"]'),
+    ).not.toBeNull();
+    // The new node sits where the kind was dropped (the pane is not panned
+    // or zoomed here, so screen and canvas points are the same): its centre
+    // under the pointer, its top just above it. The draft kept in the
+    // browser holds the place.
+    await waitFor(() =>
+      expect(draftPositions()["ringGroup:~n1"]).toEqual({
+        x: 500 - 124,
+        y: 400 - 20,
+      }),
+    );
+  });
+
+  it("opens a device's own form from the palette and places it where it was dropped", async () => {
+    api("operator", {
+      "GET /api/v1/flow/catalogue": () => json(snapshot),
+      "GET /api/v1/extensions": () =>
+        json({ items: [{ id: 1, number: "201", name: "Ann" }] }),
+      "POST /api/v1/devices": () =>
+        json({
+          id: 9,
+          extensionId: 1,
+          sipUsername: "desk-9",
+          enabled: true,
+          secret: "s3cret-once",
+          createdAt: "2026-11-18T10:00:00Z",
+          updatedAt: "2026-11-18T10:00:00Z",
+        }),
+    });
+    await open();
+    const palette = screen.getByRole("region", { name: "New object" });
+    // Every kind the canvas can make is offered, the new ones too.
+    for (const label of [
+      "Device",
+      "Phone",
+      "Announcement",
+      "Fax destination",
+    ]) {
+      expect(
+        within(palette).getByRole("button", { name: `New ${label}` }),
+      ).toBeInTheDocument();
+    }
+    const item = within(palette)
+      .getByRole("button", { name: "New Device" })
+      .closest("li")!;
+    const dt = transfer();
+    fireEvent.dragStart(item, { dataTransfer: dt });
+    const stage = screen.getByRole("region", { name: /^Flow canvas/ });
+    drop(stage, dt, 500, 400);
+    // No short form: the device's own form opens at once.
+    expect(
+      screen.queryByRole("dialog", { name: "Add an object" }),
+    ).not.toBeInTheDocument();
+    const form = await screen.findByRole(
+      "form",
+      { name: "New device" },
+      { timeout: 20000 },
+    );
+    fireEvent.change(within(form).getByLabelText("Extension"), {
+      target: { value: "1" },
+    });
+    fireEvent.change(within(form).getByLabelText("SIP username"), {
+      target: { value: "desk-9" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create device" }));
+    expect(await screen.findByText("s3cret-once")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(await screen.findByText(/Device created\./)).toBeInTheDocument();
+  });
+
+  it("opens the create form for a kind clicked in the palette", async () => {
+    api("operator");
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "New Ring group" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add an object" });
+    expect(within(dialog).getByLabelText("Kind")).toHaveValue("ringGroup");
+  });
+
+  it("places an object dropped from the list when only text crosses (Safari)", async () => {
+    api("operator", {
+      "PUT /api/v1/flow/canvases/1/layout": () => json(CANVAS),
+    });
+    await open();
+    const side = screen.getByRole("region", { name: "Not on this canvas" });
+    const item = side.querySelector<HTMLElement>('li[draggable="true"]')!;
+    const dt = transfer();
+    fireEvent.dragStart(item, { dataTransfer: dt });
+    const id = dt.data.get("application/x-hello-flow-node")!;
+    // Only the text copy is visible and readable.
+    dt.data.delete("application/x-hello-flow-node");
+    const stage = screen.getByRole("region", { name: /^Flow canvas/ });
+    expect(fireEvent.dragOver(stage, { dataTransfer: dt })).toBe(false);
+    drop(stage, dt, 300, 300);
+    await waitFor(() =>
+      expect(
+        document.querySelector(
+          `.react-flow__node[data-id="${CSS.escape(id)}"]`,
+        ),
+      ).not.toBeNull(),
+    );
+  });
+
+  it("hides the side list and shows the overview on request", async () => {
+    api("operator");
+    await open();
+    expect(document.querySelector(".react-flow__minimap")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    expect(document.querySelector(".react-flow__minimap")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Hide list" }));
+    expect(
+      screen.queryByRole("region", { name: "Not on this canvas" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show list" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide overview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    expect(document.querySelector(".flow-shell--max")).not.toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(document.querySelector(".flow-shell--max")).toBeNull();
   });
 
   it("lists applied batches and reverts one after a dry-run preview", async () => {

@@ -267,6 +267,9 @@ export function buildView({
 
   const nodes: FlowRFNode[] = [];
   const typeOfPort = new Map<string, string>(); // "node|out|port" -> port type
+  // "node|in|port" / "node|out|port" -> the port's row: the router spreads
+  // the first and last runs of a node's connections by it.
+  const laneOf = new Map<string, number>();
   const sizes = new Map<string, { w: number; h: number }>();
   for (const n of graph.nodes) {
     const pos = positions[n.id];
@@ -281,6 +284,8 @@ export function buildView({
       for (const p of outputs) p.editable = portIsEditable(n.kind, p.id);
     }
     for (const p of outputs) typeOfPort.set(`${n.id}|${p.id}`, p.type);
+    outputs.forEach((p, i) => laneOf.set(`${n.id}|out|${p.id}`, i));
+    inputs.forEach((p, i) => laneOf.set(`${n.id}|in|${p.id}`, i));
     const h = nodeHeight(inputs.length, outputs.length);
     sizes.set(n.id, { w: NODE_WIDTH, h });
     nodes.push({
@@ -390,7 +395,12 @@ export function buildView({
       label: edgeLabel(e),
       labelStyle: shift,
       labelBgStyle: shift,
-      data: { implicit: Boolean(e.implicit), type },
+      data: {
+        implicit: Boolean(e.implicit),
+        type,
+        sourceLane: laneOf.get(`${e.source.node}|out|${e.source.port}`),
+        targetLane: laneOf.get(`${e.target.node}|in|${e.target.port}`),
+      },
       className: e.implicit ? "flow-edge flow-edge--implicit" : "flow-edge",
       style: { stroke: `var(--flow-port-${type}, var(--az-muted))` },
     };

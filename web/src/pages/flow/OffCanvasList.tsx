@@ -6,12 +6,11 @@
 import { useState } from "react";
 import type { FlowCatalogue, FlowNode } from "../../api/flow";
 import { Button, Input } from "../../design/azrty/components";
+import { pressKeys, startDrag } from "./dnd";
 import { groupByKind } from "./model";
 
 /** A short list shows its groups open; a long one starts collapsed. */
 const OPEN_LIMIT = 40;
-
-export const DRAG_TYPE = "application/x-hello-flow-node";
 
 export interface OffCanvasListProps {
   nodes: readonly FlowNode[];
@@ -69,19 +68,20 @@ export function OffCanvasList({
                   key={n.id}
                   className="flow-item"
                   draggable={Boolean(onAdd)}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData(DRAG_TYPE, n.id);
-                    e.dataTransfer.effectAllowed = "move";
-                  }}
+                  onDragStart={(e) =>
+                    startDrag(e.dataTransfer, { type: "node", id: n.id })
+                  }
                 >
-                  <button
-                    type="button"
+                  <span
+                    role="button"
+                    tabIndex={0}
                     className="flow-linkbtn flow-item__label"
                     title={n.label}
                     onClick={() => onSelect(n.id)}
+                    onKeyDown={pressKeys(() => onSelect(n.id))}
                   >
                     {n.label}
-                  </button>
+                  </span>
                   {onAdd && (
                     <Button
                       size="sm"

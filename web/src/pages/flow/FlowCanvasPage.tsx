@@ -1,6 +1,8 @@
-// A flow canvas (spec flow-canvas P2): the call flow drawn from the live
-// configuration, with positions saved per canvas. Read-only for the
-// configuration: moving a node saves layout, nothing else.
+// A flow canvas (spec flow-canvas P2, P4): the call flow drawn from the live
+// configuration, with positions saved per canvas. Moving a node saves its
+// place; every other gesture (a new object from the palette, a connection
+// drawn or deleted, an edit in the panel) stages a change in the draft, which
+// is checked, reviewed and applied in one batch.
 
 import "@xyflow/react/dist/style.css";
 import "./flow.css";
@@ -9,10 +11,12 @@ import {
   Background,
   Controls,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
   type Connection,
+  type EdgeTypes,
   type NodeChange,
   type NodeTypes,
 } from "@xyflow/react";
@@ -100,7 +104,13 @@ import {
 import { HistoryDialog } from "./HistoryDialog";
 import { Legend } from "./Legend";
 import { emptyLayout, layoutReducer, pendingWrite } from "./layoutState";
-import { buildView, kindLabel, neighbour, type FlowRFNode } from "./model";
+import {
+  buildView,
+  kindLabel,
+  neighbour,
+  NODE_WIDTH,
+  type FlowRFNode,
+} from "./model";
 import { NodePanel } from "./NodePanel";
 import { TracePanel } from "./TracePanel";
 import { FlowAIPanel } from "./ai/FlowAIPanel";
@@ -111,11 +121,15 @@ import {
   missingFromCanvas,
 } from "./traceHighlight";
 import type { NodeEditApi } from "./NodeEditor";
-import { OBJECTS, idOf } from "./objects";
+import { CREATE_FORMS, FORM_KINDS, OBJECTS, idOf } from "./objects";
 import { ReviewDialog } from "./ReviewDialog";
 import { FlowNodeView, StubNodeView } from "./nodes";
-import { DRAG_TYPE, OffCanvasList } from "./OffCanvasList";
+import { OffCanvasList } from "./OffCanvasList";
+import { Palette } from "./Palette";
 import { PortStylesContext, portStylesOf } from "./portStyles";
+import { acceptDrag, readDrop } from "./dnd";
+import { RouteCache, type Obstacle } from "./edgeRouter";
+import { RoutedEdge, RouterContext } from "./RoutedEdge";
 
 // The shared forms are big and only needed when one is opened.
 const FormHost = lazy(() =>
@@ -126,6 +140,35 @@ const PromptHost = lazy(() =>
 );
 
 const nodeTypes: NodeTypes = { flow: FlowNodeView, stub: StubNodeView };
+// Every connection is routed: out on the right, in on the left, around boxes.
+const edgeTypes: EdgeTypes = { default: RoutedEdge };
+
+/** Where the canvas keeps the user's view choices (side list, overview). */
+const PREFS_KEY = "hello.flow.view";
+interface ViewPrefs {
+  side: boolean;
+  overview: boolean;
+}
+function loadPrefs(): ViewPrefs {
+  try {
+    const raw = JSON.parse(
+      localStorage.getItem(PREFS_KEY) ?? "{}",
+    ) as Partial<ViewPrefs>;
+    return {
+      side: raw.side !== false,
+      overview: raw.overview === true,
+    };
+  } catch {
+    return { side: true, overview: false };
+  }
+}
+function savePrefs(p: ViewPrefs) {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+  } catch {
+    // Private mode or a full store: the choice holds for this visit only.
+  }
+}
 
 /** How often the canvas asks whether the configuration changed (spec S-9). */
 export const REVISION_POLL_MS = 10_000;
@@ -307,10 +350,36 @@ function CanvasView({
   const [dialog, setDialog] = useState<
     "create" | "review" | "history" | "discard" | null
   >(null);
+  // The kind and drop point the create form opens with (from the palette).
+  const [creating, setCreating] = useState<{
+    kind?: string;
+    at?: { x: number; y: number };
+  }>({});
   const [deleting, setDeleting] = useState<FlowNode | null>(null);
   const [formNode, setFormNode] = useState<FlowNode | null>(null);
   // The kind of a new object whose own form is open (formNode is then null).
   const [formNew, setFormNew] = useState<string | null>(null);
+  // Where the new object of formNew goes (where its kind was dropped).
+  const [formAt, setFormAt] = useState<{ x: number; y: number } | undefined>(
+    undefined,
+  );
+  /**
+   * Opens the create path for a kind: the short form of Add object, or, for a
+   * kind without one (a device, a phone, an announcement, a feature code, the
+   * kinds only their own form makes), that form at once.
+   */
+  const openCreate = useCallback(
+    (kind: string | undefined, at?: { x: number; y: number }) => {
+      if (kind && !CREATE_FORMS[kind] && FORM_KINDS.has(kind)) {
+        setFormAt(at);
+        setFormNew(kind);
+        return;
+      }
+      setCreating({ kind, at });
+      setDialog("create");
+    },
+    [],
+  );
   // A prompt being written: an announcement node, or null for a new one.
   const [promptFor, setPromptFor] = useState<FlowNode | null | undefined>(
     undefined,
@@ -549,6 +618,40 @@ function CanvasView({
     if (rest.length > 0) setNodes((ns) => applyNodeChanges(rest, ns));
   }, []);
 
+  // --- routing the connections around the boxes ------------------------------
+  // The boxes follow the library's copy of the nodes, so a node being dragged
+  // pushes the connections near it aside as it moves.
+  const obstacles = useMemo<Obstacle[]>(
+    () =>
+      nodes.map((n) => ({
+        id: n.id,
+        x: n.position.x,
+        y: n.position.y,
+        w: n.measured?.width ?? n.width ?? n.initialWidth ?? NODE_WIDTH,
+        h: n.measured?.height ?? n.height ?? n.initialHeight ?? 0,
+      })),
+    [nodes],
+  );
+  const [routeCache] = useState(() => new RouteCache());
+  useEffect(() => {
+    routeCache.retain(new Set(view.edges.map((e) => e.id)));
+  }, [routeCache, view.edges]);
+  const router = useMemo(
+    () => ({ obstacles, cache: routeCache }),
+    [obstacles, routeCache],
+  );
+
+  // --- the room the canvas gets ---------------------------------------------
+  const [prefs, setPrefs] = useState(loadPrefs);
+  const setPref = useCallback((p: Partial<ViewPrefs>) => {
+    setPrefs((old) => {
+      const next = { ...old, ...p };
+      savePrefs(next);
+      return next;
+    });
+  }, []);
+  const [maximised, setMaximised] = useState(false);
+
   // --- saving layout ---------------------------------------------------------
   const pending = useMemo(() => pendingWrite(layout), [layout]);
   useEffect(() => {
@@ -616,20 +719,42 @@ function CanvasView({
     [rf, layout.positions, place],
   );
 
+  // A drop from the list places the object; one from the palette opens the
+  // create form for that kind, and the new node goes where it was dropped.
   const onDrop = (e: DragEvent) => {
-    const id = e.dataTransfer.getData(DRAG_TYPE);
-    if (!canEdit || !id) return;
+    if (!canEdit) return;
+    const payload = readDrop(e.dataTransfer);
+    if (!payload) return;
     e.preventDefault();
-    const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-    place(id, p.x - 124, p.y - 20);
+    // A drop without a point (some synthetic events) lands mid-stage.
+    const rect = stageRef.current?.getBoundingClientRect();
+    const p = rf.screenToFlowPosition({
+      x: Number.isFinite(e.clientX)
+        ? e.clientX
+        : (rect?.left ?? 0) + (rect?.width ?? 0) / 2,
+      y: Number.isFinite(e.clientY)
+        ? e.clientY
+        : (rect?.top ?? 0) + (rect?.height ?? 0) / 2,
+    });
+    const at = { x: Math.round(p.x - NODE_WIDTH / 2), y: Math.round(p.y - 20) };
+    if (payload.type === "node") {
+      if (shown.nodes.some((n) => n.id === payload.id)) {
+        place(payload.id, at.x, at.y);
+      }
+    } else {
+      openCreate(payload.kind, at);
+    }
   };
 
   const onDragOver = (e: DragEvent) => {
-    if (canEdit && e.dataTransfer.types.includes(DRAG_TYPE)) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-    }
+    if (canEdit && acceptDrag(e.dataTransfer)) e.preventDefault();
   };
+
+  // A kind picked from the palette with a click or the keyboard.
+  const pickKind = useCallback(
+    (kind: string) => openCreate(kind),
+    [openCreate],
+  );
 
   // --- editing: every gesture stages operations in the draft -------------------
   const gestures = useRef(0);
@@ -716,18 +841,27 @@ function CanvasView({
   const createFromDialog = async (
     kind: string,
     values: FormValues,
+    at?: { x: number; y: number },
   ): Promise<string | null> =>
-    stageCreated(await createNode(ctx, kind, values));
+    stageCreated(await createNode(ctx, kind, values), at);
 
-  /** Stages a new object as one step and places its node in the middle. */
-  const stageCreated = (r: EditResult): string | null => {
+  /**
+   * Stages a new object as one step and places its node `at` (where its kind
+   * was dropped), or in the middle.
+   */
+  const stageCreated = (
+    r: EditResult,
+    at?: { x: number; y: number },
+  ): string | null => {
     if (!r.ok) return r.error;
     const group = `g${Date.now().toString(36)}-${++gestures.current}`;
     dispatchDraft({
       type: "stage",
       ops: r.ops.map((o) => ({ ...o, groups: [group] })),
     });
-    if (r.node) {
+    if (r.node && at) {
+      place(r.node, at.x, at.y);
+    } else if (r.node) {
       const rect = stageRef.current?.getBoundingClientRect();
       const centre = rf.screenToFlowPosition({
         x: (rect?.left ?? 0) + (rect?.width ?? 0) / 2,
@@ -808,6 +942,19 @@ function CanvasView({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [canEdit]);
+
+  // Escape leaves full screen, unless a dialog or a panel takes it first.
+  const panelOpen = selected !== null || tracing || ai.open;
+  useEffect(() => {
+    if (!maximised || panelOpen) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      setMaximised(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [maximised, panelOpen]);
 
   const checkText =
     draft.ops.length === 0
@@ -1028,7 +1175,7 @@ function CanvasView({
           canvas.description ||
           `Configuration revision ${graph.configRevision}. ${
             canEdit
-              ? "Moving a node saves its place on this canvas."
+              ? "Changes are drafted here, checked, reviewed and applied together; moving a node saves its place on this canvas."
               : "View only."
           }`
         }
@@ -1129,7 +1276,10 @@ function CanvasView({
             size="sm"
             variant="secondary"
             icon="plus"
-            onClick={() => setDialog("create")}
+            onClick={() => {
+              setCreating({});
+              setDialog("create");
+            }}
           >
             Add object
           </Button>
@@ -1217,107 +1367,165 @@ function CanvasView({
           canvas. Add them from the list to see them.
         </Alert>
       )}
-      <div className="flow-shell">
-        <OffCanvasList
-          nodes={view.offCanvas}
-          catalogue={catalogue}
-          onAdd={canEdit ? addFromList : undefined}
-          onAddAll={canEdit && !importing ? () => void addAll() : undefined}
-          onSelect={setSelected}
-        />
+      <div
+        className={[
+          "flow-shell",
+          prefs.side ? "" : "flow-shell--noside",
+          maximised ? "flow-shell--max" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        {prefs.side && (
+          <div className="flow-sidebar">
+            {canEdit && <Palette catalogue={catalogue} onPick={pickKind} />}
+            <OffCanvasList
+              nodes={view.offCanvas}
+              catalogue={catalogue}
+              onAdd={canEdit ? addFromList : undefined}
+              onAddAll={canEdit && !importing ? () => void addAll() : undefined}
+              onSelect={setSelected}
+            />
+          </div>
+        )}
         <PortStylesContext.Provider value={styles}>
-          <div
-            ref={stageRef}
-            className={`flow-stage${trace ? " flow-stage--tracing" : ""}`}
-            role="region"
-            aria-label="Flow canvas. Arrow keys move between nodes, Enter opens details, Alt and an arrow key moves a node."
-            onKeyDown={onKeyDown}
-            onDrop={onDrop}
-            onDragOver={onDragOver}
-          >
-            <ReactFlow<FlowRFNode>
-              nodes={nodes}
-              edges={view.edges}
-              nodeTypes={nodeTypes}
-              onNodesChange={onNodesChange}
-              colorMode={theme}
-              nodesConnectable={canEdit}
-              nodesDraggable={canEdit}
-              edgesFocusable={canEdit}
-              isValidConnection={isValidConnection}
-              onConnect={connectGesture}
-              deleteKeyCode={canEdit ? ["Backspace", "Delete"] : null}
-              // Only connections are deleted with the key; objects have a
-              // confirmation with the list of what points at them.
-              onBeforeDelete={({ edges }) =>
-                Promise.resolve({ nodes: [], edges })
-              }
-              onEdgesDelete={(edges) =>
-                edges.forEach((e) => {
-                  const edge = shown.edges.find((x) => x.id === e.id);
-                  if (edge) void run(disconnect(ctx, edge));
-                })
-              }
-              disableKeyboardA11y
-              minZoom={0.1}
-              maxZoom={1.75}
-              fitView={!canvas.viewport}
-              defaultViewport={canvas.viewport}
-              onlyRenderVisibleElements={nodes.length > 200}
-              onNodeClick={(_, n) =>
-                activate(n.id, n.type, n.position.x, n.position.y)
-              }
-              onPaneClick={() => setSelected(null)}
-              onNodeDragStop={(_, n) =>
-                dispatch({
-                  type: "move",
-                  node: n.id,
-                  x: Math.round(n.position.x),
-                  y: Math.round(n.position.y),
-                })
-              }
-              onSelectionDragStop={(_, ns) =>
-                ns.forEach((n) =>
+          <RouterContext.Provider value={router}>
+            <div
+              ref={stageRef}
+              className={`flow-stage${trace ? " flow-stage--tracing" : ""}`}
+              role="region"
+              aria-label="Flow canvas. Arrow keys move between nodes, Enter opens details, Alt and an arrow key moves a node."
+              onKeyDown={onKeyDown}
+              onDrop={onDrop}
+              onDragOver={onDragOver}
+            >
+              <ReactFlow<FlowRFNode>
+                nodes={nodes}
+                edges={view.edges}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                onNodesChange={onNodesChange}
+                colorMode={theme}
+                nodesConnectable={canEdit}
+                nodesDraggable={canEdit}
+                edgesFocusable={canEdit}
+                isValidConnection={isValidConnection}
+                onConnect={connectGesture}
+                deleteKeyCode={canEdit ? ["Backspace", "Delete"] : null}
+                // Only connections are deleted with the key; objects have a
+                // confirmation with the list of what points at them.
+                onBeforeDelete={({ edges }) =>
+                  Promise.resolve({ nodes: [], edges })
+                }
+                onEdgesDelete={(edges) =>
+                  edges.forEach((e) => {
+                    const edge = shown.edges.find((x) => x.id === e.id);
+                    if (edge) void run(disconnect(ctx, edge));
+                  })
+                }
+                disableKeyboardA11y
+                minZoom={0.1}
+                maxZoom={1.75}
+                fitView={!canvas.viewport}
+                fitViewOptions={{ padding: 0.15 }}
+                defaultViewport={canvas.viewport}
+                onlyRenderVisibleElements={nodes.length > 200}
+                onNodeClick={(_, n) =>
+                  activate(n.id, n.type, n.position.x, n.position.y)
+                }
+                onPaneClick={() => setSelected(null)}
+                onNodeDragStop={(_, n) =>
                   dispatch({
                     type: "move",
                     node: n.id,
                     x: Math.round(n.position.x),
                     y: Math.round(n.position.y),
-                  }),
-                )
-              }
-            >
-              <Background gap={24} />
-              <Controls showInteractive={false} />
-              <MiniMap pannable zoomable ariaLabel="Overview of the canvas" />
-            </ReactFlow>
-            {empty && (
-              <div className="flow-empty">
-                <EmptyState
-                  icon="workflow"
-                  title="This canvas is empty"
-                  description={
-                    canEdit
-                      ? shown.nodes.length > 0
-                        ? "Add everything to see the whole PBX laid out, pick objects from the list on the left, or import a flow from a trunk, a number or a feature code."
-                        : "There is nothing configured yet to show."
-                      : "Nothing has been placed on it yet."
-                  }
-                  action={
-                    canEdit && shown.nodes.length > 0 ? (
-                      <Button
-                        icon="workflow"
-                        disabled={importing !== null}
-                        onClick={() => void addAll()}
-                      >
-                        {`Add everything (${shown.nodes.length})`}
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              </div>
-            )}
-          </div>
+                  })
+                }
+                onSelectionDragStop={(_, ns) =>
+                  ns.forEach((n) =>
+                    dispatch({
+                      type: "move",
+                      node: n.id,
+                      x: Math.round(n.position.x),
+                      y: Math.round(n.position.y),
+                    }),
+                  )
+                }
+              >
+                <Background gap={24} />
+                <Controls showInteractive={false} />
+                <Panel position="top-left" className="flow-stagebar">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={prefs.side ? "panel-left-close" : "panel-left-open"}
+                    aria-pressed={prefs.side}
+                    onClick={() => setPref({ side: !prefs.side })}
+                  >
+                    {prefs.side ? "Hide list" : "Show list"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon="map"
+                    aria-pressed={prefs.overview}
+                    onClick={() => setPref({ overview: !prefs.overview })}
+                  >
+                    {prefs.overview ? "Hide overview" : "Overview"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={maximised ? "minimize-2" : "maximize-2"}
+                    aria-pressed={maximised}
+                    onClick={() => {
+                      setMaximised(!maximised);
+                      requestAnimationFrame(
+                        () => void rf.fitView({ duration: 200, padding: 0.15 }),
+                      );
+                    }}
+                  >
+                    {maximised ? "Exit full screen" : "Full screen"}
+                  </Button>
+                </Panel>
+                {prefs.overview && (
+                  <MiniMap
+                    className="flow-minimap"
+                    pannable
+                    zoomable
+                    ariaLabel="Overview of the canvas"
+                  />
+                )}
+              </ReactFlow>
+              {empty && (
+                <div className="flow-empty">
+                  <EmptyState
+                    icon="workflow"
+                    title="This canvas is empty"
+                    description={
+                      canEdit
+                        ? shown.nodes.length > 0
+                          ? "Add everything to see the whole PBX laid out, pick objects from the list on the left, or import a flow from a trunk, a number or a feature code."
+                          : "There is nothing configured yet to show."
+                        : "Nothing has been placed on it yet."
+                    }
+                    action={
+                      canEdit && shown.nodes.length > 0 ? (
+                        <Button
+                          icon="workflow"
+                          disabled={importing !== null}
+                          onClick={() => void addAll()}
+                        >
+                          {`Add everything (${shown.nodes.length})`}
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          </RouterContext.Provider>
         </PortStylesContext.Provider>
         {ai.open && (
           <FlowAIPanel
@@ -1397,9 +1605,12 @@ function CanvasView({
       {dialog === "create" && (
         <CreateDialog
           ctx={ctx}
+          initialKind={creating.kind}
+          at={creating.at}
           onCreate={createFromDialog}
-          onOpenForm={(kind) => {
+          onOpenForm={(kind, at) => {
             setDialog(null);
+            setFormAt(at);
             setFormNew(kind);
           }}
           onClose={() => setDialog(null)}
@@ -1459,13 +1670,14 @@ function CanvasView({
             onClose={() => {
               setFormNode(null);
               setFormNew(null);
+              setFormAt(undefined);
             }}
             onCommit={async (body) => {
               const kind = formNode?.kind ?? formNew ?? "";
               const r = await stageForm(ctx, kind, formNode, body);
               const err =
                 r.ok && r.node
-                  ? stageCreated(r)
+                  ? stageCreated(r, formAt)
                   : await run(Promise.resolve(r));
               if (err) throw new Error(err);
             }}
@@ -1475,7 +1687,10 @@ function CanvasView({
               setFormNew(null);
               setNote(message);
               await reload().catch(() => undefined);
-              if (id !== null && fresh) addFromList(id);
+              if (id !== null && fresh) {
+                if (formAt) place(id, formAt.x, formAt.y);
+                else addFromList(id);
+              }
             }}
           />
         </Suspense>
