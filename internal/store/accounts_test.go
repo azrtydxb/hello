@@ -12,7 +12,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/secret"
-	"github.com/azrtydxb/hello/migrations"
+	"github.com/azrtydxb/hello/migrations/legacy"
 	"github.com/pressly/goose/v3"
 )
 
@@ -295,7 +295,7 @@ func TestSelfServiceSQL(t *testing.T) {
 func TestUserAccountsMigration(t *testing.T) {
 	ctx := context.Background()
 	db := scratchDB(t)
-	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	p, err := goose.NewProvider(goose.DialectPostgres, db, legacy.FS)
 	if err != nil {
 		t.Fatal(err)
 	}

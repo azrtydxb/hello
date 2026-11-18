@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,14 +17,16 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/migrate"
-	"github.com/azrtydxb/hello/migrations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3/lock"
 )
 
 const root = "../.."
 
+// TestMigrateIdempotentConcurrent fails if migrate.Up runs while another
+// session holds momo's history lock, or if replicas racing over a fresh
+// database, or over a goose-built one they take over together, apply a
+// migration twice, fail, or leave the database short of one.
 func TestMigrateIdempotentConcurrent(t *testing.T) {
 	dsn := os.Getenv("HELLO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -38,16 +39,21 @@ func TestMigrateIdempotentConcurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	// Deterministic: while another session holds the migration lock,
-	// Up must wait for it rather than run.
-	if _, err := db.ExecContext(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
-		t.Fatal(err)
+	reset := func() {
+		t.Helper()
+		if _, err := db.ExecContext(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
+			t.Fatal(err)
+		}
 	}
+
+	// Deterministic: while another session holds momo's history lock, Up
+	// must wait for it rather than run.
+	reset()
 	holder, err := db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := holder.ExecContext(ctx, "SELECT pg_advisory_lock($1)", lock.DefaultLockID); err != nil {
+	if _, err := holder.ExecContext(ctx, "SELECT pg_advisory_lock($1)", momoHistoryLockID("public")); err != nil {
 		t.Fatal(err)
 	}
 	upDone := make(chan error, 1)
@@ -57,7 +63,7 @@ func TestMigrateIdempotentConcurrent(t *testing.T) {
 		t.Fatalf("migrate up ran while the migration lock was held elsewhere (err=%v)", err)
 	case <-time.After(1500 * time.Millisecond):
 	}
-	if _, err := holder.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", lock.DefaultLockID); err != nil {
+	if _, err := holder.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", momoHistoryLockID("public")); err != nil {
 		t.Fatal(err)
 	}
 	_ = holder.Close()
@@ -65,17 +71,8 @@ func TestMigrateIdempotentConcurrent(t *testing.T) {
 		t.Fatalf("migrate up after lock release: %v", err)
 	}
 
-	// Behavioural: 16 replicas racing over fresh schemas apply each
-	// migration once.
-	files, err := fs.Glob(migrations.FS, "*.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := len(files)
-	for round := range 3 {
-		if _, err := db.ExecContext(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
-			t.Fatal(err)
-		}
+	race := func(round string) int {
+		t.Helper()
 		var wg sync.WaitGroup
 		counts := make([]int, 16)
 		errs := make([]error, 16)
@@ -94,12 +91,20 @@ func TestMigrateIdempotentConcurrent(t *testing.T) {
 		total := 0
 		for i := range counts {
 			if errs[i] != nil {
-				t.Fatalf("round %d runner %d: %v", round, i, errs[i])
+				t.Fatalf("%s: runner %d: %v", round, i, errs[i])
 			}
 			total += counts[i]
 		}
-		if total != want {
-			t.Fatalf("round %d: %d migrations applied across concurrent runners, want each of %d once", round, total, want)
+		return total
+	}
+
+	// Behavioural: 16 replicas racing over fresh schemas apply each
+	// migration once.
+	want := len(momoMigrations(t))
+	for round := range 3 {
+		reset()
+		if total := race(fmt.Sprintf("fresh round %d", round)); total != want {
+			t.Fatalf("fresh round %d: %d migrations applied across concurrent runners, want each of %d once", round, total, want)
 		}
 	}
 	if n, err := migrate.Up(ctx, db); err != nil || n != 0 {
@@ -108,6 +113,21 @@ func TestMigrateIdempotentConcurrent(t *testing.T) {
 	var rows int
 	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM schema_info").Scan(&rows); err != nil || rows != 1 {
 		t.Fatalf("schema_info rows = %d, %v; want 1", rows, err)
+	}
+
+	// 16 replicas starting together on a goose-built database: one takes it
+	// over, nothing runs twice, and every momo migration through legacy_seed
+	// is recorded once, as a baseline.
+	reset()
+	if _, err := migrate.LegacyUp(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if total := race("takeover"); total != 0 {
+		t.Fatalf("takeover: %d migrations ran on a database goose had built, want 0", total)
+	}
+	assertTakenOver(t, ctx, db)
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM schema_info").Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("schema_info rows after the takeover = %d, %v; want 1", rows, err)
 	}
 }
 

@@ -1,11 +1,11 @@
 // Package db is Hello's momo (github.com/azrtydxb/momo) handle over the
 // *sql.DB every binary already opens.
 //
-// momo is the query layer only, adopted one package at a time; goose stays
-// the migration tool. The handle shares the pool of the *sql.DB it wraps (no
+// momo is the query layer, adopted one package at a time, and its migration
+// engine builds the schema (internal/migrate). The handle shares the pool of the *sql.DB it wraps (no
 // second pool, no new connection settings), and momo code joins a
-// transaction raw database/sql code opened with AdoptTx. The generated
-// models of the tables momo reads and writes live in package models; see
+// transaction raw database/sql code opened with AdoptTx. The models of
+// every table, which declare the schema, live in package models; see
 // docs/database.md.
 package db
 

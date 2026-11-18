@@ -19,6 +19,8 @@ import (
 	"github.com/azrtydxb/hello/internal/backup"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/hello/migrations"
+	"github.com/azrtydxb/hello/migrations/legacy"
 )
 
 // memObjects is an in-memory object server for the restore test: one server,
@@ -167,7 +169,10 @@ func TestRestoreIntegration(t *testing.T) {
 			Dest: func(context.Context, backup.SecretSettings) (backup.Store, string, error) {
 				return objs, backup.DefaultBucket, nil
 			},
-			Migrate: func(ctx context.Context) error { _, err := migrate.Up(ctx, db); return err },
+			Migrate: func(ctx context.Context, from int64) error {
+				_, err := migrate.UpAfterRestore(ctx, db, from)
+				return err
+			},
 		})
 	}
 
@@ -251,5 +256,118 @@ func TestRestoreIntegration(t *testing.T) {
 	var audit string
 	if err := emptyDB.QueryRowContext(ctx, `SELECT resource_id FROM audit_events WHERE action = 'restore'`).Scan(&audit); err != nil || !strings.Contains(audit, "outcome=ok") {
 		t.Fatalf("restore audit: %q, %v", audit, err)
+	}
+}
+
+// TestRestorePreCutoverBackup restores a backup taken before the cutover to
+// momo's migration engine (a goose-built database: goose_db_version, no
+// momo_migrations, Manifest.SchemaVersion a goose version) with this binary,
+// into an empty database and into one already on momo's migrations. Both
+// must end taken over from goose: momo's history records init and
+// legacy_seed as a baseline, not the target's own history, the rows are the
+// backup's and the schema version is this binary's.
+func TestRestorePreCutoverBackup(t *testing.T) {
+	dsn := os.Getenv("HELLO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("HELLO_TEST_DATABASE_URL not set")
+	}
+	for _, tool := range []string{"pg_dump", "pg_restore"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s is not installed", tool)
+		}
+	}
+	ctx := context.Background()
+	key, err := backup.DeriveKey("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := func() (*sql.DB, *pgx.ConnConfig) {
+		cfg, err := pgx.ParseConfig(scratchDatabase(t, ctx, dsn))
+		if err != nil {
+			t.Fatal(err)
+		}
+		db := stdlib.OpenDB(*cfg)
+		t.Cleanup(func() { _ = db.Close() })
+		return db, cfg
+	}
+	objs := &memObjects{data: map[string][]byte{}}
+	service := func(db *sql.DB, cfg *pgx.ConnConfig) *backup.Service {
+		return backup.New(backup.Config{
+			DB: store.New(db, nil), Key: key, Live: objs, Tools: backup.PGTools{Conn: cfg}, Tmp: t.TempDir(),
+			Dest: func(context.Context, backup.SecretSettings) (backup.Store, string, error) {
+				return objs, backup.DefaultBucket, nil
+			},
+			Migrate: func(ctx context.Context, from int64) error {
+				_, err := migrate.UpAfterRestore(ctx, db, from)
+				return err
+			},
+		})
+	}
+
+	// The pre-cutover install: goose only, with a user.
+	src, srcCfg := open()
+	if _, err := migrate.LegacyUp(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.ExecContext(ctx, `INSERT INTO users (username, password_hash) VALUES ('alice', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := service(src, srcCfg).RunNow(ctx, backup.RunManual); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+	arch, _ := objs.List(ctx, backup.DefaultBucket, backup.ArchivePrefix)
+	if len(arch) != 1 {
+		t.Fatalf("archives: %v", arch)
+	}
+
+	for _, target := range []struct {
+		name    string
+		prepare func(*sql.DB)
+	}{
+		{"into an empty database", func(*sql.DB) {}},
+		{"into a database on momo's migrations", func(db *sql.DB) {
+			if _, err := migrate.Up(ctx, db); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, `INSERT INTO users (username, password_hash) VALUES ('later', 'x')`); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(target.name, func(t *testing.T) {
+			db, cfg := open()
+			target.prepare(db)
+			rep, err := service(db, cfg).Restore(ctx, objs, backup.DefaultBucket, arch[0].Key, backup.RestoreOptions{Actor: "test"})
+			if err != nil {
+				t.Fatalf("restore: %v", err)
+			}
+			if rep.SchemaVersion != legacy.Latest {
+				t.Fatalf("the pre-cutover backup's schema version is %d, want goose's %d", rep.SchemaVersion, legacy.Latest)
+			}
+			assertTakenOver(t, ctx, db)
+			assertNoDrift(t, ctx, db)
+			var users []string
+			rows, err := db.QueryContext(ctx, `SELECT username FROM users ORDER BY username`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var u string
+				if err := rows.Scan(&u); err != nil {
+					t.Fatal(err)
+				}
+				users = append(users, u)
+			}
+			_ = rows.Close()
+			if len(users) != 1 || users[0] != "alice" {
+				t.Fatalf("users after the restore = %v, want the backup's [alice]", users)
+			}
+			if v, err := store.New(db, nil).SchemaVersion(ctx); err != nil || v != migrations.Latest() {
+				t.Fatalf("SchemaVersion after the restore = %d, %v; want %d", v, err, migrations.Latest())
+			}
+			if n, err := migrate.Up(ctx, db); err != nil || n != 0 {
+				t.Fatalf("migrate up after the restore = %d, %v; want 0, nil", n, err)
+			}
+		})
 	}
 }

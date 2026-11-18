@@ -1,4 +1,4 @@
-// momo:fromdb sha256=38ca686e5d1dbab97641c784a3b37a4fba20f94f91ffeaa3ecb46b29cd240c50
+// momo:fromdb sha256=9e868ad458ed6f32da6af75c5b11791e6d65795b2375a432d9031925c1a4ab54
 // Written by momo generate --from-db. A re-run keeps this file if you edit it, and reports a conflict when the database changed the model.
 
 package models
@@ -32,6 +32,7 @@ type CrmConnection struct {
 	CalendarError     string `momo:"default:''::text,dbdefault"`
 
 	Connector *CrmConnector `momo:"belongs_to,fk:ConnectorID,on_delete:cascade"`
+	User      *User         `momo:"belongs_to,fk:UserID,on_delete:cascade"`
 }
 
 // MomoConfig declares what a tag cannot: the other indexes, constraints, enums and defaults.

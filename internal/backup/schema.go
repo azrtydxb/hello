@@ -1,29 +1,9 @@
 package backup
 
-import (
-	"io/fs"
-	"strconv"
-	"strings"
+import "github.com/azrtydxb/hello/migrations"
 
-	"github.com/azrtydxb/hello/migrations"
-)
-
-// LatestSchema is the highest migration number this binary carries; a
-// backup of a newer schema is refused.
-func LatestSchema() int64 {
-	ents, err := fs.ReadDir(migrations.FS, ".")
-	if err != nil {
-		return 0
-	}
-	var max int64
-	for _, e := range ents {
-		n, _, ok := strings.Cut(e.Name(), "_")
-		if !ok {
-			continue
-		}
-		if v, err := strconv.ParseInt(n, 10, 64); err == nil && v > max {
-			max = v
-		}
-	}
-	return max
-}
+// LatestSchema is the newest migration version this binary carries (a
+// 14-digit momo version); a backup of a newer schema is refused. A backup
+// from before the cutover to momo's migration engine carries a goose version
+// (00001 to 00107), which is always older.
+func LatestSchema() int64 { return migrations.Latest() }

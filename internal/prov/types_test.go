@@ -1,88 +1,30 @@
 package prov
 
 import (
-	"os"
-	"regexp"
 	"slices"
-	"strings"
 	"testing"
+
+	"github.com/azrtydxb/momo/migrate"
+	"github.com/azrtydxb/momo/schema"
+
+	"github.com/azrtydxb/hello/migrations"
 )
 
-// checkList returns the quoted values of the CHECK (column IN (...)) list
-// for column in the CREATE TABLE of table in the provisioning migration.
-func checkList(t *testing.T, sql, table, column string) []string {
+// checkList returns the values the value-list CHECK (c.CheckIn) on
+// table.column accepts in the newest migration's schema, sorted.
+func checkList(t *testing.T, s *schema.Schema, table, column string) []string {
 	t.Helper()
-	start := strings.Index(sql, "CREATE TABLE "+table+" (")
-	if start < 0 {
-		t.Fatalf("migration has no table %s", table)
+	tb, ok := s.Table(table)
+	if !ok {
+		t.Fatalf("the schema has no table %s", table)
 	}
-	body := sql[start:]
-	body = body[:strings.Index(body, "\n);")]
-	m := regexp.MustCompile(`(?s)\b` + column + `\s+TEXT[^\n]*?CHECK \(` + column + ` IN \(([^)]*)\)`).FindStringSubmatch(body)
-	if m == nil {
-		t.Fatalf("%s.%s has no IN list", table, column)
-	}
-	var out []string
-	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
-		out = append(out, q[1])
-	}
-	return out
-}
-
-// latestKindList is the prov_fetches.kind list the newest migrations that
-// redefine it accept (00012 added "phonebook"; 00052 and 00076 widened it
-// with hello_check_values, the kinds each adds going before "other", which
-// closes the Go list).
-func latestKindList(t *testing.T) []string {
-	t.Helper()
-	b, err := os.ReadFile("../../migrations/00012_prov_fetch_phonebook.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	up, _, _ := strings.Cut(string(b), "-- +goose Down")
-	m := regexp.MustCompile(`CHECK \(kind IN \(([^)]*)\)`).FindStringSubmatch(up)
-	if m == nil {
-		t.Fatal("00012 has no kind IN list")
-	}
-	var out []string
-	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
-		out = append(out, q[1])
-	}
-	for _, f := range []string{"00052_ringtones.sql", "00076_scep_dot1x.sql"} {
-		b, err = os.ReadFile("../../migrations/" + f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		up, _, _ = strings.Cut(string(b), "-- +goose Down")
-		m = regexp.MustCompile(`'prov_fetches', 'prov_fetches_kind_check',\s+ARRAY\[([^\]]*)\]`).FindStringSubmatch(up)
-		if m == nil {
-			t.Fatalf("%s does not widen the kind list", f)
-		}
-		for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
-			out = slices.Insert(out, len(out)-1, q[1])
+	for _, c := range tb.Checks {
+		if c.In != nil && c.In.Column == column {
+			return schema.SortedValues(c.In.Values)
 		}
 	}
-	return out
-}
-
-// latestResultList is the prov_fetches.result list: 00006's, then the
-// results 00076 adds with hello_check_values (the SCEP results).
-func latestResultList(t *testing.T, base []string) []string {
-	t.Helper()
-	b, err := os.ReadFile("../../migrations/00076_scep_dot1x.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	up, _, _ := strings.Cut(string(b), "-- +goose Down")
-	m := regexp.MustCompile(`'prov_fetches', 'prov_fetches_result_check',\s+ARRAY\[([^\]]*)\]`).FindStringSubmatch(up)
-	if m == nil {
-		t.Fatal("00076 does not widen the result list")
-	}
-	out := slices.Clone(base)
-	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
-		out = append(out, q[1])
-	}
-	return out
+	t.Fatalf("%s.%s has no value-list check", table, column)
+	return nil
 }
 
 func strs[T ~string](xs []T) []string {
@@ -90,20 +32,20 @@ func strs[T ~string](xs []T) []string {
 	for i, x := range xs {
 		out[i] = string(x)
 	}
-	return out
+	return schema.SortedValues(out)
 }
 
 // TestContractMatchesMigration fails if the vendors, file kinds or fetch
-// results the Go contract names drift from the values the migration's
-// CHECK constraints accept: a value only one side knows would either be
-// unrepresentable in Go or rejected by the database at insert time.
+// results the Go contract names drift from the values the schema's CHECK
+// constraints accept (the newest migration's, momo's derived state of
+// migrations/postgres): a value only one side knows would either be
+// unrepresentable in Go or rejected by the database at insert time. Both
+// sides compare as sets.
 func TestContractMatchesMigration(t *testing.T) {
-	b, err := os.ReadFile("../../migrations/00006_provisioning.sql")
+	st, err := migrate.LatestState(migrations.FS)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sql := string(b)
-	sql = sql[:strings.Index(sql, "-- +goose Down")]
 	firstClass := strs(Vendors[:5])
 	for _, tc := range []struct {
 		table, column string
@@ -118,14 +60,7 @@ func TestContractMatchesMigration(t *testing.T) {
 		{"prov_fetches", "kind", strs(FileKinds)},
 		{"prov_fetches", "result", strs(Results)},
 	} {
-		got := checkList(t, sql, tc.table, tc.column)
-		if tc.table == "prov_fetches" && tc.column == "kind" {
-			got = latestKindList(t) // widened by later migrations
-		}
-		if tc.table == "prov_fetches" && tc.column == "result" {
-			got = latestResultList(t, got)
-		}
-		if !slices.Equal(got, tc.want) {
+		if got := checkList(t, st.Schema, tc.table, tc.column); !slices.Equal(got, tc.want) {
 			t.Errorf("%s.%s CHECK = %v, Go contract = %v", tc.table, tc.column, got, tc.want)
 		}
 	}

@@ -80,6 +80,18 @@ func testBox(t *testing.T) *secret.Box {
 // a channel with one number and three users (an admin, an agent, another).
 func newRig(t *testing.T) *rig {
 	t.Helper()
+	return newRigWith(t, migrate.Up)
+}
+
+// newLegacyRig is newRig on a database the frozen goose migrations built
+// (migrations/legacy), for a test of one of them.
+func newLegacyRig(t *testing.T) *rig {
+	t.Helper()
+	return newRigWith(t, migrate.LegacyUp)
+}
+
+func newRigWith(t *testing.T, up func(context.Context, *sql.DB) (int, error)) *rig {
+	t.Helper()
 	base := os.Getenv("HELLO_TEST_DATABASE_URL")
 	if base == "" {
 		t.Skip("HELLO_TEST_DATABASE_URL not set")
@@ -106,7 +118,7 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = r.db.Close() })
-	if _, err := migrate.Up(ctx, r.db); err != nil {
+	if _, err := up(ctx, r.db); err != nil {
 		t.Fatal(err)
 	}
 	r.st = store.New(r.db, nil).WithSecretBox(testBox(t))

@@ -6842,3 +6842,55 @@ and PostgreSQL's stored `col = ANY (ARRAY[...])` diff as equal but are not
   reproduction; Hello keeps its test-side normalisation until it is fixed.
   **Chosen by the user, 2026-11-18; filed as azrtydxb/momo#227.**
 - Don't file: keep the normalisation in Hello only.
+
+## momo Phase 5: migration engine takeover, design (2026-11-18, momo/phase5-takeover)
+
+Inputs: "momo Phase 5: migration engine takeover inputs" (PR #406). Choices
+made while building it, one PR:
+
+- **Layout.** The goose files move to `migrations/legacy` (package
+  `legacy`, digest pinned by `TestFrozen`); momo's directory is
+  `migrations/postgres`, embedded by `migrations.FS`. `momo.yaml` gains a
+  `migrate` section and is embedded by a root package (`momo.go`, package
+  `hello`), so hello-control and the CLI read one file.
+- **Seed rows.** The init migration is schema only, but the goose
+  migrations inserted rows (settings singletons, ring tags, phonebooks,
+  firmware minimums, `schema_info`). A hand-written, schema-neutral
+  `legacy_seed` migration after init holds them, from `pg_dump --data-only`
+  of the goose database, with every sequence position and `now()` for the
+  timestamps. The takeover baselines through `legacy_seed`, not init, so a
+  goose database never gets the rows twice. `TestMigrateInitParity`
+  compares schema and rows of both builds.
+- **Takeover lock.** `migrate.Up` decides under its own session advisory
+  lock (`0x68656c6c6f6d6967`), on top of goose's and momo's locks, so
+  replicas starting together on a goose database run goose, Baseline and
+  Apply once. "Has momo history" means a migration row in
+  `momo_migrations`, not that the table exists.
+- **Restoring a pre-cutover backup.** The restore's `Migrate` hook now
+  receives the backup's `SchemaVersion`. For a goose version (at most 107)
+  `migrate.UpAfterRestore` drops `momo_migrations` first (pg_restore
+  `--clean` restores goose's history but leaves the target's momo history,
+  which no longer describes the schema) and then takes the restored schema
+  over.
+- **`lock_timeout` 30 s** in `momo.yaml` (momo's default is 5 s); the init
+  container's retry loop stays.
+- **Tests.** The goose rollback tests become schema checks on both builds
+  (fresh and taken over), with the 00008 data step kept through a real
+  takeover from 00007; the store and messaging tests of single goose data
+  migrations run on `legacy.FS`. `TestMomoModelsMatchSchema` and
+  `TestMomoModelsDeclareSchema` go: the models are the source now, checked
+  offline in the `go` job (`generate --check`, `migrate validate`,
+  `migrate diff ci_probe`) and against a live database by strict drift.
+- **Deferrable unique constraints.** momo v0.16.0 does not model
+  `DEFERRABLE` (from-db drops it, drift and baseline ignore it), so init
+  made the four `position` uniques plain and the reorder tests failed.
+  `legacy_seed` drops and re-adds them `DEFERRABLE INITIALLY DEFERRED` (fresh
+  installs only; goose databases have them). `TestMigrateInitParity`
+  compares the PostgreSQL catalog (`pg_get_constraintdef`,
+  `pg_get_indexdef`, columns, triggers, functions, sequences, comments) of a
+  goose-built and a momo-built database, value-list order aside. Reported
+  as a momo gap, not fixed there.
+- **`c.Sequence("prov_redirect_jobs_seq")`** is on `ProvRedirectJob`, not
+  the first model where `--from-db` put it.
+- **`momo-bootstrap`** stays as a dispatch-only CI job (input
+  `momo_bootstrap`), documented as used once.

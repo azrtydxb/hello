@@ -3,45 +3,44 @@ package integration
 import (
 	"context"
 	"database/sql"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/migrate"
-	"github.com/azrtydxb/hello/migrations"
-	"github.com/pressly/goose/v3"
 )
 
-// TestMigrateAIAccessRollback fails if 00008_ai_access does not apply, make
-// existing users admin, roll back to 00007 without leftovers, and apply
-// again; or if the schema accepts a role, token kind, client kind or OAuth
-// token kind outside the contract, or an OAuth token without scopes or
-// resources.
-func TestMigrateAIAccessRollback(t *testing.T) {
-	dsn := os.Getenv("HELLO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("HELLO_TEST_DATABASE_URL not set")
-	}
-	ctx := context.Background()
-	db, err := sql.Open("pgx", scratchDatabase(t, ctx, dsn))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.UpTo(ctx, 7); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO users (username, password_hash) VALUES ('old', 'x')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := migrate.Up(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+// TestAIAccessSchema fails if 00008_ai_access's objects are missing from a
+// new install or from a database taken over from goose 00007 (where its data
+// step must make the existing users admin), or if the schema accepts a role,
+// token kind, client kind or OAuth token kind outside the contract, or an
+// OAuth token without scopes or resources.
+func TestAIAccessSchema(t *testing.T) {
+	t.Run("fresh", func(t *testing.T) {
+		db := openScratch(t)
+		schemaBuilds[0].build(t, db)
+		aiAccessChecks(t, db, false)
+	})
+	t.Run("taken over from 00007", func(t *testing.T) {
+		db := openScratch(t)
+		ctx := context.Background()
+		gooseUpTo(t, db, 7)
+		if _, err := db.ExecContext(ctx, `INSERT INTO users (username, password_hash) VALUES ('old', 'x')`); err != nil {
+			t.Fatal(err)
+		}
+		n, err := migrate.Up(ctx, db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := legacyAfter(t, 7) + momoAfterTakeover(t); n != want {
+			t.Fatalf("takeover from 00007 ran %d migrations, want %d", n, want)
+		}
+		assertTakenOver(t, ctx, db)
+		aiAccessChecks(t, db, true)
+	})
+}
 
+func aiAccessChecks(t *testing.T, db *sql.DB, takenOver bool) {
+	ctx := context.Background()
 	tables := []string{"oauth_clients", "oauth_client_secrets", "oauth_requests", "oauth_grants", "oauth_tokens"}
 	columns := [][2]string{{"users", "role"}, {"api_tokens", "scopes"}, {"api_tokens", "expires_at"},
 		{"api_tokens", "revoked_at"}, {"api_tokens", "kind"}, {"audit_events", "via"}}
@@ -67,8 +66,10 @@ func TestMigrateAIAccessRollback(t *testing.T) {
 	}
 
 	var role string
-	if err := db.QueryRowContext(ctx, `SELECT role FROM users WHERE username = 'old'`).Scan(&role); err != nil || role != "admin" {
-		t.Fatalf("existing user's role = %q, %v; want admin", role, err)
+	if takenOver {
+		if err := db.QueryRowContext(ctx, `SELECT role FROM users WHERE username = 'old'`).Scan(&role); err != nil || role != "admin" {
+			t.Fatalf("existing user's role = %q, %v; want admin", role, err)
+		}
 	}
 	var uid int64
 	if err := db.QueryRowContext(ctx, `INSERT INTO users (username, password_hash) VALUES ('new', 'x') RETURNING id`).Scan(&uid); err != nil {
@@ -103,18 +104,4 @@ func TestMigrateAIAccessRollback(t *testing.T) {
 	refused("an OAuth token without scopes", token, []byte("h2"), "access", uid, nil, "{}")
 	refused("an OAuth token without resources", token, []byte("h3"), "access", uid, "{read}", nil)
 	accepted("an access token", token, []byte("h4"), "access", uid, "{read}", "{https://h.example/mcp}")
-
-	if _, err := p.DownTo(ctx, 7); err != nil {
-		t.Fatalf("roll back to 00007: %v", err)
-	}
-	if n := present(); n != 0 {
-		t.Fatalf("after rollback: %d AI access objects left", n)
-	}
-	if n, err := migrate.Up(ctx, db); err != nil || n != 93 { // 00008 to 00017, 00019, 00026 to 00107
-		t.Fatalf("re-apply = %d, %v; want 93, nil", n, err)
-		t.Fatalf("re-apply = %d, %v; want 91, nil", n, err)
-	}
-	if n := present(); n != want {
-		t.Fatalf("after re-apply: %d of %d AI access objects present", n, want)
-	}
 }

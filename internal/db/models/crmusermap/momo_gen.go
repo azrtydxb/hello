@@ -81,3 +81,21 @@ var Connector = momo.Relation[models.CrmUserMap, models.CrmConnector]{
 	GetOne:       func(p *models.CrmUserMap) *models.CrmConnector { return p.Connector },
 	SetOne:       func(p *models.CrmUserMap, c *models.CrmConnector) { p.Connector = c },
 }
+
+// User is the belongs_to relation of CrmUserMap.
+var User = momo.Relation[models.CrmUserMap, models.User]{
+	Name:         "User",
+	Kind:         momo.BelongsTo,
+	Parent:       momo.TableRef{Name: "crm_user_map"},
+	Child:        momo.TableRef{Name: "users"},
+	ParentMeta:   (*models.CrmUserMap)(nil).MomoMeta(),
+	ChildMeta:    (*models.User)(nil).MomoMeta(),
+	ParentCols:   []string{"user_id"},
+	ChildCols:    []string{"id"},
+	ChildPK:      []string{"id"},
+	ParentKey:    func(p *models.CrmUserMap) ([]any, bool) { return []any{p.UserID}, true },
+	ChildKey:     func(c *models.User) ([]any, bool) { return []any{c.ID}, true },
+	SetParentKey: func(p *models.CrmUserMap, k []any) { p.UserID = k[0].(int64) },
+	GetOne:       func(p *models.CrmUserMap) *models.User { return p.User },
+	SetOne:       func(p *models.CrmUserMap, c *models.User) { p.User = c },
+}
