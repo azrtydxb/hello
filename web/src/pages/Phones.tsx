@@ -810,7 +810,7 @@ const FORM_FIELDS = [
 
 const NEW_DEVICE = "new";
 
-function PhoneForm({
+export function PhoneForm({
   phone,
   extensions,
   devices,
@@ -820,6 +820,7 @@ function PhoneForm({
   onClose,
   onCreated,
   onUpdated,
+  commit,
 }: {
   phone: Phone | null;
   extensions: Extension[];
@@ -830,6 +831,11 @@ function PhoneForm({
   onClose: () => void;
   onCreated: (phone: IssuedPhone) => void;
   onUpdated: (phone: Phone) => void;
+  /**
+   * The canvas stages an edit in its draft instead of saving it here. A new
+   * phone is always created here: its provisioning URL is shown once.
+   */
+  commit?: (body: object) => Promise<void>;
 }) {
   const editing = phone !== null;
   const [mac, setMac] = useState("");
@@ -936,6 +942,11 @@ function PhoneForm({
     if (Object.keys(found).length > 0 || ext === undefined) return;
     setBusy(true);
     try {
+      if (phone && commit) {
+        await commit(patchFor(phone));
+        onClose();
+        return;
+      }
       if (phone) {
         const patch = patchFor(phone);
         onUpdated(

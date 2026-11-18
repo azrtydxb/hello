@@ -214,14 +214,17 @@ export function MulticastChannels({
   );
 }
 
-function ChannelModal({
+export function ChannelModal({
   channel,
   onClose,
   onSaved,
+  commit,
 }: {
   channel: CatalogChannel | null;
   onClose: () => void;
   onSaved: (channel: CatalogChannel, created: boolean) => void;
+  /** The canvas stages the body in its draft instead of saving it here. */
+  commit?: (body: object) => Promise<void>;
 }) {
   const [d, setD] = useState<CatalogChannelInput>(() => {
     if (!channel) return emptyChannel();
@@ -253,6 +256,11 @@ function ChannelModal({
     setUnmatched([]);
     try {
       const input = { ...d, label: d.label.trim(), address: d.address.trim() };
+      if (commit) {
+        await commit(input);
+        onClose();
+        return;
+      }
       const saved = channel
         ? await updateMulticastChannel(channel.id, input)
         : await createMulticastChannel(input);

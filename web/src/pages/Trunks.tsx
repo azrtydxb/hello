@@ -871,14 +871,21 @@ function TrunkCard({
   );
 }
 
-function TrunkDrawer({
+export function TrunkDrawer({
   trunk,
   onClose,
   onSaved,
+  commit,
 }: {
   trunk: Trunk | null;
   onClose: () => void;
   onSaved: (t: Trunk, created: boolean, rotated: boolean) => void;
+  /**
+   * The canvas stages the body in its draft instead of saving it here. A
+   * draft is kept in the browser, so the password is not part of it: it is
+   * set on the Trunks page.
+   */
+  commit?: (body: object) => Promise<void>;
 }) {
   useRestoreFocus();
   const [draft, setDraft] = useState<TrunkDraft>(() =>
@@ -909,7 +916,7 @@ function TrunkDrawer({
     setFormError(null);
     setUnmatched([]);
     const found: Record<string, string> = { ...validate(draft) };
-    if (trunk && changingPassword && password === "") {
+    if (!commit && trunk && changingPassword && password === "") {
       found.password = "Enter the new password, or keep the current one.";
     }
     setErrors(found);
@@ -918,10 +925,15 @@ function TrunkDrawer({
       return;
     }
     const body = toInput(draft);
-    const sendingPassword = changingPassword && password !== "";
+    const sendingPassword = !commit && changingPassword && password !== "";
     if (sendingPassword) body.password = password;
     setBusy(true);
     try {
+      if (commit) {
+        await commit(body);
+        onClose();
+        return;
+      }
       const saved = trunk
         ? await updateTrunk(trunk.id, body)
         : await createTrunk(body);
@@ -1060,19 +1072,26 @@ function TrunkDrawer({
               onChange={(e) => set("realm", e.target.value)}
             />
           </div>
-          <PasswordField
-            id={fid("password")}
-            isNew={trunk === null}
-            hasPassword={trunk?.hasPassword ?? false}
-            changing={changingPassword}
-            value={password}
-            error={errors.password}
-            onChange={setPassword}
-            onChanging={(on) => {
-              setChangingPassword(on);
-              setPassword("");
-            }}
-          />
+          {commit ? (
+            <p className="cf-form__note">
+              The password is set on the Trunks page: a canvas draft is kept in
+              the browser, so it never holds one.
+            </p>
+          ) : (
+            <PasswordField
+              id={fid("password")}
+              isNew={trunk === null}
+              hasPassword={trunk?.hasPassword ?? false}
+              changing={changingPassword}
+              value={password}
+              error={errors.password}
+              onChange={setPassword}
+              onChanging={(on) => {
+                setChangingPassword(on);
+                setPassword("");
+              }}
+            />
+          )}
           {registration && (
             <Input
               id={fid("registerExpires")}

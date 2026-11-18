@@ -16,6 +16,7 @@ import {
 import { isPending, type Body } from "./draft";
 import {
   connectChoices,
+  fixedTargets,
   terminalNode,
   typedTargets,
   type EditCtx,
@@ -25,6 +26,7 @@ import {
   adapterFor,
   canDeleteKind,
   canEditKind,
+  deletesInDraft,
   FORM_KINDS,
   OBJECTS,
   portBase,
@@ -53,7 +55,10 @@ export interface NodeEditApi {
   ) => Promise<string | null>;
   onDisconnect: (edge: FlowEdge) => Promise<string | null>;
   onDelete: (node: FlowNode) => void;
-  /** Opens the object's own form (the one its page uses). */
+  /**
+   * Opens the object's own form (the one its page uses): every field of it,
+   * and what a batch cannot carry (an announcement's audio and its delete).
+   */
   onOpenForm: (node: FlowNode) => void;
   /** Opens the text prompt editor of an announcement. */
   onPrompt: (node: FlowNode) => void;
@@ -123,8 +128,19 @@ export function NodeEditor({
             icon="square-pen"
             onClick={() => edit.onOpenForm(node)}
           >
-            Edit all settings
+            {def?.own?.edit ? "Open its form" : "Edit all settings"}
           </Button>
+          {def?.own?.edit && (
+            <p>
+              Its audio, text and deletion are saved at once by its form; they
+              are not part of the draft.
+            </p>
+          )}
+          {def?.listCreate && (
+            <p>
+              The codes are one list: add, change or remove a code in its form.
+            </p>
+          )}
         </div>
       )}
       {node.kind === "announcement" && (
@@ -180,18 +196,24 @@ export function NodeEditor({
           ))}
         </div>
       )}
-      {canDeleteKind(node.kind) && (
-        <div className="flow-panel__section">
-          <Button
-            variant="danger"
-            size="sm"
-            icon="trash-2"
-            onClick={() => edit.onDelete(node)}
-          >
-            Delete {kindLabel(edit.ctx.catalogue, node.kind).toLowerCase()}
-          </Button>
-        </div>
-      )}
+      {canDeleteKind(node.kind) &&
+        (deletesInDraft(node.kind) || !isPending(node.id)) && (
+          <div className="flow-panel__section">
+            <Button
+              variant="danger"
+              size="sm"
+              icon="trash-2"
+              onClick={() =>
+                deletesInDraft(node.kind)
+                  ? edit.onDelete(node)
+                  : edit.onOpenForm(node)
+              }
+            >
+              Delete {kindLabel(edit.ctx.catalogue, node.kind).toLowerCase()}
+              {deletesInDraft(node.kind) ? "" : "…"}
+            </Button>
+          </div>
+        )}
     </>
   );
 }
@@ -289,6 +311,7 @@ function PortEditor({
   const [typed, setTyped] = useState("");
   const choices = connectChoices(edit.ctx, node.kind, portId, node.id);
   const terminals = typedTargets(edit.ctx.catalogue, node.kind, portId);
+  const fixed = fixedTargets(edit.ctx, node, portId);
   const keyed = perKey;
 
   const wire = (tgt: FlowNode, tgtPort: string) => {
@@ -367,6 +390,18 @@ function PortEditor({
       >
         Connect
       </Button>
+      {fixed.map((t) => (
+        <Button
+          key={t.id}
+          size="sm"
+          variant="secondary"
+          icon="link"
+          disabled={keyed && !key.trim()}
+          onClick={() => void wire(t, "call")}
+        >
+          Connect to: {t.label}
+        </Button>
+      ))}
       {terminals.map((t) => (
         <div key={t.kind} className="flow-edit-row">
           <Input

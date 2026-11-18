@@ -19,7 +19,13 @@ import {
   type FormValues,
 } from "./edits";
 import { kindLabel } from "./model";
-import { CREATE_FORMS, canCreateKind } from "./objects";
+import {
+  CREATE_FORMS,
+  canCreateKind,
+  createsOwn,
+  FORM_KINDS,
+  OBJECTS,
+} from "./objects";
 
 export function creatableKinds(catalogue: FlowCatalogue): string[] {
   return catalogue.nodes.map((n) => n.kind).filter(canCreateKind);
@@ -30,6 +36,7 @@ export function CreateDialog({
   initialKind,
   at,
   onCreate,
+  onOpenForm,
   onClose,
 }: {
   ctx: EditCtx;
@@ -43,6 +50,11 @@ export function CreateDialog({
     values: FormValues,
     at?: { x: number; y: number },
   ) => Promise<string | null>;
+  /**
+   * Opens the kind's own form (every field, as on its page) for a new one,
+   * placed `at`: the only way for a kind without a short form here.
+   */
+  onOpenForm?: (kind: string, at?: { x: number; y: number }) => void;
   onClose: () => void;
 }) {
   const kinds = creatableKinds(ctx.catalogue);
@@ -53,11 +65,21 @@ export function CreateDialog({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const form = CREATE_FORMS[kind];
+  const full = onOpenForm && FORM_KINDS.has(kind) ? onOpenForm : undefined;
+  const note = createsOwn(kind)
+    ? "Its own form creates it at once, not in the draft: the answer is shown only once."
+    : OBJECTS[kind]?.listCreate
+      ? "Its form edits the whole list; the new row is added to the draft."
+      : "Its form has every field; the object is added to the draft.";
 
   const set = (key: string, value: string) =>
     setValues((v) => ({ ...v, [key]: value }));
 
   const submit = async () => {
+    if (!form) {
+      full?.(kind, at);
+      return;
+    }
     const missing = missingFields(kind, values);
     if (missing.length > 0) {
       setError(`Fill in: ${missing.join(", ")}.`);
@@ -80,13 +102,23 @@ export function CreateDialog({
           <Button variant="secondary" size="sm" onClick={onClose}>
             Cancel
           </Button>
+          {form && full && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="square-pen"
+              onClick={() => full(kind, at)}
+            >
+              All fields…
+            </Button>
+          )}
           <Button
             size="sm"
             icon="plus"
-            disabled={busy}
+            disabled={busy || (!form && !full)}
             onClick={() => void submit()}
           >
-            Add to draft
+            {form ? "Add to draft" : "Open the form"}
           </Button>
         </>
       }
@@ -111,6 +143,7 @@ export function CreateDialog({
             label: kindLabel(ctx.catalogue, k),
           }))}
         />
+        {!form && <p>{full ? note : "It is created on its own page."}</p>}
         {form?.fields.map((f) =>
           f.type === "select" ? (
             <Select

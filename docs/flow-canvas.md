@@ -50,7 +50,9 @@ the canvas can create (operators and admins only). Drag a kind onto the canvas
 and **Add an object** opens for that kind; the new node is placed where it was
 dropped. Clicking a kind, or Enter on it, opens the same form, and the node
 then goes to the middle of the view. **Add object** above the canvas still
-opens the form with a kind to choose.
+opens the form with a kind to choose. A kind that is made only by its own
+form (a device, a phone, an announcement, a feature code) opens that form at
+once instead, and its node goes where the kind was dropped.
 
 ### Objects already configured
 
@@ -80,6 +82,52 @@ Moving nodes, drawing connections and dropping from the side column work in
 Chrome, Edge, Firefox and Safari. Dragging from the side column uses the
 browser's drag and drop, which phones and some tablets do not offer; there
 the **+** button of a listed object and a click on a palette kind do the same.
+
+### What the canvas edits
+
+Every stored object of a call flow can be created, edited and deleted from the
+canvas. **Add object** offers a short form for the common kinds, and **All
+fields…** (or, for the other kinds, **Open the form**) opens the object's own
+form: the same drawer its page uses, with every field. In the side panel,
+**Edit all settings** opens that form for the selected node. The panel's
+**Where it goes** wires every output the catalogue allows, also to the
+dial-by-name directory and, for an inbound route, to the dialled DID looked up
+as an extension.
+
+| Node kind                                                                     | Create                    | Edit                    | Delete                  |
+| ----------------------------------------------------------------------------- | ------------------------- | ----------------------- | ----------------------- |
+| Extension, trunk, inbound and outbound route, ring group, IVR menu, queue     | draft                     | draft (own form)        | draft                   |
+| Time condition, schedule, holiday calendar, hold music class, conference room | draft                     | draft (own form)        | draft                   |
+| Park lot, pickup group, multicast channel, paging group, voicemail group, fax | draft                     | draft (own form)        | draft                   |
+| Feature code                                                                  | draft (a row of the list) | draft (the list's form) | draft (its row removed) |
+| Device                                                                        | at once (own form)        | draft (own form)        | draft                   |
+| Phone                                                                         | at once (own form)        | draft (own form)        | draft                   |
+| Announcement                                                                  | at once (own form)        | at once (own form)      | at once (own form)      |
+
+"Draft" means the change is staged and applied with the rest in one batch.
+"At once" is for what a batch cannot carry; the form saves it directly, exactly
+as its page does, and the canvas reloads and places the new node:
+
+- a new **device** answers with its SIP secret and a new **phone** with its
+  provisioning URL; the form shows it once, as the Devices and Phones pages
+  do, and it is never stored in a draft;
+- an **announcement's** audio (an upload, a replacement or speech made from
+  text) and its deletion touch object storage and a speech provider, which do
+  not roll back.
+
+A draft is kept in the browser, so it never holds a password, PIN or secret:
+every such field is dropped from it, and the canvas forms leave them out. Set
+a trunk's password on the Trunks page and a conference room's PINs on the
+Conferences page. A holiday calendar's date import saves at once and
+stays on the Holiday calendars page. A fax destination's name is fixed once it
+exists: routes and IVR keys refer to it.
+
+These nodes are not configurable objects and have no form; they cannot be
+created or deleted, only reached by the outputs that lead to them: **Any
+trunk** (an inbound route without a trunk), **Internal callers** (every
+outbound route is dialled by them), an **External number** or **SIP URI**
+(typed into the output that dials it), **DID as extension**, the **Dial-by-name
+directory** and a **Missing target** (a destination that names nothing).
 
 ## Tracing a call
 

@@ -200,16 +200,20 @@ export function RoomDrawer({
         record: d.record,
         enabled: d.enabled,
         video: d.video,
-        ...(d.clearUserPin
-          ? { userPin: "" }
-          : d.userPin !== ""
-            ? { userPin: d.userPin }
-            : {}),
-        ...(d.clearLeaderPin
-          ? { leaderPin: "" }
-          : d.leaderPin !== ""
-            ? { leaderPin: d.leaderPin }
-            : {}),
+        ...(commit
+          ? {}
+          : d.clearUserPin
+            ? { userPin: "" }
+            : d.userPin !== ""
+              ? { userPin: d.userPin }
+              : {}),
+        ...(commit
+          ? {}
+          : d.clearLeaderPin
+            ? { leaderPin: "" }
+            : d.leaderPin !== ""
+              ? { leaderPin: d.leaderPin }
+              : {}),
       };
       if (commit) {
         await commit(body);
@@ -279,8 +283,17 @@ export function RoomDrawer({
           />
         </div>
         <div className="cf-two">
-          {pinField("userPin", "User PIN", room?.hasUserPin ?? false)}
-          {pinField("leaderPin", "Leader PIN", room?.hasLeaderPin ?? false)}
+          {commit ? (
+            <p className="cf-form__note">
+              PINs are set on the Conferences page: a canvas draft is kept in
+              the browser, so it never holds one.
+            </p>
+          ) : (
+            <>
+              {pinField("userPin", "User PIN", room?.hasUserPin ?? false)}
+              {pinField("leaderPin", "Leader PIN", room?.hasLeaderPin ?? false)}
+            </>
+          )}
         </div>
         <p className="cf-form__note">
           Leaders (who enter the leader PIN) can press *7 to lock the room, *8

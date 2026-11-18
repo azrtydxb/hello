@@ -58,8 +58,23 @@ export function System() {
 
 // --- feature codes -------------------------------------------------------------
 
-/** The feature-code editor: edit codes inline, save the whole list. */
-function FeatureCodes({ onSaved }: { onSaved: () => void }) {
+/**
+ * The feature-code editor: edit codes inline, save the whole list. The
+ * canvas opens it with the list as its draft leaves it (`initial`), with a
+ * new empty row when it adds a code (`adding`), and stages the list in its
+ * draft (`commit`) instead of saving it here.
+ */
+export function FeatureCodes({
+  onSaved,
+  initial,
+  adding,
+  commit,
+}: {
+  onSaved: () => void;
+  initial?: FeatureCode[];
+  adding?: boolean;
+  commit?: (body: object) => Promise<void>;
+}) {
   const [list, setList] = useState<
     | { status: "loading" }
     | { status: "error"; message: string }
@@ -84,11 +99,19 @@ function FeatureCodes({ onSaved }: { onSaved: () => void }) {
     return () => controller.abort();
   }, []);
 
+  // The starting list is read once, when the editor opens.
+  const [seed] = useState(() => ({ initial, adding }));
   useEffect(() => {
     const controller = new AbortController();
-    listFeatureCodes(controller.signal)
+    const blank: FeatureCode[] = seed.adding
+      ? [{ code: "", action: "voicemail", argument: "" }]
+      : [];
+    (seed.initial
+      ? Promise.resolve(seed.initial)
+      : listFeatureCodes(controller.signal)
+    )
       .then((items) => {
-        setRows(items);
+        setRows([...items, ...blank]);
         setList({ status: "ready" });
       })
       .catch((err: unknown) => {
@@ -97,7 +120,7 @@ function FeatureCodes({ onSaved }: { onSaved: () => void }) {
         }
       });
     return () => controller.abort();
-  }, []);
+  }, [seed]);
 
   function validate(): boolean {
     const found: Record<string, string> = {};
@@ -143,7 +166,11 @@ function FeatureCodes({ onSaved }: { onSaved: () => void }) {
       argument: r.argument.trim(),
     }));
     try {
-      await updateFeatureCodes(clean);
+      if (commit) {
+        await commit({ items: clean });
+      } else {
+        await updateFeatureCodes(clean);
+      }
       setRows(clean);
       onSaved();
     } catch (err: unknown) {

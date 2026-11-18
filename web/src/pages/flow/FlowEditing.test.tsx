@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { apiError, json, mockApi, renderApp, type Call } from "../../test/api";
+import snapshot from "./catalogue.snapshot.json";
 import { EDIT_BODIES, EDIT_CATALOGUE, EDIT_GRAPH } from "./fixtures";
 
 const CANVAS = {
@@ -562,6 +563,63 @@ describe("flow canvas editing", { timeout: 90000 }, () => {
     );
   });
 
+  it("opens a device's own form from the palette and places it where it was dropped", async () => {
+    api("operator", {
+      "GET /api/v1/flow/catalogue": () => json(snapshot),
+      "GET /api/v1/extensions": () =>
+        json({ items: [{ id: 1, number: "201", name: "Ann" }] }),
+      "POST /api/v1/devices": () =>
+        json({
+          id: 9,
+          extensionId: 1,
+          sipUsername: "desk-9",
+          enabled: true,
+          secret: "s3cret-once",
+          createdAt: "2026-11-18T10:00:00Z",
+          updatedAt: "2026-11-18T10:00:00Z",
+        }),
+    });
+    await open();
+    const palette = screen.getByRole("region", { name: "New object" });
+    // Every kind the canvas can make is offered, the new ones too.
+    for (const label of [
+      "Device",
+      "Phone",
+      "Announcement",
+      "Fax destination",
+    ]) {
+      expect(
+        within(palette).getByRole("button", { name: `New ${label}` }),
+      ).toBeInTheDocument();
+    }
+    const item = within(palette)
+      .getByRole("button", { name: "New Device" })
+      .closest("li")!;
+    const dt = transfer();
+    fireEvent.dragStart(item, { dataTransfer: dt });
+    const stage = screen.getByRole("region", { name: /^Flow canvas/ });
+    drop(stage, dt, 500, 400);
+    // No short form: the device's own form opens at once.
+    expect(
+      screen.queryByRole("dialog", { name: "Add an object" }),
+    ).not.toBeInTheDocument();
+    const form = await screen.findByRole(
+      "form",
+      { name: "New device" },
+      { timeout: 20000 },
+    );
+    fireEvent.change(within(form).getByLabelText("Extension"), {
+      target: { value: "1" },
+    });
+    fireEvent.change(within(form).getByLabelText("SIP username"), {
+      target: { value: "desk-9" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create device" }));
+    expect(await screen.findByText("s3cret-once")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(await screen.findByText(/Device created\./)).toBeInTheDocument();
+  });
+
   it("opens the create form for a kind clicked in the palette", async () => {
     api("operator");
     await open();
@@ -783,6 +841,109 @@ describe(
       expect(
         screen.getByRole("button", { name: "Generate announcement" }),
       ).toBeInTheDocument();
+    });
+
+    it("creates any kind with its own full form, staged in the draft", async () => {
+      api("operator", {
+        "GET /api/v1/flow/catalogue": () => json(snapshot),
+        "POST /api/v1/config/batch": () => json(RESULT(false)),
+      });
+      await open();
+      fireEvent.click(screen.getByRole("button", { name: "Add object" }));
+      const dialog = await screen.findByRole("dialog", {
+        name: "Add an object",
+      });
+      fireEvent.change(within(dialog).getByLabelText("Kind"), {
+        target: { value: "parkLot" },
+      });
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Open the form" }),
+      );
+      const form = await screen.findByRole(
+        "form",
+        { name: "New park lot" },
+        { timeout: 20000 },
+      );
+      fireEvent.change(within(form).getByLabelText("Name"), {
+        target: { value: "lot-a" },
+      });
+      fireEvent.change(within(form).getByLabelText("First slot"), {
+        target: { value: "701" },
+      });
+      fireEvent.change(within(form).getByLabelText("Last slot"), {
+        target: { value: "710" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Create lot" }));
+      await screen.findByText(/1 staged change/);
+      // The form saved nothing itself: the draft carries the create.
+      expect(
+        calls.filter((c) => c.method === "POST" && c.url.includes("park")),
+      ).toHaveLength(0);
+      await waitFor(() => expect(batchCalls().length).toBeGreaterThan(0));
+      const ops = batchBody(batchCalls().at(-1)!).ops as {
+        operationId: string;
+        body: Record<string, unknown>;
+      }[];
+      expect(ops[0]).toMatchObject({
+        operationId: "createParkLot",
+        body: { name: "lot-a", slotStart: 701, slotEnd: 710 },
+      });
+    });
+
+    it("creates a device with its own form at once and shows its secret once", async () => {
+      api("operator", {
+        "GET /api/v1/flow/catalogue": () => json(snapshot),
+        "GET /api/v1/extensions": () =>
+          json({ items: [{ id: 1, number: "201", name: "Ann" }] }),
+        "POST /api/v1/devices": () =>
+          json({
+            id: 9,
+            extensionId: 1,
+            sipUsername: "desk-9",
+            enabled: true,
+            secret: "s3cret-once",
+            createdAt: "2026-11-18T10:00:00Z",
+            updatedAt: "2026-11-18T10:00:00Z",
+          }),
+      });
+      await open();
+      fireEvent.click(screen.getByRole("button", { name: "Add object" }));
+      const dialog = await screen.findByRole("dialog", {
+        name: "Add an object",
+      });
+      fireEvent.change(within(dialog).getByLabelText("Kind"), {
+        target: { value: "device" },
+      });
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Open the form" }),
+      );
+      const form = await screen.findByRole(
+        "form",
+        { name: "New device" },
+        { timeout: 20000 },
+      );
+      fireEvent.change(within(form).getByLabelText("Extension"), {
+        target: { value: "1" },
+      });
+      fireEvent.change(within(form).getByLabelText("SIP username"), {
+        target: { value: "desk-9" },
+      });
+      const graphReads = () =>
+        calls.filter((c) => c.url === "/api/v1/flow/graph").length;
+      fireEvent.click(screen.getByRole("button", { name: "Create device" }));
+      expect(await screen.findByText("s3cret-once")).toBeInTheDocument();
+      expect(screen.getByText("Shown once")).toBeInTheDocument();
+      const before = graphReads();
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      await waitFor(() => expect(graphReads()).toBeGreaterThan(before));
+      expect(screen.queryByText("s3cret-once")).not.toBeInTheDocument();
+      expect(await screen.findByText(/Device created\./)).toBeInTheDocument();
+      // A device is never part of a batch: its secret would be lost.
+      expect(
+        batchCalls().some((c) =>
+          JSON.stringify(c.body).includes("createDevice"),
+        ),
+      ).toBe(false);
     });
 
     it("keeps the positions of new nodes in the persisted draft", async () => {

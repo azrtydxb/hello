@@ -303,18 +303,21 @@ function validate(d: Draft): Record<string, string> {
   return out;
 }
 
-function ClassDrawer({
+export function ClassDrawer({
   cls,
   announcements,
   annReady,
   onClose,
   onSaved,
+  commit,
 }: {
   cls: MOHClass | null;
   announcements: Announcement[];
   annReady: boolean;
   onClose: () => void;
   onSaved: (c: MOHClass, created: boolean) => void;
+  /** The canvas stages the body in its draft instead of saving it here. */
+  commit?: (body: object) => Promise<void>;
 }) {
   useRestoreFocus();
   const [d, setD] = useState(() => draftOf(cls));
@@ -359,6 +362,11 @@ function ClassDrawer({
         isDefault: d.isDefault,
         announcementIds: d.tracks,
       };
+      if (commit) {
+        await commit(body);
+        onClose();
+        return;
+      }
       onSaved(
         cls ? await putMOHClass(cls.id, body) : await createMOHClass(body),
         cls === null,

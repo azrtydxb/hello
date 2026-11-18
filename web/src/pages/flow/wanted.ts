@@ -79,6 +79,25 @@ class Lookup {
         const n = num("conference", "number");
         return n && { node: n, port: "call" };
       }
+      case "voicemail_group": {
+        const n = num("voicemailGroup", "number");
+        return n && { node: n, port: "call" };
+      }
+      case "fax": {
+        const n = label("fax");
+        return n && { node: n, port: "call" };
+      }
+      case "directory": {
+        const id = "directory:names";
+        const have = this.g.nodes.find((n) => n.id === id);
+        return have
+          ? { node: have, port: "call" }
+          : {
+              node: { id, kind: "directory", label: "Dial-by-name directory" },
+              port: "call",
+              created: true,
+            };
+      }
       case "external":
         return { ...term("external", { number: target }), port: "call" };
       case "sip_uri":
@@ -137,6 +156,17 @@ function destEdge(
 ): Wanted[] {
   const k = str(kind);
   if (!k || k === "hangup" || k === "none") return [];
+  if (k === "internal") {
+    // The dialled DID itself, looked up as an extension: one node per route.
+    const id = `internalDid:${node.id.slice(node.id.indexOf(":") + 1)}`;
+    return [
+      mk(node.id, port, id, "call", ownerNode, field, {
+        node: l.byId("internalDid", id.slice(id.indexOf(":") + 1))
+          ? undefined
+          : { id, kind: "internalDid", label: "DID as extension" },
+      }),
+    ];
+  }
   const d = l.dest(k, str(target));
   if (!d) return [];
   return [
@@ -201,7 +231,82 @@ const exits = (n: FlowNode, b: Body, l: Lookup, names: string[]): Wanted[] =>
     return destEdge(l, n, p, p, d.kind, d.target);
   });
 
+const memberList = (port: string) => ({
+  fields: [port],
+  wanted: (n: FlowNode, b: Body, l: Lookup) =>
+    members(l, n, arr(b[port]), port, port),
+});
+
 export const OWNED: Record<string, Spec> = {
+  pickupGroup: memberList("members"),
+  voicemailGroup: memberList("members"),
+  pagingGroup: {
+    fields: ["members", "callers", "multicastChannelId"],
+    wanted: (n, b, l) => [
+      ...members(l, n, arr(b.members), "members", "members"),
+      ...members(l, n, arr(b.callers), "callers", "callers"),
+      ...(() => {
+        const mc = l.byId("multicastChannel", b.multicastChannelId);
+        return mc
+          ? [mk(n.id, "multicast", mc.id, "page", n.id, "multicastChannelId")]
+          : [];
+      })(),
+    ],
+  },
+  mohClass: {
+    fields: ["announcementIds"],
+    wanted: (n, b, l) => {
+      const out: Wanted[] = [];
+      (Array.isArray(b.announcementIds) ? b.announcementIds : []).forEach(
+        (id, i) => {
+          const a = l.byId("announcement", id);
+          if (a) {
+            out.push(
+              mk(a.id, "audio", n.id, "tracks", n.id, "announcementIds", {
+                data: { position: i + 1 },
+              }),
+            );
+          }
+        },
+      );
+      return out;
+    },
+  },
+  schedule: {
+    fields: ["calendarIds"],
+    wanted: (n, b, l) =>
+      (Array.isArray(b.calendarIds) ? b.calendarIds : []).flatMap((id) =>
+        usedBy(l, "holidayCalendar", id, n, "calendars", "calendarIds", "use"),
+      ),
+  },
+  device: {
+    fields: ["extensionId"],
+    wanted: (n, b, l) => {
+      const ext = l.byId("extension", b.extensionId);
+      return ext
+        ? [mk(n.id, "extension", ext.id, "devices", n.id, "extensionId")]
+        : [];
+    },
+  },
+  phone: {
+    fields: ["deviceId"],
+    wanted: (n, b, l) => {
+      const dev = l.byId("device", b.deviceId);
+      return dev ? [mk(n.id, "device", dev.id, "phone", n.id, "deviceId")] : [];
+    },
+  },
+  featureCode: {
+    fields: ["argument", "action"],
+    wanted: (n, b, l) => {
+      const code = n.id.slice(n.id.indexOf(":") + 1);
+      const item = arr(b.items).find((i) => str(i.code) === code);
+      if (!item) return [];
+      const action = str(item.action);
+      const field = action === "directory" ? "action" : "argument";
+      if (action !== "directory" && !str(item.argument)) return [];
+      return destEdge(l, n, "target", field, action, item.argument);
+    },
+  },
   ringGroup: {
     fields: ["failureKind+failureTarget", "members", "mohClassId"],
     wanted: (n, b, l) => [

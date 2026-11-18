@@ -96,7 +96,7 @@ import {
   disconnect,
   referrersOf,
   setSetting,
-  stageBody,
+  stageForm,
   type EditCtx,
   type EditResult,
   type FormValues,
@@ -121,7 +121,7 @@ import {
   missingFromCanvas,
 } from "./traceHighlight";
 import type { NodeEditApi } from "./NodeEditor";
-import { OBJECTS, idOf } from "./objects";
+import { CREATE_FORMS, FORM_KINDS, OBJECTS, idOf } from "./objects";
 import { ReviewDialog } from "./ReviewDialog";
 import { FlowNodeView, StubNodeView } from "./nodes";
 import { OffCanvasList } from "./OffCanvasList";
@@ -357,6 +357,29 @@ function CanvasView({
   }>({});
   const [deleting, setDeleting] = useState<FlowNode | null>(null);
   const [formNode, setFormNode] = useState<FlowNode | null>(null);
+  // The kind of a new object whose own form is open (formNode is then null).
+  const [formNew, setFormNew] = useState<string | null>(null);
+  // Where the new object of formNew goes (where its kind was dropped).
+  const [formAt, setFormAt] = useState<{ x: number; y: number } | undefined>(
+    undefined,
+  );
+  /**
+   * Opens the create path for a kind: the short form of Add object, or, for a
+   * kind without one (a device, a phone, an announcement, a feature code, the
+   * kinds only their own form makes), that form at once.
+   */
+  const openCreate = useCallback(
+    (kind: string | undefined, at?: { x: number; y: number }) => {
+      if (kind && !CREATE_FORMS[kind] && FORM_KINDS.has(kind)) {
+        setFormAt(at);
+        setFormNew(kind);
+        return;
+      }
+      setCreating({ kind, at });
+      setDialog("create");
+    },
+    [],
+  );
   // A prompt being written: an announcement node, or null for a new one.
   const [promptFor, setPromptFor] = useState<FlowNode | null | undefined>(
     undefined,
@@ -719,8 +742,7 @@ function CanvasView({
         place(payload.id, at.x, at.y);
       }
     } else {
-      setCreating({ kind: payload.kind, at });
-      setDialog("create");
+      openCreate(payload.kind, at);
     }
   };
 
@@ -729,10 +751,10 @@ function CanvasView({
   };
 
   // A kind picked from the palette with a click or the keyboard.
-  const pickKind = useCallback((kind: string) => {
-    setCreating({ kind });
-    setDialog("create");
-  }, []);
+  const pickKind = useCallback(
+    (kind: string) => openCreate(kind),
+    [openCreate],
+  );
 
   // --- editing: every gesture stages operations in the draft -------------------
   const gestures = useRef(0);
@@ -820,8 +842,17 @@ function CanvasView({
     kind: string,
     values: FormValues,
     at?: { x: number; y: number },
-  ): Promise<string | null> => {
-    const r = await createNode(ctx, kind, values);
+  ): Promise<string | null> =>
+    stageCreated(await createNode(ctx, kind, values), at);
+
+  /**
+   * Stages a new object as one step and places its node `at` (where its kind
+   * was dropped), or in the middle.
+   */
+  const stageCreated = (
+    r: EditResult,
+    at?: { x: number; y: number },
+  ): string | null => {
     if (!r.ok) return r.error;
     const group = `g${Date.now().toString(36)}-${++gestures.current}`;
     dispatchDraft({
@@ -1577,6 +1608,11 @@ function CanvasView({
           initialKind={creating.kind}
           at={creating.at}
           onCreate={createFromDialog}
+          onOpenForm={(kind, at) => {
+            setDialog(null);
+            setFormAt(at);
+            setFormNew(kind);
+          }}
           onClose={() => setDialog(null)}
         />
       )}
@@ -1617,19 +1653,44 @@ function CanvasView({
           onClose={() => setDialog(null)}
         />
       )}
-      {formNode && (
+      {(formNode || formNew) && (
         <Suspense fallback={null}>
           <FormHost
             node={formNode}
+            kind={formNode?.kind ?? formNew ?? ""}
             draftBody={
-              draft.ops.find(
-                (o) => o.kind === "update" && o.node === formNode.id,
+              draft.ops.find((o) =>
+                (formNode?.kind ?? formNew) === "featureCode"
+                  ? o.key === "list|putFeatureCodes"
+                  : formNode !== null &&
+                    o.kind === "update" &&
+                    o.node === formNode.id,
               )?.body
             }
-            onClose={() => setFormNode(null)}
+            onClose={() => {
+              setFormNode(null);
+              setFormNew(null);
+              setFormAt(undefined);
+            }}
             onCommit={async (body) => {
-              const err = await run(stageBody(ctx, formNode, body));
+              const kind = formNode?.kind ?? formNew ?? "";
+              const r = await stageForm(ctx, kind, formNode, body);
+              const err =
+                r.ok && r.node
+                  ? stageCreated(r, formAt)
+                  : await run(Promise.resolve(r));
               if (err) throw new Error(err);
+            }}
+            onDone={async (id, message) => {
+              const fresh = id !== null && !(id in layout.positions);
+              setFormNode(null);
+              setFormNew(null);
+              setNote(message);
+              await reload().catch(() => undefined);
+              if (id !== null && fresh) {
+                if (formAt) place(id, formAt.x, formAt.y);
+                else addFromList(id);
+              }
             }}
           />
         </Suspense>

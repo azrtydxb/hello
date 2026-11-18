@@ -64,8 +64,12 @@ operator role, including MCP clients (`applyConfigBatch`).
 The object writes of the canvas: extensions, devices, phones, trunks, inbound
 and outbound routes (and their order), ring groups, IVR menus, time
 conditions, schedules, holiday calendars, music on hold classes, queues, park
-lots, pickup groups, conferences, multicast channels, paging groups and the
-feature codes (`putFeatureCodes`). The list is `Ops` in
+lots, pickup groups, conferences, multicast channels, paging groups, voicemail
+groups, fax destinations and the feature codes (`putFeatureCodes`). Every
+stored node kind of the flow catalogue has its create, update and delete here,
+except the creation of devices and phones and everything about announcements
+(below); the call-flow canvas does those through the object's own form (see
+[the flow canvas guide](flow-canvas.md#what-the-canvas-edits)). The list is `Ops` in
 `internal/configbatch/ops.go`; anything else is `400 op_not_batchable`:
 
 - operations whose response carries a secret (`createDevice`, `createPhone`),
@@ -78,8 +82,9 @@ feature codes (`putFeatureCodes`). The list is `Ops` in
 - operations on objects the canvas does not draw (phonebooks, users, messages).
 
 Every operation is replayed through the API with your own credentials, so it
-needs its own route's scope and role. A batch with `createPagingGroup` needs
-the admin role; if any operation is refused the whole batch is rejected with
+needs its own route's scope and role. Paging groups, multicast channels,
+voicemail groups and fax destinations are admin-only: a batch that writes one
+needs the admin role; if any operation is refused the whole batch is rejected with
 `403`, naming the operation, and nothing is applied.
 
 ## What happens

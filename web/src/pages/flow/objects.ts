@@ -42,6 +42,22 @@ export interface ObjectDef {
   /** True when the update replaces the whole object (PUT). */
   put?: boolean;
   settings?: Setting[];
+  /**
+   * The draft's body in the shape the object's GET answers, for the form
+   * that reads it (a list of member ids becomes a list of members).
+   */
+  toView?: (body: Body) => Body;
+  /**
+   * What the object's own form does at once, outside the draft, because a
+   * batch cannot carry it: a create whose answer is a secret shown once (a
+   * device, a phone), or audio and speech (an announcement).
+   */
+  own?: { create?: boolean; edit?: boolean; delete?: boolean };
+  /**
+   * A new one is a row added to a list the draft replaces as a whole (the
+   * feature codes): it is made in the list's form, staged like an edit.
+   */
+  listCreate?: boolean;
 }
 
 const list = (v: unknown): Body[] => (Array.isArray(v) ? (v as Body[]) : []);
@@ -56,6 +72,27 @@ const only =
 
 const members = (list: unknown, keys: readonly string[]): Body[] =>
   Array.isArray(list) ? (list as Body[]).map((m) => only(keys)(m)) : [];
+
+/** Member objects ({extensionId, ...}) as the ids a PUT takes. */
+const memberIds = (v: unknown): unknown[] =>
+  list(v).map((m) => (typeof m === "object" ? m.extensionId : m));
+
+/** Member ids as the member objects a GET answers (the forms read those). */
+const memberObjects = (v: unknown): Body[] =>
+  (Array.isArray(v) ? (v as unknown[]) : []).map((m) =>
+    typeof m === "object" && m !== null ? (m as Body) : { extensionId: m },
+  );
+
+/** Replaces the listed keys of a body with member objects. */
+const viewMembers =
+  (...keys: string[]) =>
+  (b: Body): Body => {
+    const out: Body = { ...b };
+    for (const k of keys) {
+      if (b[k] !== undefined) out[k] = memberObjects(b[k]);
+    }
+    return out;
+  };
 
 const IVR_KEYS = [
   "name",
@@ -176,19 +213,53 @@ export const OBJECTS: Record<string, ObjectDef> = {
   outboundRoute: {
     read: (id) => `/api/v1/routes/outbound/${id}`,
     update: "updateOutboundRoute",
+    create: "createOutboundRoute",
     delete: "deleteOutboundRoute",
     nameKey: "name",
   },
-  trunk: { delete: "deleteTrunk" },
+  trunk: {
+    read: (id) => `/api/v1/trunks/${id}`,
+    update: "updateTrunk",
+    create: "createTrunk",
+    delete: "deleteTrunk",
+    nameKey: "name",
+  },
   device: {
     read: (id) => `/api/v1/devices/${id}`,
     update: "updateDevice",
     delete: "deleteDevice",
+    own: { create: true },
   },
   phone: {
     read: (id) => `/api/v1/phones/${id}`,
     update: "updatePhone",
     delete: "deletePhone",
+    own: { create: true },
+  },
+  announcement: {
+    read: (id) => `/api/v1/announcements/${id}`,
+    own: { create: true, edit: true, delete: true },
+  },
+  fax: {
+    read: (id) => `/api/v1/fax-destinations/${id}`,
+    update: "updateFaxDestination",
+    create: "createFaxDestination",
+    delete: "deleteFaxDestination",
+    put: true,
+    pick: only(["name", "extension", "email"]),
+  },
+  voicemailGroup: {
+    read: (id) => `/api/v1/voicemail-groups/${id}`,
+    update: "putVoicemailGroup",
+    create: "createVoicemailGroup",
+    delete: "deleteVoicemailGroup",
+    nameKey: "name",
+    put: true,
+    pick: (g) => ({
+      ...only(["number", "name", "enabled", "maxSeconds"])(g),
+      members: memberIds(g.members),
+    }),
+    toView: viewMembers("members"),
   },
   ivr: {
     read: (id) => `/api/v1/ivr-menus/${id}`,
@@ -275,10 +346,19 @@ export const OBJECTS: Record<string, ObjectDef> = {
     put: true,
     pick: (g) => only(["name", "timeZone", "ranges", "calendarIds"])(g),
   },
-  holidayCalendar: { delete: "deleteCalendar" },
+  holidayCalendar: {
+    read: (id) => `/api/v1/calendars/${id}`,
+    update: "putCalendar",
+    create: "createCalendar",
+    delete: "deleteCalendar",
+    nameKey: "name",
+    put: true,
+    pick: only(["name", "description", "entries"]),
+  },
   mohClass: {
     read: (id) => `/api/v1/moh-classes/${id}`,
     update: "putMOHClass",
+    create: "createMOHClass",
     delete: "deleteMOHClass",
     nameKey: "name",
     put: true,
@@ -286,9 +366,43 @@ export const OBJECTS: Record<string, ObjectDef> = {
       ...only(["name", "mode", "isDefault"])(g),
       announcementIds: list(g.tracks).map((t) => t.announcementId),
     }),
+    toView: (b) =>
+      b.announcementIds === undefined
+        ? b
+        : {
+            ...b,
+            tracks: (Array.isArray(b.announcementIds)
+              ? (b.announcementIds as unknown[])
+              : []
+            ).map((announcementId) => ({ announcementId })),
+          },
   },
-  parkLot: { delete: "deleteParkLot" },
-  pickupGroup: { delete: "deletePickupGroup" },
+  parkLot: {
+    read: (id) => `/api/v1/park-lots/${id}`,
+    update: "putParkLot",
+    create: "createParkLot",
+    delete: "deleteParkLot",
+    nameKey: "name",
+    put: true,
+    pick: only([
+      "name",
+      "slotStart",
+      "slotEnd",
+      "returnSecs",
+      "voicemailSecs",
+      "enabled",
+    ]),
+  },
+  pickupGroup: {
+    read: (id) => `/api/v1/pickup-groups/${id}`,
+    update: "putPickupGroup",
+    create: "createPickupGroup",
+    delete: "deletePickupGroup",
+    nameKey: "name",
+    put: true,
+    pick: (g) => ({ name: g.name, members: memberIds(g.members) }),
+    toView: viewMembers("members"),
+  },
   conference: {
     read: (id) => `/api/v1/conferences/${id}`,
     update: "updateConference",
@@ -309,23 +423,42 @@ export const OBJECTS: Record<string, ObjectDef> = {
       "enabled",
     ]),
   },
-  multicastChannel: { delete: "deleteMulticastChannel" },
+  multicastChannel: {
+    read: (id) => `/api/v1/multicast-channels/${id}`,
+    update: "putMulticastChannel",
+    create: "createMulticastChannel",
+    delete: "deleteMulticastChannel",
+    nameKey: "label",
+    put: true,
+    pick: only([
+      "label",
+      "address",
+      "port",
+      "codec",
+      "priority",
+      "kind",
+      "enabled",
+    ]),
+  },
   pagingGroup: {
     read: (id) => `/api/v1/paging-groups/${id}`,
     update: "putPagingGroup",
+    create: "createPagingGroup",
     delete: "deletePagingGroup",
     nameKey: "name",
     put: true,
     pick: (g) => ({
       ...only(["name", "code", "priority", "enabled", "multicastChannelId"])(g),
-      members: list(g.members).map((m) => m.extensionId),
-      callers: list(g.callers).map((m) => m.extensionId),
+      members: memberIds(g.members),
+      callers: memberIds(g.callers),
     }),
+    toView: viewMembers("members", "callers"),
   },
   featureCode: {
     read: () => "/api/v1/feature-codes",
     update: "putFeatureCodes",
     put: true,
+    listCreate: true,
     pick: (g) => ({
       items: members(g.items, ["code", "action", "argument"]),
     }),
@@ -335,12 +468,35 @@ export const OBJECTS: Record<string, ObjectDef> = {
 /** The one operation that replaces the feature codes as a whole. */
 export const FEATURE_CODES_OP = "putFeatureCodes";
 
+/** Whether the draft can change the object (a batch update). */
 export const canEditKind = (kind: string): boolean =>
   Boolean(OBJECTS[kind]?.update);
+/**
+ * Whether the canvas can make one: staged in the draft (a batch create), or
+ * at once by the object's own form (`own.create`).
+ */
 export const canCreateKind = (kind: string): boolean =>
-  Boolean(OBJECTS[kind]?.create);
+  Boolean(
+    OBJECTS[kind]?.create ||
+    OBJECTS[kind]?.own?.create ||
+    OBJECTS[kind]?.listCreate,
+  );
+/**
+ * Whether the canvas can delete one: in the draft, by its own form at once,
+ * or as a row removed in its list's form (staged in the draft).
+ */
 export const canDeleteKind = (kind: string): boolean =>
+  Boolean(
+    OBJECTS[kind]?.delete ||
+    OBJECTS[kind]?.own?.delete ||
+    OBJECTS[kind]?.listCreate,
+  );
+/** Whether a delete is staged in the draft (false: the own form does it). */
+export const deletesInDraft = (kind: string): boolean =>
   Boolean(OBJECTS[kind]?.delete);
+/** Whether a new one is made at once by its own form, outside the draft. */
+export const createsOwn = (kind: string): boolean =>
+  Boolean(!OBJECTS[kind]?.create && OBJECTS[kind]?.own?.create);
 
 // --- stored destinations --------------------------------------------------------
 
@@ -358,6 +514,9 @@ const STORED_KIND: Record<string, string> = {
   "external.call": "external",
   "sipUri.call": "sip_uri",
   "internalDid.call": "internal",
+  "voicemailGroup.call": "voicemail_group",
+  "directory.call": "directory",
+  "fax.call": "fax",
 };
 
 export const storedKindOf = (kind: string, port: string): string | undefined =>
@@ -373,10 +532,14 @@ export function targetString(node: FlowNode): string {
     case "pagingGroup":
       return text(s.code);
     case "conference":
+    case "voicemailGroup":
       return text(s.number);
+    case "fax":
+      return text(s.name) || node.label;
     case "external":
       return text(s.number) || node.label;
     case "internalDid":
+    case "directory":
       return "";
     default:
       return node.label;
@@ -388,6 +551,7 @@ export const FEATURE_ACTION: Record<string, string> = {
   announcement: "announcement",
   ivr: "ivr",
   timeCondition: "time_condition",
+  directory: "directory",
 };
 
 // --- the catalogue's compatibility check -----------------------------------------
@@ -710,6 +874,10 @@ export const EDGE_ADAPTERS: Record<string, EdgeAdapter[]> = {
       ...idListAdapter("target", "callers", srcId),
       when: (k, p) => k === "pagingGroup" && p === PAGING_LISTS.callers,
     },
+    {
+      ...idListAdapter("target", "members", srcId),
+      when: (k) => k === "pickupGroup" || k === "voicemailGroup",
+    },
   ],
   "featureCode.target": [
     {
@@ -935,13 +1103,35 @@ export const CREATE_FORMS: Record<string, CreateForm> = {
   },
 };
 
-/** The kinds whose own form (shared with its page) opens from the panel. */
+/**
+ * The kinds whose own form (shared with its page) opens from the canvas: to
+ * edit every field of one, and to make a new one with every field. Every
+ * stored kind the canvas can create or edit is here; the pseudo and
+ * terminal kinds (any trunk, internal callers, an external number, a SIP
+ * URI, a DID dialled as an extension, the dial-by-name directory, a missing
+ * target) are not objects and have no form.
+ */
 export const FORM_KINDS = new Set([
+  "extension",
+  "device",
+  "phone",
+  "trunk",
   "ringGroup",
   "ivr",
   "queue",
   "timeCondition",
+  "schedule",
+  "holidayCalendar",
+  "mohClass",
   "conference",
   "inboundRoute",
   "outboundRoute",
+  "parkLot",
+  "pickupGroup",
+  "multicastChannel",
+  "pagingGroup",
+  "voicemailGroup",
+  "fax",
+  "announcement",
+  "featureCode",
 ]);

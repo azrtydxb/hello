@@ -275,3 +275,62 @@ describe("persistence", () => {
     expect(loadDraft(key)).toBeNull();
   });
 });
+
+describe("credentials", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("never keeps a password, PIN or secret in the draft or its persisted copy", () => {
+    const key = draftKey(9, "ann");
+    const creds = {
+      name: "weekly",
+      userPin: "1234",
+      leaderPin: "987654",
+      password: "hunter2",
+      nested: { sipSecret: "s3", list: [{ adminPassword: "pw", ok: 1 }] },
+    };
+    let s = draftReducer(emptyDraft(7), {
+      type: "stage",
+      ops: [upd("conference:1", creds)],
+    });
+    s = draftReducer(s, {
+      type: "stage",
+      ops: [upd("trunk:2", { password: "x", username: "u" })],
+    });
+    expect(s.ops[0]?.body).toEqual({
+      name: "weekly",
+      nested: { list: [{ ok: 1 }] },
+    });
+    expect(s.ops[1]?.body).toEqual({ username: "u" });
+    // A draft loaded from an older copy (or put together elsewhere) is
+    // cleaned before it is kept, persisted and kept in its history.
+    const dirty: DraftState = {
+      ...emptyDraft(7),
+      ops: [upd("conference:1", creds)],
+      past: [[upd("conference:1", { userPin: "1" })]],
+    };
+    saveDraft(key, dirty);
+    const raw = localStorage.getItem(key) ?? "";
+    for (const leak of [
+      "1234",
+      "987654",
+      "hunter2",
+      "s3",
+      '"pw"',
+      "Pin",
+      "assword",
+      "ecret",
+    ]) {
+      expect(raw).not.toContain(leak);
+    }
+    localStorage.setItem(
+      key,
+      JSON.stringify({ baseRevision: 7, ops: [upd("conference:1", creds)] }),
+    );
+    expect(JSON.stringify(loadDraft(key))).not.toContain("1234");
+    expect(
+      JSON.stringify(
+        draftReducer(emptyDraft(7), { type: "load", state: dirty }),
+      ),
+    ).not.toContain("1234");
+  });
+});

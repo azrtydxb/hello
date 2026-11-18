@@ -395,21 +395,41 @@ function SendForm({ onSent }: { onSent: () => void }) {
   );
 }
 
-function DestinationForm({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState("");
-  const [extension, setExtension] = useState("");
-  const [email, setEmail] = useState("");
+/**
+ * A fax destination's form: name, owner extension and address. The canvas
+ * opens it for an existing destination too (the name is then fixed: routes
+ * and IVR keys refer to it) and stages the body in its draft (`commit`).
+ */
+export function DestinationForm({
+  onCreated,
+  destination,
+  commit,
+}: {
+  onCreated: () => void;
+  destination?: FaxDestination | null;
+  commit?: (body: object) => Promise<void>;
+}) {
+  const [name, setName] = useState(destination?.name ?? "");
+  const [extension, setExtension] = useState(destination?.extension ?? "");
+  const [email, setEmail] = useState(destination?.email ?? "");
   const [error, setError] = useState<string | null>(null);
+  const editing = Boolean(destination);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const body = {
+      name: name.trim(),
+      extension: extension.trim(),
+      email: email.trim(),
+    };
     try {
-      await createFaxDestination({
-        name: name.trim(),
-        extension: extension.trim(),
-        email: email.trim(),
-      });
+      if (commit) {
+        await commit(body);
+        onCreated();
+        return;
+      }
+      await createFaxDestination(body);
       setName("");
       setExtension("");
       setEmail("");
@@ -423,14 +443,24 @@ function DestinationForm({ onCreated }: { onCreated: () => void }) {
     <form
       className="cf-form"
       onSubmit={(e) => void submit(e)}
-      aria-label="Add a fax destination"
+      aria-label={
+        editing ? `Edit fax destination ${name}` : "Add a fax destination"
+      }
     >
-      <h3 className="az-h3">Add a fax destination</h3>
+      <h3 className="az-h3">
+        {editing ? `Fax destination ${name}` : "Add a fax destination"}
+      </h3>
       <div className="cf-row">
         <Input
           label="Name"
           value={name}
           mono
+          disabled={editing}
+          hint={
+            editing
+              ? "Routes and IVR keys refer to the name, so it does not change."
+              : undefined
+          }
           onChange={(e) => setName(e.target.value)}
         />
         <Input
@@ -447,16 +477,23 @@ function DestinationForm({ onCreated }: { onCreated: () => void }) {
         />
       </div>
       {error && (
-        <Alert tone="bad" title="Could not add the destination">
+        <Alert
+          tone="bad"
+          title={
+            editing
+              ? "Could not change the destination"
+              : "Could not add the destination"
+          }
+        >
           {error}
         </Alert>
       )}
       <Button
         type="submit"
-        icon="plus"
+        icon={editing ? "check" : "plus"}
         disabled={name.trim() === "" || extension.trim() === ""}
       >
-        Add destination
+        {editing ? "Save destination" : "Add destination"}
       </Button>
     </form>
   );

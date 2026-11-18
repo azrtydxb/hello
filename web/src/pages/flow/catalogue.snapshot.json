@@ -1,0 +1,1511 @@
+{
+  "portTypes": [
+    {
+      "type": "call",
+      "label": "Call",
+      "colour": "#2563EB",
+      "shape": "circle"
+    },
+    {
+      "type": "voicemail",
+      "label": "Voicemail",
+      "colour": "#7C3AED",
+      "shape": "circle-notch"
+    },
+    {
+      "type": "carrier",
+      "label": "Carrier",
+      "colour": "#EA580C",
+      "shape": "square"
+    },
+    {
+      "type": "member",
+      "label": "Member",
+      "colour": "#16A34A",
+      "shape": "diamond"
+    },
+    {
+      "type": "prompt",
+      "label": "Prompt",
+      "colour": "#CA8A04",
+      "shape": "triangle"
+    },
+    {
+      "type": "schedule",
+      "label": "Schedule",
+      "colour": "#0D9488",
+      "shape": "hexagon"
+    },
+    {
+      "type": "holdMusic",
+      "label": "Hold music",
+      "colour": "#DB2777",
+      "shape": "triangle"
+    },
+    {
+      "type": "device",
+      "label": "Device",
+      "colour": "#64748B",
+      "shape": "small-square"
+    }
+  ],
+  "nodes": [
+    {
+      "kind": "trunk",
+      "label": "Trunk",
+      "ports": [
+        {
+          "id": "carrier",
+          "direction": "in",
+          "type": "carrier",
+          "many": true,
+          "label": "Outbound routes"
+        },
+        {
+          "id": "inbound",
+          "direction": "out",
+          "type": "carrier",
+          "many": true,
+          "label": "Inbound routes",
+          "field": "trunkId",
+          "targets": [
+            {
+              "kind": "inboundRoute",
+              "port": "trunk"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "anyTrunk",
+      "label": "Any trunk",
+      "pseudo": true,
+      "ports": [
+        {
+          "id": "inbound",
+          "direction": "out",
+          "type": "carrier",
+          "many": true,
+          "label": "Inbound routes",
+          "field": "trunkId",
+          "targets": [
+            {
+              "kind": "inboundRoute",
+              "port": "trunk"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "inboundRoute",
+      "label": "Inbound route",
+      "ports": [
+        {
+          "id": "trunk",
+          "direction": "in",
+          "type": "carrier",
+          "many": false,
+          "label": "Trunk"
+        },
+        {
+          "id": "holdMusic",
+          "direction": "in",
+          "type": "holdMusic",
+          "many": false,
+          "label": "Hold music"
+        },
+        {
+          "id": "destination",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Destination",
+          "field": "destinationKind+destination",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            },
+            {
+              "kind": "voicemailGroup",
+              "port": "call"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "queue",
+              "port": "call"
+            },
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "call"
+            },
+            {
+              "kind": "conference",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            },
+            {
+              "kind": "sipUri",
+              "port": "call"
+            },
+            {
+              "kind": "internalDid",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            },
+            {
+              "kind": "fax",
+              "port": "call"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "dialPlan",
+      "label": "Internal callers",
+      "pseudo": true,
+      "ports": [
+        {
+          "id": "dial",
+          "direction": "out",
+          "type": "carrier",
+          "many": true,
+          "label": "Outbound routes",
+          "targets": [
+            {
+              "kind": "outboundRoute",
+              "port": "dial"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "outboundRoute",
+      "label": "Outbound route",
+      "ports": [
+        {
+          "id": "dial",
+          "direction": "in",
+          "type": "carrier",
+          "many": false,
+          "label": "Dialled by"
+        },
+        {
+          "id": "trunks",
+          "direction": "out",
+          "type": "carrier",
+          "many": true,
+          "label": "Trunks (in try order)",
+          "field": "trunks",
+          "targets": [
+            {
+              "kind": "trunk",
+              "port": "carrier"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "extension",
+      "label": "Extension",
+      "ports": [
+        {
+          "id": "ring",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Ring"
+        },
+        {
+          "id": "voicemail",
+          "direction": "in",
+          "type": "voicemail",
+          "many": true,
+          "label": "Voicemail"
+        },
+        {
+          "id": "devices",
+          "direction": "in",
+          "type": "device",
+          "many": true,
+          "label": "Devices"
+        },
+        {
+          "id": "holdMusic",
+          "direction": "in",
+          "type": "holdMusic",
+          "many": false,
+          "label": "Hold music"
+        },
+        {
+          "id": "forwardAlways",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Always forward",
+          "field": "forwardAlways",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring",
+              "note": "Ring group names must be numeric to be dialled from a forward"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            }
+          ]
+        },
+        {
+          "id": "forwardBusy",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Forward when busy",
+          "field": "forwardBusy",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring",
+              "note": "Ring group names must be numeric to be dialled from a forward"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            }
+          ]
+        },
+        {
+          "id": "forwardNoAnswer",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Forward on no answer",
+          "field": "forwardNoAnswer",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring",
+              "note": "Ring group names must be numeric to be dialled from a forward"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            }
+          ]
+        },
+        {
+          "id": "member",
+          "direction": "out",
+          "type": "member",
+          "many": true,
+          "label": "Member of",
+          "field": "members",
+          "targets": [
+            {
+              "kind": "ringGroup",
+              "port": "members"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "members"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "callers"
+            },
+            {
+              "kind": "queue",
+              "port": "members"
+            },
+            {
+              "kind": "pickupGroup",
+              "port": "members"
+            },
+            {
+              "kind": "voicemailGroup",
+              "port": "members"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "device",
+      "label": "Device",
+      "ports": [
+        {
+          "id": "phone",
+          "direction": "in",
+          "type": "device",
+          "many": false,
+          "label": "Phone"
+        },
+        {
+          "id": "extension",
+          "direction": "out",
+          "type": "device",
+          "many": false,
+          "label": "Extension",
+          "field": "extensionId",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "devices"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "phone",
+      "label": "Phone",
+      "ports": [
+        {
+          "id": "device",
+          "direction": "out",
+          "type": "device",
+          "many": false,
+          "label": "Device",
+          "field": "deviceId",
+          "targets": [
+            {
+              "kind": "device",
+              "port": "phone"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "ringGroup",
+      "label": "Ring group",
+      "ports": [
+        {
+          "id": "ring",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Ring"
+        },
+        {
+          "id": "members",
+          "direction": "in",
+          "type": "member",
+          "many": true,
+          "label": "Members"
+        },
+        {
+          "id": "holdMusic",
+          "direction": "in",
+          "type": "holdMusic",
+          "many": false,
+          "label": "Hold music"
+        },
+        {
+          "id": "noAnswer",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "No answer",
+          "field": "failureKind+failureTarget",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "queue",
+              "port": "call"
+            },
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "ivr",
+      "label": "IVR menu",
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Call"
+        },
+        {
+          "id": "greeting",
+          "direction": "in",
+          "type": "prompt",
+          "many": false,
+          "label": "Greeting"
+        },
+        {
+          "id": "invalidPrompt",
+          "direction": "in",
+          "type": "prompt",
+          "many": false,
+          "label": "Invalid prompt"
+        },
+        {
+          "id": "timeoutPrompt",
+          "direction": "in",
+          "type": "prompt",
+          "many": false,
+          "label": "Timeout prompt"
+        },
+        {
+          "id": "key",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Key (one port per configured key)",
+          "perKey": true,
+          "field": "options",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            },
+            {
+              "kind": "voicemailGroup",
+              "port": "call"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "queue",
+              "port": "call"
+            },
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            },
+            {
+              "kind": "fax",
+              "port": "call"
+            }
+          ]
+        },
+        {
+          "id": "timeout",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Timeout",
+          "field": "timeout",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            },
+            {
+              "kind": "voicemailGroup",
+              "port": "call"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "queue",
+              "port": "call"
+            },
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            },
+            {
+              "kind": "fax",
+              "port": "call"
+            }
+          ]
+        },
+        {
+          "id": "invalid",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Invalid",
+          "field": "invalid",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            },
+            {
+              "kind": "voicemailGroup",
+              "port": "call"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "queue",
+              "port": "call"
+            },
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            },
+            {
+              "kind": "fax",
+              "port": "call"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "queue",
+      "label": "Call queue",
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Call"
+        },
+        {
+          "id": "members",
+          "direction": "in",
+          "type": "member",
+          "many": true,
+          "label": "Agents"
+        },
+        {
+          "id": "holdMusic",
+          "direction": "in",
+          "type": "holdMusic",
+          "many": false,
+          "label": "Hold music"
+        },
+        {
+          "id": "periodicPrompt",
+          "direction": "in",
+          "type": "prompt",
+          "many": false,
+          "label": "Periodic announcement"
+        },
+        {
+          "id": "positionPrompt",
+          "direction": "in",
+          "type": "prompt",
+          "many": false,
+          "label": "Position prompt"
+        },
+        {
+          "id": "waitPrompt",
+          "direction": "in",
+          "type": "prompt",
+          "many": false,
+          "label": "Wait prompt"
+        },
+        {
+          "id": "minutesPrompt",
+          "direction": "in",
+          "type": "prompt",
+          "many": false,
+          "label": "Minutes prompt"
+        },
+        {
+          "id": "breakoutPrompt",
+          "direction": "in",
+          "type": "prompt",
+          "many": false,
+          "label": "Voicemail breakout prompt"
+        },
+        {
+          "id": "timeout",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Wait too long",
+          "field": "timeout",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            },
+            {
+              "kind": "voicemailGroup",
+              "port": "call"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "queue",
+              "port": "call"
+            },
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            }
+          ]
+        },
+        {
+          "id": "full",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Queue full",
+          "field": "full",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            },
+            {
+              "kind": "voicemailGroup",
+              "port": "call"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "queue",
+              "port": "call"
+            },
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            }
+          ]
+        },
+        {
+          "id": "noAgents",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "No agents",
+          "field": "noAgents",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            },
+            {
+              "kind": "voicemailGroup",
+              "port": "call"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "queue",
+              "port": "call"
+            },
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            }
+          ]
+        },
+        {
+          "id": "breakout",
+          "direction": "out",
+          "type": "voicemail",
+          "many": false,
+          "label": "Breakout voicemail",
+          "field": "breakoutVoicemail",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "announcement",
+      "label": "Announcement",
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Play, then hang up"
+        },
+        {
+          "id": "audio",
+          "direction": "out",
+          "type": "prompt",
+          "many": true,
+          "label": "Used as prompt",
+          "targets": [
+            {
+              "kind": "ivr",
+              "port": "greeting"
+            },
+            {
+              "kind": "ivr",
+              "port": "invalidPrompt"
+            },
+            {
+              "kind": "ivr",
+              "port": "timeoutPrompt"
+            },
+            {
+              "kind": "queue",
+              "port": "periodicPrompt"
+            },
+            {
+              "kind": "queue",
+              "port": "positionPrompt"
+            },
+            {
+              "kind": "queue",
+              "port": "waitPrompt"
+            },
+            {
+              "kind": "queue",
+              "port": "minutesPrompt"
+            },
+            {
+              "kind": "queue",
+              "port": "breakoutPrompt"
+            },
+            {
+              "kind": "mohClass",
+              "port": "tracks"
+            },
+            {
+              "kind": "conference",
+              "port": "entryAnnouncement"
+            },
+            {
+              "kind": "conference",
+              "port": "exitAnnouncement"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "pagingGroup",
+      "label": "Paging group",
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Page"
+        },
+        {
+          "id": "members",
+          "direction": "in",
+          "type": "member",
+          "many": true,
+          "label": "Members"
+        },
+        {
+          "id": "callers",
+          "direction": "in",
+          "type": "member",
+          "many": true,
+          "label": "Allowed callers"
+        },
+        {
+          "id": "multicast",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Also page multicast channel",
+          "field": "multicastChannelId",
+          "targets": [
+            {
+              "kind": "multicastChannel",
+              "port": "page"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "multicastChannel",
+      "label": "Multicast channel",
+      "ports": [
+        {
+          "id": "page",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Paged by"
+        }
+      ]
+    },
+    {
+      "kind": "conference",
+      "label": "Conference room",
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Join the room"
+        },
+        {
+          "id": "entryAnnouncement",
+          "direction": "in",
+          "type": "prompt",
+          "many": false,
+          "label": "Entry announcement"
+        },
+        {
+          "id": "exitAnnouncement",
+          "direction": "in",
+          "type": "prompt",
+          "many": false,
+          "label": "Exit announcement"
+        }
+      ]
+    },
+    {
+      "kind": "parkLot",
+      "label": "Park lot",
+      "ports": []
+    },
+    {
+      "kind": "pickupGroup",
+      "label": "Pickup group",
+      "ports": [
+        {
+          "id": "members",
+          "direction": "in",
+          "type": "member",
+          "many": true,
+          "label": "Members"
+        }
+      ]
+    },
+    {
+      "kind": "voicemailGroup",
+      "label": "Voicemail group",
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Leave a message"
+        },
+        {
+          "id": "members",
+          "direction": "in",
+          "type": "member",
+          "many": true,
+          "label": "Members"
+        }
+      ]
+    },
+    {
+      "kind": "featureCode",
+      "label": "Feature code",
+      "ports": [
+        {
+          "id": "target",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Target",
+          "field": "argument",
+          "targets": [
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "timeCondition",
+      "label": "Time condition",
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Call"
+        },
+        {
+          "id": "schedule",
+          "direction": "in",
+          "type": "schedule",
+          "many": false,
+          "label": "Schedule"
+        },
+        {
+          "id": "open",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Open",
+          "field": "open",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            },
+            {
+              "kind": "voicemailGroup",
+              "port": "call"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "queue",
+              "port": "call"
+            },
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            }
+          ]
+        },
+        {
+          "id": "closed",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Closed",
+          "field": "closed",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            },
+            {
+              "kind": "voicemailGroup",
+              "port": "call"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "queue",
+              "port": "call"
+            },
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            }
+          ]
+        },
+        {
+          "id": "holiday",
+          "direction": "out",
+          "type": "call",
+          "many": false,
+          "label": "Holiday",
+          "field": "holiday",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "ring"
+            },
+            {
+              "kind": "extension",
+              "port": "voicemail"
+            },
+            {
+              "kind": "voicemailGroup",
+              "port": "call"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "ring"
+            },
+            {
+              "kind": "ivr",
+              "port": "call"
+            },
+            {
+              "kind": "queue",
+              "port": "call"
+            },
+            {
+              "kind": "announcement",
+              "port": "call"
+            },
+            {
+              "kind": "pagingGroup",
+              "port": "call"
+            },
+            {
+              "kind": "timeCondition",
+              "port": "call"
+            },
+            {
+              "kind": "external",
+              "port": "call"
+            },
+            {
+              "kind": "directory",
+              "port": "call"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "schedule",
+      "label": "Schedule",
+      "ports": [
+        {
+          "id": "calendars",
+          "direction": "in",
+          "type": "schedule",
+          "many": true,
+          "label": "Holiday calendars"
+        },
+        {
+          "id": "use",
+          "direction": "out",
+          "type": "schedule",
+          "many": true,
+          "label": "Used by",
+          "field": "scheduleId",
+          "targets": [
+            {
+              "kind": "timeCondition",
+              "port": "schedule"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "holidayCalendar",
+      "label": "Holiday calendar",
+      "ports": [
+        {
+          "id": "use",
+          "direction": "out",
+          "type": "schedule",
+          "many": true,
+          "label": "Used by",
+          "field": "calendarIds",
+          "targets": [
+            {
+              "kind": "schedule",
+              "port": "calendars"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "mohClass",
+      "label": "Hold music class",
+      "ports": [
+        {
+          "id": "tracks",
+          "direction": "in",
+          "type": "prompt",
+          "many": true,
+          "label": "Tracks"
+        },
+        {
+          "id": "use",
+          "direction": "out",
+          "type": "holdMusic",
+          "many": true,
+          "label": "Used by",
+          "field": "mohClassId",
+          "targets": [
+            {
+              "kind": "extension",
+              "port": "holdMusic"
+            },
+            {
+              "kind": "ringGroup",
+              "port": "holdMusic"
+            },
+            {
+              "kind": "inboundRoute",
+              "port": "holdMusic"
+            },
+            {
+              "kind": "queue",
+              "port": "holdMusic"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "external",
+      "label": "External number",
+      "terminal": true,
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Call"
+        }
+      ]
+    },
+    {
+      "kind": "sipUri",
+      "label": "SIP URI",
+      "terminal": true,
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Call"
+        }
+      ]
+    },
+    {
+      "kind": "internalDid",
+      "label": "DID as extension",
+      "terminal": true,
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Call"
+        }
+      ]
+    },
+    {
+      "kind": "directory",
+      "label": "Dial-by-name directory",
+      "terminal": true,
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Call"
+        }
+      ]
+    },
+    {
+      "kind": "fax",
+      "label": "Fax destination",
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Receive a fax"
+        }
+      ]
+    },
+    {
+      "kind": "missing",
+      "label": "Missing target",
+      "terminal": true,
+      "ports": [
+        {
+          "id": "call",
+          "direction": "in",
+          "type": "call",
+          "many": true,
+          "label": "Call"
+        }
+      ]
+    }
+  ]
+}
