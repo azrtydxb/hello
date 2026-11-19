@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FlowNode } from "../../api/flow";
+import type { FlowGraph, FlowNode } from "../../api/flow";
 import {
   draftReducer,
   emptyDraft,
@@ -22,6 +22,7 @@ import {
   type EditCtx,
 } from "./edits";
 import { EDIT_BODIES, EDIT_CATALOGUE, EDIT_GRAPH } from "./fixtures";
+import { summaryEntries } from "./model";
 import { OBJECTS, idOf } from "./objects";
 
 function ctxFor(draft: DraftState = emptyDraft(7)): EditCtx {
@@ -335,6 +336,94 @@ describe("create", () => {
       destinationKind: "ring_group",
       destination: "night",
     });
+  });
+
+  it("counts the members a new ring group gets in the draft", async () => {
+    const r = await createNode(ctxFor(), "ringGroup", { name: "night" });
+    if (!r.ok) throw new Error(r.error);
+    let draft = draftReducer(emptyDraft(7), { type: "stage", ops: r.ops });
+    const created = project(EDIT_GRAPH, draft).nodes.find(
+      (n) => n.id === "ringGroup:~n1",
+    )!;
+    expect(created.summary).toMatchObject({ members: 0 });
+    const ops = await ok(
+      connect(ctxFor(draft), node("extension:2"), "member", created, "members"),
+    );
+    draft = draftReducer(draft, { type: "stage", ops });
+    const shown = project(EDIT_GRAPH, draft).nodes.find(
+      (n) => n.id === "ringGroup:~n1",
+    )!;
+    expect(shown.summary).toEqual({ strategy: "ring-all", members: 1 });
+    expect(summaryEntries(shown.summary)).toContainEqual({
+      key: "members",
+      label: "Members",
+      value: "1",
+    });
+  });
+
+  it("counts the members an existing ring group keeps after a disconnect", async () => {
+    const two: FlowGraph = {
+      ...EDIT_GRAPH,
+      nodes: EDIT_GRAPH.nodes.map((n) =>
+        n.id === "ringGroup:1"
+          ? { ...n, summary: { strategy: "ring-all", members: 2 } }
+          : n,
+      ),
+      edges: [
+        ...EDIT_GRAPH.edges,
+        {
+          id: "extension:2.member->ringGroup:1.members",
+          source: { node: "extension:2", port: "member" },
+          target: { node: "ringGroup:1", port: "members" },
+          owner: { node: "ringGroup:1", field: "members" },
+        },
+      ],
+    };
+    const draft0 = emptyDraft(7);
+    const base = ctxFor(draft0);
+    const ctx: EditCtx = {
+      ...base,
+      graph: two,
+      load: async (n) => {
+        const got = await base.load(n);
+        return n.id === "ringGroup:1"
+          ? {
+              ...got,
+              members: [
+                { extensionId: 1, position: 1, weight: 1, delay: 0 },
+                { extensionId: 2, position: 2, weight: 1, delay: 0 },
+              ],
+            }
+          : got;
+      },
+    };
+    const edge = two.edges.find(
+      (e) => e.id === "extension:1.member->ringGroup:1.members",
+    )!;
+    const ops = await ok(disconnect(ctx, edge));
+    const draft = draftReducer(draft0, { type: "stage", ops });
+    const shown = project(two, draft).nodes.find(
+      (n) => n.id === "ringGroup:1",
+    )!;
+    expect(shown.summary).toEqual({ strategy: "ring-all", members: 1 });
+    // The stored graph is left as it was.
+    expect(two.nodes.find((n) => n.id === "ringGroup:1")?.summary).toEqual({
+      strategy: "ring-all",
+      members: 2,
+    });
+  });
+
+  it("shows a setting staged on an existing node in its summary", async () => {
+    const ctx = ctxFor();
+    const ops = await ok(
+      setSetting(ctx, node("ivr:1"), "number", "801", "Number"),
+    );
+    const draft = draftReducer(emptyDraft(7), { type: "stage", ops });
+    const shown = project(EDIT_GRAPH, draft).nodes.find(
+      (n) => n.id === "ivr:1",
+    )!;
+    // The number changed; the whole menu the update sends has one key.
+    expect(shown.summary).toEqual({ number: "801", options: 1 });
   });
 
   it("refers to a new extension by its placeholder in member lists", async () => {

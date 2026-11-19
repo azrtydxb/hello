@@ -523,6 +523,40 @@ describe("flow canvas editing", { timeout: 90000 }, () => {
     ).not.toBeNull();
   });
 
+  it("counts a member connected to a new ring group on its node", async () => {
+    api("operator", {
+      "POST /api/v1/config/batch": () => json(RESULT(false)),
+    });
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Add object" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add an object" });
+    fireEvent.change(within(dialog).getByLabelText("Kind"), {
+      target: { value: "ringGroup" },
+    });
+    fireEvent.change(await within(dialog).findByLabelText("Name"), {
+      target: { value: "night" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Add to draft" }),
+    );
+    await screen.findByText(/1 staged change/);
+    const box = () =>
+      document.querySelector(
+        '.react-flow__node[data-id="ringGroup:~n1"] .flow-node__summary',
+      )?.textContent ?? "";
+    await waitFor(() => expect(box()).toContain("members 0"));
+    fireEvent.click(screen.getByText("101 Bob"));
+    const panel = await screen.findByRole("complementary", {
+      name: "Selected node",
+    });
+    const select = await within(panel).findByLabelText(/^member: connect to/i);
+    fireEvent.change(select, { target: { value: "ringGroup:~n1|members" } });
+    fireEvent.click(
+      within(panel).getByRole("button", { name: /^Connect member/i }),
+    );
+    await waitFor(() => expect(box()).toContain("members 1"));
+  });
+
   it("creates an object by dragging a kind from the palette onto the canvas", async () => {
     api("operator", {
       "POST /api/v1/config/batch": () => json(RESULT(false)),

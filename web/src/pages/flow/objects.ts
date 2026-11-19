@@ -953,6 +953,47 @@ export function adapterFor(
 export const portIsEditable = (srcKind: string, srcPort: string): boolean =>
   `${srcKind}.${portBase(srcPort)}` in EDGE_ADAPTERS;
 
+// --- the summary as the draft leaves it ---------------------------------------------
+
+/**
+ * The summary counts the graph takes from a list of the object (the
+ * builder in internal/flow/build.go), by kind: summary key -> body key.
+ */
+const SUMMARY_COUNTS: Record<string, Record<string, string>> = {
+  ringGroup: { members: "members" },
+  queue: { agents: "members" },
+  ivr: { options: "options" },
+  pagingGroup: { members: "members" },
+  pickupGroup: { members: "members" },
+  voicemailGroup: { members: "members" },
+  schedule: { ranges: "ranges", calendars: "calendarIds" },
+  holidayCalendar: { entries: "entries" },
+  mohClass: { tracks: "announcementIds" },
+};
+
+const scalar = (v: unknown): v is string | number | boolean =>
+  typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+
+/**
+ * A node's summary once a staged body is applied: each shown setting the
+ * body changes (same key, same type), and each count of a list it holds.
+ */
+export function draftSummary(
+  kind: string,
+  summary: FlowNode["summary"],
+  body: Body,
+): NonNullable<FlowNode["summary"]> {
+  const out: Record<string, unknown> = { ...summary };
+  for (const [k, v] of Object.entries(body)) {
+    if (k in out && scalar(v) && typeof v === typeof out[k]) out[k] = v;
+  }
+  for (const [k, from] of Object.entries(SUMMARY_COUNTS[kind] ?? {})) {
+    const v = body[from];
+    if (Array.isArray(v)) out[k] = v.length;
+  }
+  return out;
+}
+
 // --- creating -----------------------------------------------------------------------
 
 export interface CreateField {
