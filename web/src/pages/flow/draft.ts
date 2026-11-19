@@ -6,6 +6,7 @@
 
 import type { BatchOp, BatchRequest } from "../../api/configBatch";
 import type { FlowEdge, FlowGraph, FlowNode } from "../../api/flow";
+import { draftSummary } from "./objects";
 
 export type Body = Record<string, unknown>;
 
@@ -310,7 +311,7 @@ export function project(graph: FlowGraph, state: DraftState): FlowGraph {
   );
   const labels = new Map<string, string>();
   for (const o of state.ops) if (o.label) labels.set(o.node, o.label);
-  const nodes: FlowNode[] = graph.nodes
+  let nodes: FlowNode[] = graph.nodes
     .filter((n) => !deleted.has(n.id))
     .map((n) => (labels.has(n.id) ? { ...n, label: labels.get(n.id)! } : n));
   for (const o of state.ops) {
@@ -321,6 +322,18 @@ export function project(graph: FlowGraph, state: DraftState): FlowGraph {
       }
     }
   }
+  // Each node's summary as its staged body leaves it (a member connected
+  // to a group counts at once, a new one's too).
+  const bodies = new Map<string, Body>();
+  for (const o of state.ops) {
+    if (o.kind !== "delete" && o.body) {
+      bodies.set(o.node, { ...bodies.get(o.node), ...o.body });
+    }
+  }
+  nodes = nodes.map((n) => {
+    const body = bodies.get(n.id);
+    return body ? { ...n, summary: draftSummary(n.kind, n.summary, body) } : n;
+  });
   let edges = graph.edges.filter(
     (e) => !deleted.has(e.source.node) && !deleted.has(e.target.node),
   );
