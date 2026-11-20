@@ -3,7 +3,7 @@ module github.com/azrtydxb/hello
 go 1.27.1
 
 require (
-	github.com/azrtydxb/go-ai-sdk v0.10.0
+	github.com/azrtydxb/go-ai-sdk v0.11.0
 	github.com/azrtydxb/momo v0.16.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/emiago/sipgo v1.7.3
