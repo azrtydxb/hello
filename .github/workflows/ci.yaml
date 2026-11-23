@@ -497,7 +497,7 @@ jobs:
           momo migrate diff ci_probe 2>&1 | tee out/diff.log
           git status --porcelain > out/status.txt
           ls -la migrations/postgres > out/migrations.txt
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: momo-bootstrap
