@@ -4,11 +4,11 @@ go 1.27.1
 
 require (
 	github.com/azrtydxb/go-ai-sdk v0.11.0
-	github.com/azrtydxb/momo v0.16.0
+	github.com/azrtydxb/momo v0.19.0
 	github.com/coreos/go-oidc/v3 v3.21.0
-	github.com/emiago/sipgo v1.7.3
+	github.com/emiago/sipgo v1.7.4
 	github.com/go-asn1-ber/asn1-ber v1.5.8
-	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/gobwas/ws v1.5.0
 	github.com/google/jsonschema-go v0.4.3
@@ -19,23 +19,23 @@ require (
 	github.com/kazzmir/opus-go v1.7.0
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/pion/dtls/v3 v3.1.15
+	github.com/pion/dtls/v3 v3.1.16
 	github.com/pion/rtcp v1.2.20
 	github.com/pion/rtp v1.10.6
 	github.com/pion/sdp/v3 v3.0.20
 	github.com/pion/srtp/v3 v3.1.3
 	github.com/pion/stun/v3 v3.1.7
-	github.com/pion/transport/v4 v4.1.0
+	github.com/pion/transport/v4 v4.1.3
 	github.com/pressly/goose/v3 v3.30.1
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
 	github.com/smallstep/pkcs7 v0.2.3
-	github.com/smallstep/scep v0.0.0-20261014185058-63893dadfda8
-	github.com/valkey-io/valkey-go v1.0.79
+	github.com/smallstep/scep v0.1.0
+	github.com/valkey-io/valkey-go v1.0.80
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/crypto v0.59.0
 	golang.org/x/image v0.48.0
-	golang.org/x/net v0.62.0
+	golang.org/x/net v0.63.0
 	golang.org/x/oauth2 v0.38.0
 	golang.org/x/text v0.44.0
 )
